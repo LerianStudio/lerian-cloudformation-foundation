@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Midaz Application Stack
+  Deploys the Midaz ledger application via Helm to an existing EKS cluster.
+  Requires midaz-infrastructure stack to be deployed first.
+  (c) Lerian Studio - https://lerian.studio
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Infrastructure Reference"
+        Parameters:
+          - InfrastructureStackName
+      - Label:
+          default: "AWS Marketplace Configuration"
+        Parameters:
+          - MPS3BucketName
+          - MPS3BucketRegion
+          - MPS3KeyPrefix
+      - Label:
+          default: "Application Configuration"
+        Parameters:
+          - MidazVersion
+          - MidazReplicas
+      - Label:
+          default: "Ingress Configuration"
+        Parameters:
+          - EnableIngress
+          - DomainName
+          - IngressHostname
+          - IngressScheme
+          - IngressCertificateArn
+    ParameterLabels:
+      InfrastructureStackName:
+        default: "Infrastructure Stack Name"
+      MPS3BucketName:
+        default: "Template S3 Bucket Name"
+      MPS3BucketRegion:
+        default: "Template S3 Bucket Region"
+      MPS3KeyPrefix:
+        default: "Template S3 Key Prefix"
+      MidazVersion:
+        default: "Midaz Version"
+      MidazReplicas:
+        default: "Number of Replicas"
+      EnableIngress:
+        default: "Enable Ingress"
+      DomainName:
+        default: "Domain Name"
+      IngressHostname:
+        default: "Ingress Hostname"
+      IngressScheme:
+        default: "Ingress Scheme"
+      IngressCertificateArn:
+        default: "ACM Certificate ARN"
+
+Parameters:
+  # =============================================================================
+  # INFRASTRUCTURE REFERENCE
+  # =============================================================================
+  InfrastructureStackName:
+    Type: String
+    Description: "Name of the midaz-infrastructure CloudFormation stack"
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    ConstraintDescription: "Must be a valid CloudFormation stack name"
+
+  # =============================================================================
+  # AWS MARKETPLACE PARAMETERS
+  # =============================================================================
+  MPS3BucketName:
+    Type: String
+    Description: "S3 bucket name containing the CloudFormation templates"
+    Default: "midaz-cloudformation-templates"
+
+  MPS3BucketRegion:
+    Type: String
+    Description: "AWS Region where the S3 bucket is located"
+    Default: "us-east-1"
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+      - us-west-1
+      - us-west-2
+      - eu-west-1
+      - eu-west-2
+      - eu-central-1
+      - ap-southeast-1
+      - ap-southeast-2
+      - ap-northeast-1
+      - sa-east-1
+
+  MPS3KeyPrefix:
+    Type: String
+    Description: "S3 key prefix for the CloudFormation templates"
+    Default: "templates/"
+    AllowedPattern: "^[a-zA-Z0-9-_/]*$"
+    ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, and forward slashes"
+
+  # =============================================================================
+  # APPLICATION CONFIGURATION
+  # =============================================================================
+  MidazVersion:
+    Type: String
+    Default: "5.3.0"
+    Description: "Midaz Helm chart version to deploy"
+    AllowedPattern: "^[a-zA-Z0-9.-]+$"
+    ConstraintDescription: "Must be a valid version string"
+
+  MidazReplicas:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: "Number of Midaz application replicas"
+
+  # =============================================================================
+  # INGRESS CONFIGURATION
+  # =============================================================================
+  EnableIngress:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Enable ALB Ingress for external access"
+
+  DomainName:
+    Type: String
+    Default: ""
+    Description: "Base domain name of the hosted zone (e.g., midaz.net)"
+    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
+    ConstraintDescription: "Must be a valid domain name or empty"
+
+  IngressHostname:
+    Type: String
+    Default: ""
+    Description: "Full hostname for Ingress (e.g., ledger.midaz.net)"
+    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
+    ConstraintDescription: "Must be a valid hostname or empty"
+
+  IngressScheme:
+    Type: String
+    Default: "internal"
+    AllowedValues:
+      - "internal"
+      - "internet-facing"
+    Description: "ALB scheme - internal (private) or internet-facing (public)"
+
+  IngressCertificateArn:
+    Type: String
+    Default: ""
+    Description: "ACM Certificate ARN for HTTPS (optional)"
+    AllowedPattern: "^$|^arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+$"
+    ConstraintDescription: "Must be a valid ACM certificate ARN or empty"
+
+Conditions:
+  HasIngress: !Equals [!Ref EnableIngress, "true"]
+  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
+  HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
+
+Resources:
+  # =============================================================================
+  # MIDAZ HELM DEPLOYMENT
+  # =============================================================================
+  MidazHelmStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
+      Parameters:
+        ProjectName:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-ProjectName"
+        EnvironmentName:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-EnvironmentName"
+        ClusterName:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-EKSClusterName"
+        ClusterSecurityGroupId:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-ClusterSecurityGroupId"
+        VpcId:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-VpcId"
+        PrivateSubnetIds:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-PrivateSubnetIds"
+        # Database connections from infrastructure
+        RDSEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-RDSEndpoint"
+        RDSSecretArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-RDSSecretArn"
+        DocumentDBEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-DocumentDBEndpoint"
+        DocumentDBSecretArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-DocumentDBSecretArn"
+        ElastiCacheEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheEndpoint"
+        AmazonMQEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQEndpoint"
+        AmazonMQSecretArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQSecretArn"
+        # Application settings
+        MidazChartVersion: !Ref MidazVersion
+        # Ingress settings
+        EnableIngress: !Ref EnableIngress
+        DomainName: !Ref DomainName
+        IngressHostname: !Ref IngressHostname
+        IngressScheme: !Ref IngressScheme
+        IngressCertificateArn: !Ref IngressCertificateArn
+      Tags:
+        - Key: Name
+          Value: !Sub "midaz-application-${InfrastructureStackName}"
+        - Key: InfrastructureStack
+          Value: !Ref InfrastructureStackName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  ApplicationStackName:
+    Description: Name of this application stack
+    Value: !Ref AWS::StackName
+    Export:
+      Name: !Sub "${AWS::StackName}-StackName"
+
+  InfrastructureStackReference:
+    Description: Infrastructure stack this application is deployed to
+    Value: !Ref InfrastructureStackName
+
+  MidazNamespace:
+    Description: Kubernetes namespace where Midaz is deployed
+    Value: !GetAtt MidazHelmStack.Outputs.HelmNamespace
+    Export:
+      Name: !Sub "${AWS::StackName}-Namespace"
+
+  LedgerAPIEndpoint:
+    Description: Midaz Ledger API endpoint
+    Value: !GetAtt MidazHelmStack.Outputs.LedgerAPIEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-LedgerAPIEndpoint"
+
+  UpdateCommand:
+    Description: Command to update the application
+    Value: !Sub |
+      aws cloudformation update-stack \
+        --stack-name ${AWS::StackName} \
+        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}midaz-application.yaml \
+        --parameters ParameterKey=InfrastructureStackName,ParameterValue=${InfrastructureStackName} \
+                     ParameterKey=MidazVersion,ParameterValue=NEW_VERSION \
+        --capabilities CAPABILITY_IAM
+
+  KubectlCommand:
+    Description: Command to check Midaz pods
+    Value: !Sub |
+      aws eks update-kubeconfig --name $(aws cloudformation describe-stacks --stack-name ${InfrastructureStackName} --query "Stacks[0].Outputs[?OutputKey=='EKSClusterName'].OutputValue" --output text) --region ${AWS::Region}
+      kubectl get pods -n midaz

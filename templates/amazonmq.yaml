@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AmazonMQ (RabbitMQ) Stack for Midaz Platform
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    ConstraintDescription: "Must begin with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  VpcCIDR:
+    Type: String
+    Description: VPC CIDR block for security group rules
+    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block (e.g., 10.0.0.0/16)"
+
+  PrivateSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet ID for the broker
+
+  InstanceType:
+    Type: String
+    Description: AmazonMQ broker instance type
+    AllowedValues:
+      - mq.t3.micro
+      - mq.m5.large
+      - mq.m5.xlarge
+      - mq.m5.2xlarge
+
+  AdminUsername:
+    Type: String
+    Description: Admin username (sensitive)
+    NoEcho: true
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 100
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+Resources:
+  # =============================================================================
+  # SECRETS
+  # =============================================================================
+  AmazonMQSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/amazonmq-password"
+      Description: AmazonMQ Admin Password
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${AdminUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 16
+        ExcludePunctuation: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-amazonmq-secret"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # SECURITY GROUP
+  # =============================================================================
+  AmazonMQSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-amazonmq-sg"
+      GroupDescription: Security group for AmazonMQ
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5671
+          ToPort: 5671
+          CidrIp: !Ref VpcCIDR
+          Description: AMQPS from VPC
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCIDR
+          Description: HTTPS Management Console from VPC
+        - IpProtocol: tcp
+          FromPort: 15671
+          ToPort: 15671
+          CidrIp: !Ref VpcCIDR
+          Description: RabbitMQ Management Plugin from VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-amazonmq-sg"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # CLOUDWATCH LOG GROUP
+  # =============================================================================
+  AmazonMQLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/amazonmq/${ProjectName}"
+      RetentionInDays: 30
+
+  # =============================================================================
+  # AMAZONMQ BROKER
+  # =============================================================================
+  AmazonMQBroker:
+    Type: AWS::AmazonMQ::Broker
+    Properties:
+      BrokerName: !Sub "${ProjectName}-rabbitmq"
+      EngineType: RABBITMQ
+      EngineVersion: "3.13"
+      HostInstanceType: !Ref InstanceType
+      DeploymentMode: SINGLE_INSTANCE
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      SubnetIds:
+        - !Ref PrivateSubnetId
+      SecurityGroups:
+        - !Ref AmazonMQSecurityGroup
+      Users:
+        - Username: !Sub "{{resolve:secretsmanager:${AmazonMQSecret}:SecretString:username}}"
+          Password: !Sub "{{resolve:secretsmanager:${AmazonMQSecret}:SecretString:password}}"
+      Logs:
+        General: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rabbitmq"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  BrokerId:
+    Description: AmazonMQ Broker ID
+    Value: !Ref AmazonMQBroker
+
+  BrokerArn:
+    Description: AmazonMQ Broker ARN
+    Value: !GetAtt AmazonMQBroker.Arn
+
+  BrokerEndpoint:
+    Description: AmazonMQ Broker AMQP Endpoint
+    Value: !Select [0, !GetAtt AmazonMQBroker.AmqpEndpoints]
+
+  ConsoleURL:
+    Description: AmazonMQ Management Console URL
+    Value: !Sub "https://${AmazonMQBroker}.mq.${AWS::Region}.amazonaws.com"
+
+  SecretArn:
+    Description: AmazonMQ Password Secret ARN
+    Value: !Ref AmazonMQSecret
+
+  SecurityGroupId:
+    Description: AmazonMQ Security Group ID
+    Value: !Ref AmazonMQSecurityGroup

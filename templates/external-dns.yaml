@@ -1,0 +1,431 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ExternalDNS for EKS - Automatic DNS management for Route53 Private Hosted Zone
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    ConstraintDescription: "Must begin with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  ClusterName:
+    Type: String
+    Description: EKS Cluster Name
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and hyphens"
+
+  OIDCProviderArn:
+    Type: String
+    Description: OIDC Provider ARN for IRSA
+    AllowedPattern: "^arn:aws:iam::[0-9]{12}:oidc-provider/.*$"
+    ConstraintDescription: "Must be a valid IAM OIDC Provider ARN"
+
+  PrivateHostedZoneId:
+    Type: String
+    Description: Route53 Private Hosted Zone ID
+    AllowedPattern: "^Z[A-Z0-9]+$"
+    ConstraintDescription: "Must be a valid Route53 Hosted Zone ID (starts with Z)"
+
+  DomainName:
+    Type: String
+    Description: Domain name filter for ExternalDNS
+    AllowedPattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
+    ConstraintDescription: "Must be a valid domain name (e.g., example.com)"
+
+  ExternalDNSVersion:
+    Type: String
+    Default: "1.17.0"
+    Description: ExternalDNS Helm Chart Version
+    AllowedPattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    ConstraintDescription: "Must be a valid semantic version (e.g., 1.17.0)"
+
+Resources:
+  # =============================================================================
+  # EXTERNAL DNS IAM ROLE (IRSA)
+  # =============================================================================
+  ExternalDNSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-external-dns-role"
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "${OIDCProviderArn}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderHost}:sub": "system:serviceaccount:kube-system:external-dns",
+                      "${OIDCProviderHost}:aud": "sts.amazonaws.com"
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderHost: !Select [1, !Split ["oidc-provider/", !Ref OIDCProviderArn]]
+      Policies:
+        - PolicyName: ExternalDNSPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                Resource:
+                  - !Sub "arn:aws:route53:::hostedzone/${PrivateHostedZoneId}"
+              - Effect: Allow
+                Action:
+                  - route53:ListHostedZones
+                  - route53:ListResourceRecordSets
+                  - route53:ListTagsForResource
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-external-dns-role"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # LAMBDA EXECUTION ROLE FOR DEPLOYER
+  # =============================================================================
+  ExternalDNSDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-external-dns-deployer-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EKSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                  - eks:ListClusters
+                Resource: !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # =============================================================================
+  # EKS ACCESS ENTRY FOR LAMBDA ROLE
+  # =============================================================================
+  ExternalDNSDeployerAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt ExternalDNSDeployerRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - AccessScope:
+            Type: cluster
+          PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+  # =============================================================================
+  # LAMBDA FUNCTION FOR EXTERNAL DNS DEPLOYMENT
+  # =============================================================================
+  ExternalDNSDeployerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-external-dns-deployer"
+      Description: Deploys ExternalDNS to EKS cluster
+      Runtime: python3.11
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 1024
+      Role: !GetAtt ExternalDNSDeployerRole.Arn
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ClusterName
+          REGION: !Ref AWS::Region
+          CHART_VERSION: !Ref ExternalDNSVersion
+          SERVICE_ACCOUNT_ROLE_ARN: !GetAtt ExternalDNSRole.Arn
+          HOSTED_ZONE_ID: !Ref PrivateHostedZoneId
+          DOMAIN_FILTER: !Ref DomainName
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          import subprocess
+          import base64
+          import urllib.request
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def send_response(event, context, status, data=None, reason=None):
+              response_body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': event.get('PhysicalResourceId', context.log_stream_name),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+
+              json_body = json.dumps(response_body).encode('utf-8')
+              req = urllib.request.Request(event['ResponseURL'], data=json_body, method='PUT')
+              req.add_header('Content-Type', '')
+              req.add_header('Content-Length', len(json_body))
+
+              try:
+                  urllib.request.urlopen(req)
+                  logger.info(f"Response sent: {status}")
+              except Exception as e:
+                  logger.error(f"Failed to send response: {e}")
+
+          def get_eks_token(cluster_name):
+              from botocore.signers import RequestSigner
+              from botocore.model import ServiceId
+
+              STS_TOKEN_EXPIRES_IN = 60
+              session = boto3.Session()
+              region = session.region_name
+
+              service_id = ServiceId('sts')
+              signer = RequestSigner(
+                  service_id,
+                  region,
+                  'sts',
+                  'v4',
+                  session.get_credentials(),
+                  session.events
+              )
+
+              params = {
+                  'method': 'GET',
+                  'url': f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15',
+                  'body': {},
+                  'headers': {
+                      'x-k8s-aws-id': cluster_name
+                  },
+                  'context': {}
+              }
+
+              url = signer.generate_presigned_url(
+                  params,
+                  region_name=region,
+                  expires_in=STS_TOKEN_EXPIRES_IN,
+                  operation_name=''
+              )
+
+              token = 'k8s-aws-v1.' + base64.urlsafe_b64encode(url.encode('utf-8')).decode('utf-8').rstrip('=')
+              return token
+
+          def setup_kubeconfig():
+              cluster_name = os.environ['CLUSTER_NAME']
+
+              eks = boto3.client('eks')
+              cluster = eks.describe_cluster(name=cluster_name)['cluster']
+
+              token = get_eks_token(cluster_name)
+
+              kubeconfig_yaml = f'''apiVersion: v1
+          kind: Config
+          clusters:
+          - name: {cluster_name}
+            cluster:
+              server: {cluster['endpoint']}
+              certificate-authority-data: {cluster['certificateAuthority']['data']}
+          contexts:
+          - name: {cluster_name}
+            context:
+              cluster: {cluster_name}
+              user: aws
+          current-context: {cluster_name}
+          users:
+          - name: aws
+            user:
+              token: {token}
+          '''
+
+              kubeconfig_path = '/tmp/kubeconfig'
+              with open(kubeconfig_path, 'w') as f:
+                  f.write(kubeconfig_yaml)
+
+              os.environ['KUBECONFIG'] = kubeconfig_path
+              return kubeconfig_path
+
+          def run_command(cmd):
+              logger.info(f"Running: {' '.join(cmd)}")
+              result = subprocess.run(cmd, capture_output=True, text=True)
+              logger.info(f"stdout: {result.stdout}")
+              if result.returncode != 0:
+                  logger.error(f"stderr: {result.stderr}")
+                  raise Exception(f"Command failed: {result.stderr}")
+              return result.stdout
+
+          def install_tools():
+              import urllib.request
+              import tarfile
+              import stat
+
+              tmp = '/tmp'
+
+              os.environ['HOME'] = tmp
+              os.environ['HELM_CACHE_HOME'] = f'{tmp}/.helm/cache'
+              os.environ['HELM_CONFIG_HOME'] = f'{tmp}/.helm/config'
+              os.environ['HELM_DATA_HOME'] = f'{tmp}/.helm/data'
+
+              os.makedirs(f'{tmp}/.helm/cache', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/config', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/data', exist_ok=True)
+
+              kubectl_path = f'{tmp}/kubectl'
+              if not os.path.exists(kubectl_path):
+                  logger.info("Downloading kubectl...")
+                  kubectl_url = 'https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl'
+                  urllib.request.urlretrieve(kubectl_url, kubectl_path)
+                  os.chmod(kubectl_path, os.stat(kubectl_path).st_mode | stat.S_IEXEC)
+
+              helm_path = f'{tmp}/helm'
+              if not os.path.exists(helm_path):
+                  logger.info("Downloading helm...")
+                  helm_url = 'https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz'
+                  helm_tar = f'{tmp}/helm.tar.gz'
+                  urllib.request.urlretrieve(helm_url, helm_tar)
+                  with tarfile.open(helm_tar, 'r:gz') as tar:
+                      tar.extractall(tmp)
+                  os.rename(f'{tmp}/linux-amd64/helm', helm_path)
+                  os.chmod(helm_path, os.stat(helm_path).st_mode | stat.S_IEXEC)
+
+              os.environ['PATH'] = f"{tmp}:{os.environ.get('PATH', '')}"
+
+              return kubectl_path, helm_path
+
+          def helm_install():
+              region = os.environ['REGION']
+              version = os.environ['CHART_VERSION']
+              role_arn = os.environ['SERVICE_ACCOUNT_ROLE_ARN']
+              hosted_zone_id = os.environ['HOSTED_ZONE_ID']
+              domain_filter = os.environ['DOMAIN_FILTER']
+
+              # Add external-dns Helm repo
+              run_command(['helm', 'repo', 'add', 'external-dns', 'https://kubernetes-sigs.github.io/external-dns/'])
+              run_command(['helm', 'repo', 'update'])
+
+              # Install ExternalDNS
+              run_command([
+                  'helm', 'upgrade', '--install', 'external-dns',
+                  'external-dns/external-dns',
+                  '--version', version,
+                  '--namespace', 'kube-system',
+                  '--set', 'provider.name=aws',
+                  '--set', f'env[0].name=AWS_DEFAULT_REGION',
+                  '--set', f'env[0].value={region}',
+                  '--set', f'txtOwnerId={hosted_zone_id}',
+                  '--set', f'domainFilters[0]={domain_filter}',
+                  '--set', 'policy=sync',
+                  '--set', 'registry=txt',
+                  '--set', 'txtPrefix=externaldns-',
+                  '--set', 'serviceAccount.create=true',
+                  '--set', 'serviceAccount.name=external-dns',
+                  '--set', f'serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn={role_arn}',
+                  '--set', 'sources[0]=service',
+                  '--set', 'sources[1]=ingress',
+                  '--set', 'aws.zoneType=private',
+                  '--wait',
+                  '--timeout', '10m'
+              ])
+
+          def helm_uninstall():
+              try:
+                  run_command(['helm', 'uninstall', 'external-dns', '-n', 'kube-system'])
+              except:
+                  logger.info("Helm release may not exist")
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(event)}")
+
+              try:
+                  request_type = event['RequestType']
+
+                  install_tools()
+                  setup_kubeconfig()
+
+                  if request_type == 'Delete':
+                      helm_uninstall()
+                      send_response(event, context, 'SUCCESS', {'Message': 'ExternalDNS deleted'})
+                      return
+
+                  helm_install()
+
+                  send_response(event, context, 'SUCCESS', {
+                      'ReleaseName': 'external-dns',
+                      'Namespace': 'kube-system',
+                      'ChartVersion': os.environ['CHART_VERSION']
+                  })
+
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  send_response(event, context, 'FAILED', reason=str(e))
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-external-dns-deployer"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # CUSTOM RESOURCE TO TRIGGER EXTERNAL DNS DEPLOYMENT
+  # =============================================================================
+  ExternalDNSDeployment:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - ExternalDNSDeployerFunction
+      - ExternalDNSDeployerAccessEntry
+      - ExternalDNSRole
+    Properties:
+      ServiceToken: !GetAtt ExternalDNSDeployerFunction.Arn
+      ChartVersion: !Ref ExternalDNSVersion
+      ClusterName: !Ref ClusterName
+      HostedZoneId: !Ref PrivateHostedZoneId
+      DomainFilter: !Ref DomainName
+      # Force update hash
+      ConfigHash: !Base64
+        Fn::Sub: "${ClusterName}-${PrivateHostedZoneId}-${DomainName}-${ExternalDNSVersion}"
+
+Outputs:
+  ExternalDNSRoleArn:
+    Description: ExternalDNS IAM Role ARN
+    Value: !GetAtt ExternalDNSRole.Arn
+
+  ExternalDNSDeployerFunctionArn:
+    Description: ExternalDNS Deployer Lambda Function ARN
+    Value: !GetAtt ExternalDNSDeployerFunction.Arn
+
+  ExternalDNSLogGroup:
+    Description: CloudWatch Log Group for ExternalDNS Deployer
+    Value: !Sub "/aws/lambda/${ProjectName}-external-dns-deployer"

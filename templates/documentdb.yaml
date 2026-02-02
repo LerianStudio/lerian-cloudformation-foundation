@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: DocumentDB Stack for Midaz Platform
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    ConstraintDescription: "Must begin with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  VpcCIDR:
+    Type: String
+    Description: VPC CIDR block for security group rules
+    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block (e.g., 10.0.0.0/16)"
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs
+
+  InstanceClass:
+    Type: String
+    Description: DocumentDB instance class
+    AllowedValues:
+      - db.t3.medium
+      - db.r6g.large
+      - db.r6g.xlarge
+      - db.r6g.2xlarge
+
+  InstanceCount:
+    Type: Number
+    Description: Number of DocumentDB instances
+    MinValue: 1
+    MaxValue: 16
+    Default: 2
+    ConstraintDescription: "Must be between 1 and 16"
+
+  MasterUsername:
+    Type: String
+    Description: Master username (sensitive)
+    NoEcho: true
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 63
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  DeletionProtection:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: Enable deletion protection to prevent accidental cluster deletion.
+
+  BackupRetentionPeriod:
+    Type: Number
+    MinValue: 1
+    MaxValue: 35
+    Default: 7
+    Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
+
+Resources:
+  # =============================================================================
+  # SECRETS
+  # =============================================================================
+  DocumentDBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/documentdb-password"
+      Description: DocumentDB Master Password
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-secret"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # KMS KEY
+  # =============================================================================
+  DocumentDBKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for DocumentDB encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-kms"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-documentdb"
+      TargetKeyId: !Ref DocumentDBKMSKey
+
+  # =============================================================================
+  # SECURITY GROUP
+  # =============================================================================
+  DocumentDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-documentdb-sg"
+      GroupDescription: Security group for DocumentDB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 27017
+          ToPort: 27017
+          CidrIp: !Ref VpcCIDR
+          Description: MongoDB protocol from VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-sg"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # SUBNET GROUP
+  # =============================================================================
+  DocumentDBSubnetGroup:
+    Type: AWS::DocDB::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub "${ProjectName}-documentdb-subnet-group"
+      DBSubnetGroupDescription: Subnet group for DocumentDB
+      SubnetIds: !Ref PrivateSubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-subnet-group"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # PARAMETER GROUP
+  # =============================================================================
+  DocumentDBParameterGroup:
+    Type: AWS::DocDB::DBClusterParameterGroup
+    Properties:
+      Name: !Sub "${ProjectName}-documentdb-params"
+      Family: docdb5.0
+      Description: Parameter group for Midaz DocumentDB
+      Parameters:
+        tls: "disabled"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-params"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # DOCUMENTDB CLUSTER
+  # =============================================================================
+  DocumentDBCluster:
+    Type: AWS::DocDB::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBClusterIdentifier: !Sub "${ProjectName}-documentdb"
+      EngineVersion: "5.0.0"
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DocumentDBSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DocumentDBSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref DocumentDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DocumentDBSecurityGroup
+      DBClusterParameterGroupName: !Ref DocumentDBParameterGroup
+      StorageEncrypted: true
+      KmsKeyId: !Ref DocumentDBKMSKey
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PreferredBackupWindow: "07:00-09:00"
+      PreferredMaintenanceWindow: "mon:00:00-mon:03:00"
+      DeletionProtection: !Ref DeletionProtection
+      EnableCloudwatchLogsExports:
+        - audit
+        - profiler
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =============================================================================
+  # DOCUMENTDB INSTANCES
+  # =============================================================================
+  DocumentDBInstance1:
+    Type: AWS::DocDB::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-1"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-1"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance2:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateSecondInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-2"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-2"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Conditions:
+  CreateSecondInstance: !Not [!Equals [!Ref InstanceCount, 1]]
+
+Outputs:
+  ClusterEndpoint:
+    Description: DocumentDB Cluster Endpoint
+    Value: !GetAtt DocumentDBCluster.Endpoint
+
+  ClusterPort:
+    Description: DocumentDB Cluster Port
+    Value: !GetAtt DocumentDBCluster.Port
+
+  ReaderEndpoint:
+    Description: DocumentDB Reader Endpoint
+    Value: !GetAtt DocumentDBCluster.ReadEndpoint
+
+  SecretArn:
+    Description: DocumentDB Password Secret ARN
+    Value: !Ref DocumentDBSecret
+
+  SecurityGroupId:
+    Description: DocumentDB Security Group ID
+    Value: !Ref DocumentDBSecurityGroup

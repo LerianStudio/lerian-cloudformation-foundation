@@ -1,0 +1,766 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Midaz Helm Chart Deployment using Lambda Custom Resource (AWS Marketplace Ready)
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs
+
+  ClusterName:
+    Type: String
+    Description: EKS Cluster Name
+
+  ClusterSecurityGroupId:
+    Type: String
+    Description: EKS Cluster Security Group ID
+
+  RDSEndpoint:
+    Type: String
+    Description: RDS PostgreSQL Endpoint
+
+  RDSSecretArn:
+    Type: String
+    Description: RDS Password Secret ARN
+
+  RDSReplicaEndpoint:
+    Type: String
+    Description: RDS Read Replica Endpoint (optional)
+    Default: ""
+
+  DocumentDBEndpoint:
+    Type: String
+    Description: DocumentDB Cluster Endpoint
+
+  DocumentDBSecretArn:
+    Type: String
+    Description: DocumentDB Password Secret ARN
+
+  ElastiCacheEndpoint:
+    Type: String
+    Description: ElastiCache Primary Endpoint
+
+  AmazonMQEndpoint:
+    Type: String
+    Description: AmazonMQ Broker Endpoint
+
+  AmazonMQSecretArn:
+    Type: String
+    Description: AmazonMQ Password Secret ARN
+
+  MidazHelmRepository:
+    Type: String
+    Default: "oci://registry-1.docker.io/lerianstudio/midaz-helm"
+    Description: Midaz Helm Chart Repository (OCI format)
+
+  MidazChartVersion:
+    Type: String
+    Default: "5.3.0"
+    Description: Midaz Helm Chart Version
+
+  MidazNamespace:
+    Type: String
+    Default: midaz
+    Description: Kubernetes namespace for Midaz
+
+  # Ingress Configuration
+  EnableIngress:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Ingress for Ledger service (requires ALB Controller)
+
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Base domain name for the hosted zone (e.g., midaz.net).
+
+  IngressHostname:
+    Type: String
+    Default: ""
+    Description: Full hostname for Ingress (e.g., ledger.midaz.net). Required if EnableIngress is true.
+
+  IngressScheme:
+    Type: String
+    Default: "internal"
+    AllowedValues:
+      - "internal"
+      - "internet-facing"
+    Description: ALB scheme - internal (private) or internet-facing (public)
+
+  IngressCertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM Certificate ARN for HTTPS (optional). If not provided, HTTP only.
+
+Conditions:
+  HasRDSReplica: !Not [!Equals [!Ref RDSReplicaEndpoint, ""]]
+  ShouldEnableIngress: !Equals [!Ref EnableIngress, "true"]
+  HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
+
+Resources:
+  # =============================================================================
+  # LAMBDA EXECUTION ROLE
+  # =============================================================================
+  HelmDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-helm-deployer-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EKSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                  - eks:ListClusters
+                Resource: !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref RDSSecretArn
+                  - !Ref DocumentDBSecretArn
+                  - !Ref AmazonMQSecretArn
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # =============================================================================
+  # EKS ACCESS ENTRY FOR LAMBDA ROLE
+  # =============================================================================
+  # Grant the Lambda role cluster admin access to deploy Helm charts
+  HelmDeployerAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt HelmDeployerRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - AccessScope:
+            Type: cluster
+          PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+  # =============================================================================
+  # LAMBDA FUNCTION FOR HELM DEPLOYMENT
+  # =============================================================================
+  # NOTE: Lambda runs outside VPC to access CloudFormation response URL
+  # It connects to EKS via public endpoint (EndpointPublicAccess: true)
+  HelmDeployerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-helm-deployer"
+      Description: Deploys Midaz Helm chart to EKS cluster
+      Runtime: python3.11
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 1024
+      Role: !GetAtt HelmDeployerRole.Arn
+      # No VpcConfig - Lambda runs outside VPC to access internet
+      # EKS is accessed via public endpoint
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ClusterName
+          NAMESPACE: !Ref MidazNamespace
+          HELM_REPOSITORY: !Ref MidazHelmRepository
+          CHART_VERSION: !Ref MidazChartVersion
+          PROJECT_NAME: !Ref ProjectName
+          RDS_ENDPOINT: !Ref RDSEndpoint
+          RDS_REPLICA_ENDPOINT: !If [HasRDSReplica, !Ref RDSReplicaEndpoint, !Ref RDSEndpoint]
+          RDS_SECRET_ARN: !Ref RDSSecretArn
+          DOCUMENTDB_ENDPOINT: !Ref DocumentDBEndpoint
+          DOCUMENTDB_SECRET_ARN: !Ref DocumentDBSecretArn
+          ELASTICACHE_ENDPOINT: !Ref ElastiCacheEndpoint
+          AMAZONMQ_ENDPOINT: !Ref AmazonMQEndpoint
+          AMAZONMQ_SECRET_ARN: !Ref AmazonMQSecretArn
+          ENABLE_INGRESS: !Ref EnableIngress
+          DOMAIN_NAME: !Ref DomainName
+          INGRESS_HOSTNAME: !Ref IngressHostname
+          INGRESS_SCHEME: !Ref IngressScheme
+          INGRESS_CERTIFICATE_ARN: !Ref IngressCertificateArn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          import subprocess
+          import base64
+          import urllib.request
+          import tempfile
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def send_response(event, context, status, data=None, reason=None):
+              response_body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': event.get('PhysicalResourceId', context.log_stream_name),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+
+              json_body = json.dumps(response_body).encode('utf-8')
+              req = urllib.request.Request(event['ResponseURL'], data=json_body, method='PUT')
+              req.add_header('Content-Type', '')
+              req.add_header('Content-Length', len(json_body))
+
+              try:
+                  urllib.request.urlopen(req)
+                  logger.info(f"Response sent: {status}")
+              except Exception as e:
+                  logger.error(f"Failed to send response: {e}")
+
+          def get_secret(secret_arn):
+              client = boto3.client('secretsmanager')
+              response = client.get_secret_value(SecretId=secret_arn)
+              return json.loads(response['SecretString'])
+
+          def get_eks_token(cluster_name):
+              """Generate EKS token using STS presigned URL (same as aws eks get-token)"""
+              from botocore.signers import RequestSigner
+              from botocore.model import ServiceId
+
+              STS_TOKEN_EXPIRES_IN = 60
+              session = boto3.Session()
+              region = session.region_name
+
+              # Get STS client config
+              sts_client = session.client('sts', region_name=region)
+
+              # Create the presigned URL for GetCallerIdentity
+              service_id = ServiceId('sts')
+              signer = RequestSigner(
+                  service_id,
+                  region,
+                  'sts',
+                  'v4',
+                  session.get_credentials(),
+                  session.events
+              )
+
+              # Params for GetCallerIdentity
+              params = {
+                  'method': 'GET',
+                  'url': f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15',
+                  'body': {},
+                  'headers': {
+                      'x-k8s-aws-id': cluster_name
+                  },
+                  'context': {}
+              }
+
+              # Generate presigned URL with 60s expiration
+              url = signer.generate_presigned_url(
+                  params,
+                  region_name=region,
+                  expires_in=STS_TOKEN_EXPIRES_IN,
+                  operation_name=''
+              )
+
+              # Encode as EKS token
+              token = 'k8s-aws-v1.' + base64.urlsafe_b64encode(url.encode('utf-8')).decode('utf-8').rstrip('=')
+
+              logger.info(f"Generated EKS token for cluster {cluster_name}")
+              return token
+
+          def setup_kubeconfig():
+              cluster_name = os.environ['CLUSTER_NAME']
+
+              # Get cluster info
+              eks = boto3.client('eks')
+              cluster = eks.describe_cluster(name=cluster_name)['cluster']
+
+              # Get EKS token
+              token = get_eks_token(cluster_name)
+
+              # Create kubeconfig with token (not exec plugin)
+              kubeconfig_yaml = f'''apiVersion: v1
+          kind: Config
+          clusters:
+          - name: {cluster_name}
+            cluster:
+              server: {cluster['endpoint']}
+              certificate-authority-data: {cluster['certificateAuthority']['data']}
+          contexts:
+          - name: {cluster_name}
+            context:
+              cluster: {cluster_name}
+              user: aws
+          current-context: {cluster_name}
+          users:
+          - name: aws
+            user:
+              token: {token}
+          '''
+
+              kubeconfig_path = '/tmp/kubeconfig'
+              with open(kubeconfig_path, 'w') as f:
+                  f.write(kubeconfig_yaml)
+
+              os.environ['KUBECONFIG'] = kubeconfig_path
+              return kubeconfig_path
+
+          def run_command(cmd):
+              logger.info(f"Running: {' '.join(cmd)}")
+              result = subprocess.run(cmd, capture_output=True, text=True)
+              logger.info(f"stdout: {result.stdout}")
+              if result.returncode != 0:
+                  logger.error(f"stderr: {result.stderr}")
+                  raise Exception(f"Command failed: {result.stderr}")
+              return result.stdout
+
+          def install_tools():
+              """Download and install kubectl and helm to /tmp"""
+              import urllib.request
+              import tarfile
+              import stat
+
+              tmp = '/tmp'
+
+              # Set HOME and Helm directories to /tmp (Lambda filesystem is read-only except /tmp)
+              os.environ['HOME'] = tmp
+              os.environ['HELM_CACHE_HOME'] = f'{tmp}/.helm/cache'
+              os.environ['HELM_CONFIG_HOME'] = f'{tmp}/.helm/config'
+              os.environ['HELM_DATA_HOME'] = f'{tmp}/.helm/data'
+
+              # Create helm directories
+              os.makedirs(f'{tmp}/.helm/cache', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/config', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/data', exist_ok=True)
+
+              # Install kubectl if not exists
+              kubectl_path = f'{tmp}/kubectl'
+              if not os.path.exists(kubectl_path):
+                  logger.info("Downloading kubectl...")
+                  kubectl_url = 'https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl'
+                  urllib.request.urlretrieve(kubectl_url, kubectl_path)
+                  os.chmod(kubectl_path, os.stat(kubectl_path).st_mode | stat.S_IEXEC)
+
+              # Install helm if not exists
+              helm_path = f'{tmp}/helm'
+              if not os.path.exists(helm_path):
+                  logger.info("Downloading helm...")
+                  helm_url = 'https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz'
+                  helm_tar = f'{tmp}/helm.tar.gz'
+                  urllib.request.urlretrieve(helm_url, helm_tar)
+                  with tarfile.open(helm_tar, 'r:gz') as tar:
+                      tar.extractall(tmp)
+                  os.rename(f'{tmp}/linux-amd64/helm', helm_path)
+                  os.chmod(helm_path, os.stat(helm_path).st_mode | stat.S_IEXEC)
+
+              # Add to PATH
+              os.environ['PATH'] = f"{tmp}:{os.environ.get('PATH', '')}"
+
+              return kubectl_path, helm_path
+
+          def create_namespace(namespace):
+              try:
+                  run_command(['kubectl', 'create', 'namespace', namespace])
+              except:
+                  logger.info(f"Namespace {namespace} may already exist")
+
+          def create_k8s_secrets():
+              project = os.environ['PROJECT_NAME']
+              namespace = os.environ['NAMESPACE']
+
+              # Get secrets from Secrets Manager
+              rds_secret = get_secret(os.environ['RDS_SECRET_ARN'])
+              docdb_secret = get_secret(os.environ['DOCUMENTDB_SECRET_ARN'])
+              mq_secret = get_secret(os.environ['AMAZONMQ_SECRET_ARN'])
+
+              # Create secrets using YAML file
+              secrets_yaml = f'''
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-rds-credentials
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            username: "{rds_secret['username']}"
+            password: "{rds_secret['password']}"
+            DB_USER_ADMIN: "{rds_secret['username']}"
+            DB_ADMIN_PASSWORD: "{rds_secret['password']}"
+            DB_PASSWORD_MIDAZ: "{rds_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-documentdb-credentials
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            username: "{docdb_secret['username']}"
+            password: "{docdb_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-amazonmq-credentials
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            username: "{mq_secret['username']}"
+            password: "{mq_secret['password']}"
+            RABBITMQ_ADMIN_USER: "{mq_secret['username']}"
+            RABBITMQ_ADMIN_PASS: "{mq_secret['password']}"
+            RABBITMQ_DEFAULT_PASS: "{mq_secret['password']}"
+            RABBITMQ_CONSUMER_PASS: "{mq_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-midaz-secrets
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            DB_ONBOARDING_PASSWORD: "{rds_secret['password']}"
+            DB_ONBOARDING_REPLICA_PASSWORD: "{rds_secret['password']}"
+            DB_TRANSACTION_PASSWORD: "{rds_secret['password']}"
+            DB_TRANSACTION_REPLICA_PASSWORD: "{rds_secret['password']}"
+            MONGO_ONBOARDING_PASSWORD: "{docdb_secret['password']}"
+            MONGO_TRANSACTION_PASSWORD: "{docdb_secret['password']}"
+            RABBITMQ_DEFAULT_PASS: "{mq_secret['password']}"
+            RABBITMQ_CONSUMER_PASS: "{mq_secret['password']}"
+            REDIS_PASSWORD: ""
+          '''
+
+              secrets_file = '/tmp/secrets.yaml'
+              with open(secrets_file, 'w') as f:
+                  f.write(secrets_yaml)
+
+              run_command(['kubectl', 'apply', '-f', secrets_file])
+
+          def extract_host_from_endpoint(endpoint):
+              """Extract host from endpoint like amqps://host:port"""
+              if '://' in endpoint:
+                  endpoint = endpoint.split('://')[1]
+              if ':' in endpoint:
+                  endpoint = endpoint.split(':')[0]
+              return endpoint
+
+          def get_ingress_config():
+              """Generate Ingress configuration block for ledger section"""
+              enable_ingress = os.environ.get('ENABLE_INGRESS', 'false').lower() == 'true'
+              if not enable_ingress:
+                  return '''ingress:
+              enabled: false'''
+
+              ingress_hostname = os.environ.get('INGRESS_HOSTNAME', '')
+              ingress_scheme = os.environ.get('INGRESS_SCHEME', 'internal')
+              certificate_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
+
+              if not ingress_hostname:
+                  logger.warning("Ingress enabled but no hostname provided")
+                  return '''ingress:
+              enabled: false'''
+
+              # Build annotations for AWS ALB
+              annotations = {
+                  'kubernetes.io/ingress.class': 'alb',
+                  'alb.ingress.kubernetes.io/scheme': ingress_scheme,
+                  'alb.ingress.kubernetes.io/target-type': 'ip',
+                  'alb.ingress.kubernetes.io/healthcheck-path': '/health',
+                  'alb.ingress.kubernetes.io/healthcheck-interval-seconds': '"30"',
+                  'alb.ingress.kubernetes.io/healthcheck-timeout-seconds': '"5"',
+                  'alb.ingress.kubernetes.io/healthy-threshold-count': '"2"',
+                  'alb.ingress.kubernetes.io/unhealthy-threshold-count': '"3"',
+              }
+
+              # Add SSL/TLS configuration if certificate is provided
+              if certificate_arn:
+                  annotations['alb.ingress.kubernetes.io/listen-ports'] = '\'[{"HTTP": 80}, {"HTTPS": 443}]\''
+                  annotations['alb.ingress.kubernetes.io/ssl-redirect'] = '"443"'
+                  annotations['alb.ingress.kubernetes.io/certificate-arn'] = certificate_arn
+              else:
+                  annotations['alb.ingress.kubernetes.io/listen-ports'] = '\'[{"HTTP": 80}]\''
+
+              # Format annotations as YAML
+              annotations_yaml = '\n'.join([f'          {k}: {v}' for k, v in annotations.items()])
+
+              ingress_config = f'''ingress:
+              enabled: true
+              className: alb
+              annotations:
+          {annotations_yaml}
+              hosts:
+                - host: {ingress_hostname}
+                  paths:
+                    - path: /
+                      pathType: Prefix'''
+
+              return ingress_config
+
+          def create_values_file():
+              project = os.environ['PROJECT_NAME']
+              rds_endpoint = os.environ['RDS_ENDPOINT']
+              rds_replica = os.environ['RDS_REPLICA_ENDPOINT']
+              docdb_endpoint = os.environ['DOCUMENTDB_ENDPOINT']
+              elasticache_endpoint = os.environ['ELASTICACHE_ENDPOINT']
+              amazonmq_endpoint = os.environ['AMAZONMQ_ENDPOINT']
+
+              docdb_secret = get_secret(os.environ['DOCUMENTDB_SECRET_ARN'])
+              amazonmq_host = extract_host_from_endpoint(amazonmq_endpoint)
+
+              # Get ingress configuration
+              ingress_config = get_ingress_config()
+
+              values = f'''
+          # Disable built-in services (using AWS managed)
+          postgresql:
+            enabled: false
+          mongodb:
+            enabled: false
+          rabbitmq:
+            enabled: false
+          valkey:
+            enabled: false
+
+          # Enable ledger service (unified mode)
+          ledger:
+            enabled: true
+            configmap:
+              DB_ONBOARDING_HOST: "{rds_endpoint}"
+              DB_ONBOARDING_PORT: "5432"
+              DB_ONBOARDING_USER: "midaz"
+              DB_ONBOARDING_NAME: "onboarding"
+              DB_ONBOARDING_REPLICA_HOST: "{rds_replica}"
+              DB_ONBOARDING_REPLICA_PORT: "5432"
+              DB_ONBOARDING_REPLICA_USER: "midaz"
+              DB_ONBOARDING_REPLICA_NAME: "onboarding"
+              DB_TRANSACTION_HOST: "{rds_endpoint}"
+              DB_TRANSACTION_PORT: "5432"
+              DB_TRANSACTION_USER: "midaz"
+              DB_TRANSACTION_NAME: "transaction"
+              DB_TRANSACTION_REPLICA_HOST: "{rds_replica}"
+              DB_TRANSACTION_REPLICA_PORT: "5432"
+              DB_TRANSACTION_REPLICA_USER: "midaz"
+              DB_TRANSACTION_REPLICA_NAME: "transaction"
+              MONGO_ONBOARDING_URI: "mongodb"
+              MONGO_ONBOARDING_HOST: "{docdb_endpoint}"
+              MONGO_ONBOARDING_PORT: "27017"
+              MONGO_ONBOARDING_USER: "{docdb_secret['username']}"
+              MONGO_ONBOARDING_NAME: "onboarding"
+              MONGO_TRANSACTION_URI: "mongodb"
+              MONGO_TRANSACTION_HOST: "{docdb_endpoint}"
+              MONGO_TRANSACTION_PORT: "27017"
+              MONGO_TRANSACTION_USER: "{docdb_secret['username']}"
+              MONGO_TRANSACTION_NAME: "transaction"
+              REDIS_HOST: "{elasticache_endpoint}:6379"
+              RABBITMQ_URI: "amqps"
+              RABBITMQ_HOST: "{amazonmq_host}"
+              RABBITMQ_PORT_HOST: "5671"
+              RABBITMQ_PORT_AMQP: "15671"
+              RABBITMQ_PROTOCOL: "https"
+              RABBITMQ_DEFAULT_USER: "transaction"
+              RABBITMQ_CONSUMER_USER: "consumer"
+            useExistingSecret: true
+            existingSecretName: "{project}-midaz-secrets"
+            service:
+              type: ClusterIP
+              port: 3002
+            {ingress_config}
+
+          onboarding:
+            enabled: false
+
+          transaction:
+            enabled: false
+
+          global:
+            externalPostgresDefinitions:
+              enabled: true
+              connection:
+                host: "{rds_endpoint}"
+                port: "5432"
+              postgresAdminLogin:
+                useExistingSecret:
+                  name: "{project}-rds-credentials"
+              midazCredentials:
+                useExistingSecret:
+                  name: "{project}-rds-credentials"
+            externalRabbitmqDefinitions:
+              enabled: true
+              connection:
+                protocol: "https"
+                host: "{amazonmq_host}"
+                port: "15671"
+                portAmqp: "5671"
+              rabbitmqAdminLogin:
+                useExistingSecret:
+                  name: "{project}-amazonmq-credentials"
+              appCredentials:
+                useExistingSecret:
+                  name: "{project}-amazonmq-credentials"
+          '''
+
+              values_file = '/tmp/values.yaml'
+              with open(values_file, 'w') as f:
+                  f.write(values)
+
+              return values_file
+
+          def helm_install():
+              namespace = os.environ['NAMESPACE']
+              repository = os.environ['HELM_REPOSITORY']
+              version = os.environ['CHART_VERSION']
+
+              values_file = create_values_file()
+
+              run_command([
+                  'helm', 'upgrade', '--install', 'midaz',
+                  repository,
+                  '--version', version,
+                  '--namespace', namespace,
+                  '--create-namespace',
+                  '--values', values_file,
+                  '--wait',
+                  '--timeout', '15m'
+              ])
+
+          def helm_uninstall():
+              namespace = os.environ['NAMESPACE']
+              try:
+                  run_command(['helm', 'uninstall', 'midaz', '-n', namespace])
+              except:
+                  logger.info("Helm release may not exist")
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(event)}")
+
+              try:
+                  request_type = event['RequestType']
+
+                  # Install tools
+                  install_tools()
+
+                  # Setup kubeconfig
+                  setup_kubeconfig()
+
+                  if request_type == 'Delete':
+                      helm_uninstall()
+                      send_response(event, context, 'SUCCESS', {'Message': 'Helm release deleted'})
+                      return
+
+                  # Create/Update
+                  namespace = os.environ['NAMESPACE']
+                  create_namespace(namespace)
+                  create_k8s_secrets()
+                  helm_install()
+
+                  send_response(event, context, 'SUCCESS', {
+                      'ReleaseName': 'midaz',
+                      'Namespace': namespace,
+                      'ChartVersion': os.environ['CHART_VERSION']
+                  })
+
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  send_response(event, context, 'FAILED', reason=str(e))
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-helm-deployer"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # CUSTOM RESOURCE TO TRIGGER HELM DEPLOYMENT
+  # =============================================================================
+  MidazHelmDeployment:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - HelmDeployerFunction
+      - HelmDeployerAccessEntry
+    Properties:
+      ServiceToken: !GetAtt HelmDeployerFunction.Arn
+      # These properties trigger updates when changed
+      ChartVersion: !Ref MidazChartVersion
+      Namespace: !Ref MidazNamespace
+      ClusterName: !Ref ClusterName
+      # Force update hash
+      ConfigHash: !Base64
+        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}"
+
+Outputs:
+  HelmReleaseName:
+    Description: Midaz Helm Release Name
+    Value: midaz
+
+  HelmNamespace:
+    Description: Midaz Kubernetes Namespace
+    Value: !Ref MidazNamespace
+
+  HelmChartVersion:
+    Description: Midaz Helm Chart Version
+    Value: !Ref MidazChartVersion
+
+  HelmDeployerFunctionArn:
+    Description: Helm Deployer Lambda Function ARN
+    Value: !GetAtt HelmDeployerFunction.Arn
+
+  HelmDeployerLogGroup:
+    Description: CloudWatch Log Group for Helm Deployer
+    Value: !Sub "/aws/lambda/${ProjectName}-helm-deployer"
+
+  IngressEnabled:
+    Description: Whether Ingress is enabled
+    Value: !Ref EnableIngress
+
+  IngressHostnameOutput:
+    Condition: ShouldEnableIngress
+    Description: Ingress hostname for Ledger API
+    Value: !Ref IngressHostname
+
+  IngressScheme:
+    Condition: ShouldEnableIngress
+    Description: ALB scheme (internal or internet-facing)
+    Value: !Ref IngressScheme
+
+  LedgerAPIEndpoint:
+    Description: Ledger API Endpoint
+    Value: !If
+      - ShouldEnableIngress
+      - !If
+        - HasCertificate
+        - !Sub "https://${IngressHostname}"
+        - !Sub "http://${IngressHostname}"
+      - !Sub "${ProjectName}-ledger.${MidazNamespace}.svc.cluster.local:3002"

@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Route53 Private Hosted Zone for Midaz Platform
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    ConstraintDescription: "Must begin with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  DomainName:
+    Type: String
+    Description: Domain name for the private hosted zone (e.g., midaz.empresa.com)
+    AllowedPattern: "^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
+    ConstraintDescription: "Must be a valid domain name (e.g., example.com or sub.example.com)"
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID to associate with the private hosted zone
+
+Resources:
+  # =============================================================================
+  # ROUTE53 PRIVATE HOSTED ZONE
+  # =============================================================================
+  PrivateHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref DomainName
+      HostedZoneConfig:
+        Comment: !Sub "Private hosted zone for ${ProjectName} - ${EnvironmentName}"
+      VPCs:
+        - VPCId: !Ref VpcId
+          VPCRegion: !Ref AWS::Region
+      HostedZoneTags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-private-zone"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  PrivateHostedZoneId:
+    Description: Route53 Private Hosted Zone ID
+    Value: !Ref PrivateHostedZone
+
+  PrivateHostedZoneName:
+    Description: Route53 Private Hosted Zone Name
+    Value: !Ref DomainName

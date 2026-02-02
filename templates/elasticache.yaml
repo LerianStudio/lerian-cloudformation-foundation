@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ElastiCache (Valkey/Redis) Stack for Midaz Platform
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    ConstraintDescription: "Must begin with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  VpcCIDR:
+    Type: String
+    Description: VPC CIDR block for security group rules
+    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block (e.g., 10.0.0.0/16)"
+
+  CacheSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Cache subnet IDs
+
+  NodeType:
+    Type: String
+    Description: ElastiCache node type
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+      - cache.m7g.large
+      - cache.m7g.xlarge
+      - cache.r7g.large
+      - cache.r7g.xlarge
+
+Resources:
+  # =============================================================================
+  # SECURITY GROUP
+  # =============================================================================
+  ElastiCacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-elasticache-sg"
+      GroupDescription: Security group for ElastiCache
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: !Ref VpcCIDR
+          Description: Redis/Valkey from VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-elasticache-sg"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # SUBNET GROUP
+  # =============================================================================
+  ElastiCacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: !Sub "${ProjectName}-elasticache-subnet-group"
+      Description: Subnet group for ElastiCache
+      SubnetIds: !Ref CacheSubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-elasticache-subnet-group"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # PARAMETER GROUP
+  # =============================================================================
+  ElastiCacheParameterGroup:
+    Type: AWS::ElastiCache::ParameterGroup
+    Properties:
+      CacheParameterGroupFamily: valkey7
+      Description: Parameter group for Midaz ElastiCache
+      Properties:
+        latency-tracking: "yes"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-elasticache-params"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # ELASTICACHE REPLICATION GROUP
+  # =============================================================================
+  ElastiCacheReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub "${ProjectName}-valkey"
+      ReplicationGroupDescription: Valkey cluster for Midaz
+      Engine: valkey
+      EngineVersion: "7.2"
+      CacheNodeType: !Ref NodeType
+      NumCacheClusters: 2
+      CacheSubnetGroupName: !Ref ElastiCacheSubnetGroup
+      CacheParameterGroupName: !Ref ElastiCacheParameterGroup
+      SecurityGroupIds:
+        - !Ref ElastiCacheSecurityGroup
+      AutomaticFailoverEnabled: true
+      MultiAZEnabled: true
+      TransitEncryptionEnabled: true
+      TransitEncryptionMode: preferred
+      AtRestEncryptionEnabled: true
+      AutoMinorVersionUpgrade: true
+      PreferredMaintenanceWindow: "mon:00:00-mon:03:00"
+      SnapshotRetentionLimit: 7
+      SnapshotWindow: "05:00-09:00"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-valkey"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  PrimaryEndpoint:
+    Description: ElastiCache Primary Endpoint
+    Value: !GetAtt ElastiCacheReplicationGroup.PrimaryEndPoint.Address
+
+  PrimaryPort:
+    Description: ElastiCache Primary Port
+    Value: !GetAtt ElastiCacheReplicationGroup.PrimaryEndPoint.Port
+
+  ReaderEndpoint:
+    Description: ElastiCache Reader Endpoint
+    Value: !GetAtt ElastiCacheReplicationGroup.ReaderEndPoint.Address
+
+  SecurityGroupId:
+    Description: ElastiCache Security Group ID
+    Value: !Ref ElastiCacheSecurityGroup

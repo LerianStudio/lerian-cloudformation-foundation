@@ -1,0 +1,346 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS PostgreSQL Stack for Midaz Platform
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    ConstraintDescription: "Must begin with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  VpcCIDR:
+    Type: String
+    Description: VPC CIDR block for security group rules
+    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block (e.g., 10.0.0.0/16)"
+
+  DatabaseSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Database subnet IDs
+
+  InstanceClass:
+    Type: String
+    Description: RDS instance class
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t3.large
+      - db.m7g.large
+      - db.m7g.xlarge
+      - db.r7g.large
+      - db.r7g.xlarge
+
+  AllocatedStorage:
+    Type: Number
+    Description: Initial storage allocation in GB
+    MinValue: 20
+    MaxValue: 65536
+    ConstraintDescription: "Must be between 20 and 65536 GB"
+
+  MaxAllocatedStorage:
+    Type: Number
+    Description: Maximum storage for autoscaling in GB
+    MinValue: 20
+    MaxValue: 65536
+    ConstraintDescription: "Must be between 20 and 65536 GB"
+
+  DatabaseName:
+    Type: String
+    Description: Name of the initial database
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 64
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  MasterUsername:
+    Type: String
+    Description: Master username (sensitive)
+    NoEcho: true
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 63
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  CreateReadReplica:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Create a read replica
+    Default: "false"
+
+  ForceSSL:
+    Type: String
+    AllowedValues:
+      - "0"
+      - "1"
+    Default: "0"
+    Description: Force SSL/TLS connections to RDS (1 = enabled, 0 = disabled). Recommended for production with sensitive data.
+
+  MultiAZ:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: Enable Multi-AZ deployment for high availability. Recommended for production workloads.
+
+  DeletionProtection:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: Enable deletion protection to prevent accidental database deletion.
+
+  BackupRetentionPeriod:
+    Type: Number
+    MinValue: 1
+    MaxValue: 35
+    Default: 7
+    Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
+
+Conditions:
+  CreateReplica: !Equals [!Ref CreateReadReplica, "true"]
+
+Resources:
+  # =============================================================================
+  # SECRETS
+  # =============================================================================
+  RDSMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/rds-master-password"
+      Description: RDS Master Password
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-secret"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # SECURITY GROUP
+  # =============================================================================
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-rds-sg"
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref VpcCIDR
+          Description: PostgreSQL from VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-sg"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # SUBNET GROUP
+  # =============================================================================
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub "${ProjectName}-rds-subnet-group"
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds: !Ref DatabaseSubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-subnet-group"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # PARAMETER GROUP
+  # =============================================================================
+  RDSParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      DBParameterGroupName: !Sub "${ProjectName}-rds-params"
+      Family: postgres16
+      Description: Parameter group for Midaz RDS
+      Parameters:
+        max_connections: "100"
+        rds.force_ssl: !Ref ForceSSL
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-params"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # ENHANCED MONITORING ROLE
+  # =============================================================================
+  RDSMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-rds-monitoring-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+
+  # =============================================================================
+  # KMS KEY FOR ENCRYPTION
+  # =============================================================================
+  RDSKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "KMS key for ${ProjectName} RDS encryption"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow RDS to use the key
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-kms-key"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  RDSKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-rds"
+      TargetKeyId: !Ref RDSKMSKey
+
+  # =============================================================================
+  # PRIMARY RDS INSTANCE
+  # =============================================================================
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-rds"
+      DBInstanceClass: !Ref InstanceClass
+      Engine: postgres
+      EngineVersion: "16.8"
+      AllocatedStorage: !Ref AllocatedStorage
+      MaxAllocatedStorage: !Ref MaxAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt RDSKMSKey.Arn
+      DBName: !Ref DatabaseName
+      MasterUsername: !Sub "{{resolve:secretsmanager:${RDSMasterSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${RDSMasterSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBParameterGroupName: !Ref RDSParameterGroup
+      PubliclyAccessible: false
+      MultiAZ: !Ref MultiAZ
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PreferredBackupWindow: "03:00-06:00"
+      PreferredMaintenanceWindow: "Mon:00:00-Mon:03:00"
+      DeletionProtection: !Ref DeletionProtection
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      MonitoringInterval: 30
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      EnableCloudwatchLogsExports:
+        - postgresql
+        - upgrade
+      CopyTagsToSnapshot: true
+      EnableIAMDatabaseAuthentication: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =============================================================================
+  # READ REPLICA (Conditional)
+  # =============================================================================
+  RDSReadReplica:
+    Type: AWS::RDS::DBInstance
+    Condition: CreateReplica
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-rds-replica"
+      DBInstanceClass: !Ref InstanceClass
+      SourceDBInstanceIdentifier: !Ref RDSInstance
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      MonitoringInterval: 30
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-replica"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Type
+          Value: read-replica
+
+Outputs:
+  Endpoint:
+    Description: RDS Primary Endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  Port:
+    Description: RDS Port
+    Value: !GetAtt RDSInstance.Endpoint.Port
+
+  ReplicaEndpoint:
+    Condition: CreateReplica
+    Description: RDS Read Replica Endpoint
+    Value: !GetAtt RDSReadReplica.Endpoint.Address
+
+  SecretArn:
+    Description: RDS Password Secret ARN
+    Value: !Ref RDSMasterSecret
+
+  SecurityGroupId:
+    Description: RDS Security Group ID
+    Value: !Ref RDSSecurityGroup
+
+  KMSKeyArn:
+    Description: RDS KMS Key ARN for encryption
+    Value: !GetAtt RDSKMSKey.Arn

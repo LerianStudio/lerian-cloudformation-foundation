@@ -1,0 +1,30 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Terraform (if any)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# CloudFormation packaged templates
+packaged-*.yaml
+packaged-*.json
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# Lambda layer artifacts (build with scripts/build-lambda-layer.sh)
+kubectl-helm-layer.zip
+*.zip

@@ -1,0 +1,199 @@
+name: CI - Validate CloudFormation Templates
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'templates/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  commitlint:
+    name: Validate Commit Messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install commitlint
+        run: |
+          npm install --save-dev @commitlint/cli @commitlint/config-conventional
+
+      - name: Validate commits
+        run: |
+          npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+  lint:
+    name: Lint Templates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Run cfn-lint
+        run: |
+          cfn-lint templates/*.yaml --format parseable
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: templates/
+          framework: cloudformation
+          soft_fail: true
+          output_format: sarif
+          output_file_path: results.sarif
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+  validate:
+    name: Validate Templates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Validate YAML syntax
+        run: |
+          python << 'EOF'
+          import yaml
+          import glob
+          import sys
+
+          print("Validating YAML syntax...")
+          errors = []
+
+          for f in sorted(glob.glob('templates/*.yaml')):
+              try:
+                  with open(f) as file:
+                      data = yaml.safe_load(file)
+
+                  # Check required CloudFormation structure
+                  if 'AWSTemplateFormatVersion' not in data:
+                      errors.append(f'{f}: Missing AWSTemplateFormatVersion')
+                  if 'Description' not in data:
+                      errors.append(f'{f}: Missing Description')
+                  if 'Resources' not in data:
+                      errors.append(f'{f}: Missing Resources section')
+
+                  print(f'  ✓ {f}')
+              except Exception as e:
+                  errors.append(f'{f}: {e}')
+                  print(f'  ✗ {f}: {e}')
+
+          if errors:
+              print("\nErrors found:")
+              for e in errors:
+                  print(f"  - {e}")
+              sys.exit(1)
+
+          print("\n✓ All templates valid!")
+          EOF
+
+      - name: Check Marketplace compliance
+        run: |
+          python << 'EOF'
+          import yaml
+          import glob
+          import sys
+
+          print("Checking AWS Marketplace compliance...")
+          errors = []
+          warnings = []
+
+          # Check master template
+          with open('templates/midaz-complete.yaml') as f:
+              master = yaml.safe_load(f)
+
+          params = master.get('Parameters', {})
+
+          # Required Marketplace parameters
+          required_params = ['MPS3BucketName', 'MPS3BucketRegion', 'MPS3KeyPrefix']
+          for p in required_params:
+              if p not in params:
+                  errors.append(f'Missing required Marketplace parameter: {p}')
+              else:
+                  print(f'  ✓ {p} found')
+
+          # Check TemplateURL format in nested stacks
+          resources = master.get('Resources', {})
+          for name, resource in resources.items():
+              if resource.get('Type') == 'AWS::CloudFormation::Stack':
+                  props = resource.get('Properties', {})
+                  template_url = props.get('TemplateURL', '')
+                  if isinstance(template_url, str):
+                      if template_url.startswith('./') or template_url.startswith('../'):
+                          errors.append(f'{name}: TemplateURL uses relative path. Must use S3 URL.')
+                      else:
+                          print(f'  ✓ {name} uses S3 TemplateURL')
+
+          # Check for NoEcho on sensitive parameters
+          sensitive_keywords = ['password', 'secret', 'key', 'username']
+          for pname, pconfig in params.items():
+              pname_lower = pname.lower()
+              if any(kw in pname_lower for kw in sensitive_keywords):
+                  if not pconfig.get('NoEcho'):
+                      warnings.append(f'{pname}: Sensitive parameter should have NoEcho: true')
+                  else:
+                      print(f'  ✓ {pname} has NoEcho')
+
+          # Check all parameters have ConstraintDescription where needed
+          for pname, pconfig in params.items():
+              if pconfig.get('AllowedPattern') and not pconfig.get('ConstraintDescription'):
+                  warnings.append(f'{pname}: Has AllowedPattern but missing ConstraintDescription')
+
+          if errors:
+              print("\n❌ Errors:")
+              for e in errors:
+                  print(f"  - {e}")
+
+          if warnings:
+              print("\n⚠️  Warnings:")
+              for w in warnings:
+                  print(f"  - {w}")
+
+          if errors:
+              sys.exit(1)
+
+          print("\n✓ Marketplace compliance check passed!")
+          EOF
+

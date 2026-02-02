@@ -1,0 +1,588 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Load Balancer Controller for EKS - Deployed via Lambda Custom Resource
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    ConstraintDescription: "Must begin with a lowercase letter and contain only lowercase letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  ClusterName:
+    Type: String
+    Description: EKS Cluster Name
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and hyphens"
+
+  OIDCProviderArn:
+    Type: String
+    Description: OIDC Provider ARN for IRSA
+    AllowedPattern: "^arn:aws:iam::[0-9]{12}:oidc-provider/.*$"
+    ConstraintDescription: "Must be a valid IAM OIDC Provider ARN"
+
+  ALBControllerVersion:
+    Type: String
+    Default: "1.13.3"
+    Description: AWS Load Balancer Controller Helm Chart Version
+    AllowedPattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    ConstraintDescription: "Must be a valid semantic version (e.g., 1.13.3)"
+
+Resources:
+  # =============================================================================
+  # ALB CONTROLLER IAM ROLE (IRSA)
+  # =============================================================================
+  ALBControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-alb-controller-role"
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "${OIDCProviderArn}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderHost}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller",
+                      "${OIDCProviderHost}:aud": "sts.amazonaws.com"
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderHost: !Select [1, !Split ["oidc-provider/", !Ref OIDCProviderArn]]
+      Policies:
+        - PolicyName: ALBControllerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # EC2 Permissions
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeAccountAttributes
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeVpcPeeringConnections
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeInstances
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeTags
+                  - ec2:DescribeCoipPools
+                  - ec2:GetCoipPoolUsage
+                Resource: "*"
+              # EC2 Security Group Management
+              - Effect: Allow
+                Action:
+                  - ec2:CreateSecurityGroup
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                Resource: !Sub "arn:aws:ec2:*:*:security-group/*"
+                Condition:
+                  StringEquals:
+                    ec2:CreateAction: CreateSecurityGroup
+                  "Null":
+                    aws:RequestTag/elbv2.k8s.aws/cluster: "false"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: !Sub "arn:aws:ec2:*:*:security-group/*"
+                Condition:
+                  "Null":
+                    aws:RequestTag/elbv2.k8s.aws/cluster: "true"
+                    aws:ResourceTag/elbv2.k8s.aws/cluster: "false"
+              - Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:DeleteSecurityGroup
+                Resource: "*"
+                Condition:
+                  "Null":
+                    aws:ResourceTag/elbv2.k8s.aws/cluster: "false"
+              # ELBv2 Permissions
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeLoadBalancerAttributes
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:DescribeListenerAttributes
+                  - elasticloadbalancing:DescribeListenerCertificates
+                  - elasticloadbalancing:DescribeSSLPolicies
+                  - elasticloadbalancing:DescribeRules
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetGroupAttributes
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:DescribeTags
+                  - elasticloadbalancing:DescribeTrustStores
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:CreateLoadBalancer
+                  - elasticloadbalancing:CreateTargetGroup
+                Resource: "*"
+                Condition:
+                  "Null":
+                    aws:RequestTag/elbv2.k8s.aws/cluster: "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:CreateListener
+                  - elasticloadbalancing:DeleteListener
+                  - elasticloadbalancing:CreateRule
+                  - elasticloadbalancing:DeleteRule
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:AddTags
+                  - elasticloadbalancing:RemoveTags
+                Resource:
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*"
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*"
+                Condition:
+                  "Null":
+                    aws:RequestTag/elbv2.k8s.aws/cluster: "true"
+                    aws:ResourceTag/elbv2.k8s.aws/cluster: "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:AddTags
+                  - elasticloadbalancing:RemoveTags
+                Resource:
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*"
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*"
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*"
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:ModifyLoadBalancerAttributes
+                  - elasticloadbalancing:SetIpAddressType
+                  - elasticloadbalancing:SetSecurityGroups
+                  - elasticloadbalancing:SetSubnets
+                  - elasticloadbalancing:DeleteLoadBalancer
+                  - elasticloadbalancing:ModifyTargetGroup
+                  - elasticloadbalancing:ModifyTargetGroupAttributes
+                  - elasticloadbalancing:DeleteTargetGroup
+                Resource: "*"
+                Condition:
+                  "Null":
+                    aws:ResourceTag/elbv2.k8s.aws/cluster: "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:AddTags
+                Resource:
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*"
+                  - !Sub "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*"
+                Condition:
+                  StringEquals:
+                    elasticloadbalancing:CreateAction:
+                      - CreateTargetGroup
+                      - CreateLoadBalancer
+                  "Null":
+                    aws:RequestTag/elbv2.k8s.aws/cluster: "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                Resource: !Sub "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:SetWebAcl
+                  - elasticloadbalancing:ModifyListener
+                  - elasticloadbalancing:AddListenerCertificates
+                  - elasticloadbalancing:RemoveListenerCertificates
+                  - elasticloadbalancing:ModifyRule
+                Resource: "*"
+              # IAM for Service Linked Role
+              - Effect: Allow
+                Action:
+                  - iam:CreateServiceLinkedRole
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:AWSServiceName: elasticloadbalancing.amazonaws.com
+              # Cognito (optional, for auth)
+              - Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPoolClient
+                Resource: "*"
+              # ACM
+              - Effect: Allow
+                Action:
+                  - acm:ListCertificates
+                  - acm:DescribeCertificate
+                  - acm:GetCertificate
+                Resource: "*"
+              # WAFv2 (optional)
+              - Effect: Allow
+                Action:
+                  - wafv2:GetWebACL
+                  - wafv2:GetWebACLForResource
+                  - wafv2:AssociateWebACL
+                  - wafv2:DisassociateWebACL
+                Resource: "*"
+              # WAF Regional (optional)
+              - Effect: Allow
+                Action:
+                  - waf-regional:GetWebACL
+                  - waf-regional:GetWebACLForResource
+                  - waf-regional:AssociateWebACL
+                  - waf-regional:DisassociateWebACL
+                Resource: "*"
+              # Shield (optional)
+              - Effect: Allow
+                Action:
+                  - shield:GetSubscriptionState
+                  - shield:DescribeProtection
+                  - shield:CreateProtection
+                  - shield:DeleteProtection
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-alb-controller-role"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # LAMBDA EXECUTION ROLE FOR DEPLOYER
+  # =============================================================================
+  ALBControllerDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-alb-controller-deployer-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EKSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                  - eks:ListClusters
+                Resource: !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # =============================================================================
+  # EKS ACCESS ENTRY FOR LAMBDA ROLE
+  # =============================================================================
+  ALBControllerDeployerAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt ALBControllerDeployerRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - AccessScope:
+            Type: cluster
+          PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+  # =============================================================================
+  # LAMBDA FUNCTION FOR ALB CONTROLLER DEPLOYMENT
+  # =============================================================================
+  ALBControllerDeployerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-alb-controller-deployer"
+      Description: Deploys AWS Load Balancer Controller to EKS cluster
+      Runtime: python3.11
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 1024
+      Role: !GetAtt ALBControllerDeployerRole.Arn
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ClusterName
+          VPC_ID: !Ref VpcId
+          REGION: !Ref AWS::Region
+          CHART_VERSION: !Ref ALBControllerVersion
+          SERVICE_ACCOUNT_ROLE_ARN: !GetAtt ALBControllerRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          import subprocess
+          import base64
+          import urllib.request
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def send_response(event, context, status, data=None, reason=None):
+              response_body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': event.get('PhysicalResourceId', context.log_stream_name),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+
+              json_body = json.dumps(response_body).encode('utf-8')
+              req = urllib.request.Request(event['ResponseURL'], data=json_body, method='PUT')
+              req.add_header('Content-Type', '')
+              req.add_header('Content-Length', len(json_body))
+
+              try:
+                  urllib.request.urlopen(req)
+                  logger.info(f"Response sent: {status}")
+              except Exception as e:
+                  logger.error(f"Failed to send response: {e}")
+
+          def get_eks_token(cluster_name):
+              from botocore.signers import RequestSigner
+              from botocore.model import ServiceId
+
+              STS_TOKEN_EXPIRES_IN = 60
+              session = boto3.Session()
+              region = session.region_name
+
+              service_id = ServiceId('sts')
+              signer = RequestSigner(
+                  service_id,
+                  region,
+                  'sts',
+                  'v4',
+                  session.get_credentials(),
+                  session.events
+              )
+
+              params = {
+                  'method': 'GET',
+                  'url': f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15',
+                  'body': {},
+                  'headers': {
+                      'x-k8s-aws-id': cluster_name
+                  },
+                  'context': {}
+              }
+
+              url = signer.generate_presigned_url(
+                  params,
+                  region_name=region,
+                  expires_in=STS_TOKEN_EXPIRES_IN,
+                  operation_name=''
+              )
+
+              token = 'k8s-aws-v1.' + base64.urlsafe_b64encode(url.encode('utf-8')).decode('utf-8').rstrip('=')
+              return token
+
+          def setup_kubeconfig():
+              cluster_name = os.environ['CLUSTER_NAME']
+
+              eks = boto3.client('eks')
+              cluster = eks.describe_cluster(name=cluster_name)['cluster']
+
+              token = get_eks_token(cluster_name)
+
+              kubeconfig_yaml = f'''apiVersion: v1
+          kind: Config
+          clusters:
+          - name: {cluster_name}
+            cluster:
+              server: {cluster['endpoint']}
+              certificate-authority-data: {cluster['certificateAuthority']['data']}
+          contexts:
+          - name: {cluster_name}
+            context:
+              cluster: {cluster_name}
+              user: aws
+          current-context: {cluster_name}
+          users:
+          - name: aws
+            user:
+              token: {token}
+          '''
+
+              kubeconfig_path = '/tmp/kubeconfig'
+              with open(kubeconfig_path, 'w') as f:
+                  f.write(kubeconfig_yaml)
+
+              os.environ['KUBECONFIG'] = kubeconfig_path
+              return kubeconfig_path
+
+          def run_command(cmd):
+              logger.info(f"Running: {' '.join(cmd)}")
+              result = subprocess.run(cmd, capture_output=True, text=True)
+              logger.info(f"stdout: {result.stdout}")
+              if result.returncode != 0:
+                  logger.error(f"stderr: {result.stderr}")
+                  raise Exception(f"Command failed: {result.stderr}")
+              return result.stdout
+
+          def install_tools():
+              import urllib.request
+              import tarfile
+              import stat
+
+              tmp = '/tmp'
+
+              os.environ['HOME'] = tmp
+              os.environ['HELM_CACHE_HOME'] = f'{tmp}/.helm/cache'
+              os.environ['HELM_CONFIG_HOME'] = f'{tmp}/.helm/config'
+              os.environ['HELM_DATA_HOME'] = f'{tmp}/.helm/data'
+
+              os.makedirs(f'{tmp}/.helm/cache', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/config', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/data', exist_ok=True)
+
+              kubectl_path = f'{tmp}/kubectl'
+              if not os.path.exists(kubectl_path):
+                  logger.info("Downloading kubectl...")
+                  kubectl_url = 'https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl'
+                  urllib.request.urlretrieve(kubectl_url, kubectl_path)
+                  os.chmod(kubectl_path, os.stat(kubectl_path).st_mode | stat.S_IEXEC)
+
+              helm_path = f'{tmp}/helm'
+              if not os.path.exists(helm_path):
+                  logger.info("Downloading helm...")
+                  helm_url = 'https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz'
+                  helm_tar = f'{tmp}/helm.tar.gz'
+                  urllib.request.urlretrieve(helm_url, helm_tar)
+                  with tarfile.open(helm_tar, 'r:gz') as tar:
+                      tar.extractall(tmp)
+                  os.rename(f'{tmp}/linux-amd64/helm', helm_path)
+                  os.chmod(helm_path, os.stat(helm_path).st_mode | stat.S_IEXEC)
+
+              os.environ['PATH'] = f"{tmp}:{os.environ.get('PATH', '')}"
+
+              return kubectl_path, helm_path
+
+          def helm_install():
+              cluster_name = os.environ['CLUSTER_NAME']
+              vpc_id = os.environ['VPC_ID']
+              region = os.environ['REGION']
+              version = os.environ['CHART_VERSION']
+              role_arn = os.environ['SERVICE_ACCOUNT_ROLE_ARN']
+
+              # Add EKS Helm repo
+              run_command(['helm', 'repo', 'add', 'eks', 'https://aws.github.io/eks-charts'])
+              run_command(['helm', 'repo', 'update'])
+
+              # Install ALB Controller
+              run_command([
+                  'helm', 'upgrade', '--install', 'aws-load-balancer-controller',
+                  'eks/aws-load-balancer-controller',
+                  '--version', version,
+                  '--namespace', 'kube-system',
+                  '--set', f'clusterName={cluster_name}',
+                  '--set', f'vpcId={vpc_id}',
+                  '--set', f'region={region}',
+                  '--set', f'serviceAccount.create=true',
+                  '--set', f'serviceAccount.name=aws-load-balancer-controller',
+                  '--set', f'serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn={role_arn}',
+                  '--wait',
+                  '--timeout', '10m'
+              ])
+
+          def helm_uninstall():
+              try:
+                  run_command(['helm', 'uninstall', 'aws-load-balancer-controller', '-n', 'kube-system'])
+              except:
+                  logger.info("Helm release may not exist")
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(event)}")
+
+              try:
+                  request_type = event['RequestType']
+
+                  install_tools()
+                  setup_kubeconfig()
+
+                  if request_type == 'Delete':
+                      helm_uninstall()
+                      send_response(event, context, 'SUCCESS', {'Message': 'ALB Controller deleted'})
+                      return
+
+                  helm_install()
+
+                  send_response(event, context, 'SUCCESS', {
+                      'ReleaseName': 'aws-load-balancer-controller',
+                      'Namespace': 'kube-system',
+                      'ChartVersion': os.environ['CHART_VERSION']
+                  })
+
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  send_response(event, context, 'FAILED', reason=str(e))
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-alb-controller-deployer"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # CUSTOM RESOURCE TO TRIGGER ALB CONTROLLER DEPLOYMENT
+  # =============================================================================
+  ALBControllerDeployment:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - ALBControllerDeployerFunction
+      - ALBControllerDeployerAccessEntry
+      - ALBControllerRole
+    Properties:
+      ServiceToken: !GetAtt ALBControllerDeployerFunction.Arn
+      ChartVersion: !Ref ALBControllerVersion
+      ClusterName: !Ref ClusterName
+      VpcId: !Ref VpcId
+      # Force update hash
+      ConfigHash: !Base64
+        Fn::Sub: "${ClusterName}-${VpcId}-${ALBControllerVersion}"
+
+Outputs:
+  ALBControllerRoleArn:
+    Description: ALB Controller IAM Role ARN
+    Value: !GetAtt ALBControllerRole.Arn
+
+  ALBControllerDeployerFunctionArn:
+    Description: ALB Controller Deployer Lambda Function ARN
+    Value: !GetAtt ALBControllerDeployerFunction.Arn
+
+  ALBControllerLogGroup:
+    Description: CloudWatch Log Group for ALB Controller Deployer
+    Value: !Sub "/aws/lambda/${ProjectName}-alb-controller-deployer"
