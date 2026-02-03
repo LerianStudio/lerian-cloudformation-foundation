@@ -980,7 +980,6 @@ Resources:
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !GetAtt EKSStack.Outputs.ClusterName
         ClusterSecurityGroupId: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
-        OIDCProviderArn: !GetAtt EKSStack.Outputs.OIDCProviderArn
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
         # Database connections
