@@ -148,7 +148,7 @@ Metadata:
       RDSMaxAllocatedStorage:
         default: "Maximum Storage (GB)"
       RDSDatabaseName:
-        default: "Database Name"
+        default: "Database RDS Name"
       RDSMasterUsername:
         default: "Master Username"
       CreateReadReplica:

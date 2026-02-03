@@ -9,8 +9,8 @@ on:
       - 'infrastructure/**'
 
 env:
-  AWS_REGION: us-east-1
-  S3_BUCKET: midaz-cloudformation-templates
+  AWS_REGION: sa-east-1
+  S3_BUCKET: midaz-cloudformation-foundation
 
 permissions:
   contents: write
