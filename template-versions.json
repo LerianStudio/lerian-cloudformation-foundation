@@ -1,18 +1,18 @@
 {
   "description": "Current versions of each template. Updated automatically by CI/CD.",
   "templates": {
-    "vpc": "0.1.0",
-    "eks": "0.1.0",
-    "rds": "0.1.0",
-    "documentdb": "0.1.0",
-    "elasticache": "0.1.0",
-    "amazonmq": "0.1.0",
-    "route53": "0.1.0",
-    "alb-controller": "0.1.0",
-    "external-dns": "0.1.0",
+    "vpc": "0.1.1",
+    "eks": "0.1.1",
+    "rds": "0.1.1",
+    "documentdb": "0.1.1",
+    "elasticache": "0.1.1",
+    "amazonmq": "0.1.1",
+    "route53": "0.1.1",
+    "alb-controller": "0.1.1",
+    "external-dns": "0.1.1",
     "midaz-helm": "0.1.0",
-    "midaz-infrastructure": "0.1.0",
+    "midaz-infrastructure": "0.1.1",
     "midaz-application": "0.1.0",
-    "midaz-complete": "0.1.1"
+    "midaz-complete": "0.1.2"
   }
 }
