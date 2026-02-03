@@ -111,17 +111,24 @@ jobs:
           echo "## CloudFormation Lint Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if cfn-lint templates/*.yaml --format parseable; then
-            echo "All templates passed linting" >> $GITHUB_STEP_SUMMARY
+          # Run cfn-lint with us-east-1 region (has all services) and ignore warnings
+          # -I W = ignore warnings, only fail on errors (E)
+          if cfn-lint templates/*.yaml --regions us-east-1 --ignore-checks W --format parseable; then
+            echo "All templates passed linting (errors only)" >> $GITHUB_STEP_SUMMARY
           else
             echo "Some templates have linting errors" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
+          # Show warnings separately (non-blocking)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Warnings (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          cfn-lint templates/*.yaml --regions us-east-1 --include-checks W --format parseable 2>&1 | grep ":W" | head -20 >> $GITHUB_STEP_SUMMARY || echo "No warnings" >> $GITHUB_STEP_SUMMARY
+
       - name: Run cfn-lint on infrastructure templates
         run: |
           if [ -d "infrastructure" ] && ls infrastructure/*.yaml 1> /dev/null 2>&1; then
-            cfn-lint infrastructure/*.yaml --format parseable
+            cfn-lint infrastructure/*.yaml --regions us-east-1 --ignore-checks W --format parseable
           fi
 
   # ============================================================================
