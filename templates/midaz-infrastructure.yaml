@@ -306,10 +306,10 @@ Parameters:
     Type: String
     Default: midaz
     Description: Project name used for resource naming
-    AllowedPattern: "^[a-z][a-z0-9-]*$"
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
     MinLength: 3
-    MaxLength: 24
-    ConstraintDescription: "Must begin with a lowercase letter, contain only lowercase letters, numbers, and hyphens, and be 3-24 characters long"
+    MaxLength: 128
+    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-128 characters long"
 
   # Network
   VpcCIDR:
@@ -639,7 +639,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/vpc/${VPCTemplateVersion}/vpc.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcCIDR: !Ref VpcCIDR
         AvailabilityZone1: !Ref AvailabilityZone1
@@ -667,7 +667,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/rds/${RDSTemplateVersion}/rds.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         VpcCIDR: !Ref VpcCIDR
@@ -702,7 +702,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/documentdb/${DocumentDBTemplateVersion}/documentdb.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         VpcCIDR: !Ref VpcCIDR
@@ -732,7 +732,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/elasticache/${ElastiCacheTemplateVersion}/elasticache.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         VpcCIDR: !Ref VpcCIDR
@@ -758,7 +758,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/amazonmq/${AmazonMQTemplateVersion}/amazonmq.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         VpcCIDR: !Ref VpcCIDR
@@ -790,7 +790,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/eks/${EKSTemplateVersion}/eks.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
@@ -820,7 +820,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/route53/${Route53TemplateVersion}/route53.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}route53.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         DomainName: !Ref DomainName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
@@ -845,7 +845,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/alb-controller/${ALBControllerTemplateVersion}/alb-controller.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         ClusterName: !GetAtt EKSStack.Outputs.ClusterName
@@ -873,7 +873,7 @@ Resources:
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/external-dns/${ExternalDNSTemplateVersion}/external-dns.yaml"
         - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !GetAtt EKSStack.Outputs.ClusterName
         OIDCProviderArn: !GetAtt EKSStack.Outputs.OIDCProviderArn
@@ -892,8 +892,8 @@ Outputs:
   # STACK METADATA (for application stack reference)
   # =============================================================================
   ProjectName:
-    Description: Project name used in this deployment
-    Value: !Ref ProjectName
+    Description: Project name used in this deployment (stack name)
+    Value: !Ref AWS::StackName
     Export:
       Name: !Sub "${AWS::StackName}-ProjectName"
 
