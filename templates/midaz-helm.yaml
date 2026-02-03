@@ -66,7 +66,7 @@ Parameters:
 
   MidazChartVersion:
     Type: String
-    Default: "5.3.0"
+    Default: "5.5.1"
     Description: Midaz Helm Chart Version
 
   MidazNamespace:
