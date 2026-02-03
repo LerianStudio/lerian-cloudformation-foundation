@@ -146,6 +146,7 @@ jobs:
       - name: Upload Checkov SARIF
         uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true
         with:
           sarif_file: checkov-results.sarif
 
@@ -174,6 +175,26 @@ jobs:
           import glob
           import sys
 
+          # Add CloudFormation intrinsic function constructors
+          cfn_tags = ['!Ref', '!GetAtt', '!Sub', '!Join', '!Select', '!Split',
+                      '!If', '!Not', '!Equals', '!And', '!Or', '!Condition',
+                      '!Base64', '!Cidr', '!FindInMap', '!GetAZs', '!ImportValue',
+                      '!Transform', '!Length', '!ToJsonString']
+
+          def cfn_constructor(loader, tag_suffix, node):
+              if isinstance(node, yaml.ScalarNode):
+                  return {tag_suffix: loader.construct_scalar(node)}
+              elif isinstance(node, yaml.SequenceNode):
+                  return {tag_suffix: loader.construct_sequence(node)}
+              elif isinstance(node, yaml.MappingNode):
+                  return {tag_suffix: loader.construct_mapping(node)}
+
+          class CFNLoader(yaml.SafeLoader):
+              pass
+
+          for tag in cfn_tags:
+              CFNLoader.add_multi_constructor(tag, cfn_constructor)
+
           print("=" * 60)
           print("CloudFormation Template Validation")
           print("=" * 60)
@@ -185,7 +206,7 @@ jobs:
           for f in sorted(glob.glob('templates/*.yaml')):
               try:
                   with open(f) as file:
-                      data = yaml.safe_load(file)
+                      data = yaml.load(file, Loader=CFNLoader)
 
                   template_name = f.split('/')[-1]
 
@@ -204,7 +225,7 @@ jobs:
                   # Check Parameters have descriptions
                   params = data.get('Parameters', {})
                   for pname, pconfig in params.items():
-                      if not pconfig.get('Description'):
+                      if isinstance(pconfig, dict) and not pconfig.get('Description'):
                           warnings.append(f'{template_name}: Parameter {pname} missing Description')
 
                   print(f'  [PASS] {template_name}')
@@ -261,6 +282,26 @@ jobs:
           import sys
           import os
 
+          # Add CloudFormation intrinsic function constructors
+          cfn_tags = ['!Ref', '!GetAtt', '!Sub', '!Join', '!Select', '!Split',
+                      '!If', '!Not', '!Equals', '!And', '!Or', '!Condition',
+                      '!Base64', '!Cidr', '!FindInMap', '!GetAZs', '!ImportValue',
+                      '!Transform', '!Length', '!ToJsonString']
+
+          def cfn_constructor(loader, tag_suffix, node):
+              if isinstance(node, yaml.ScalarNode):
+                  return {tag_suffix: loader.construct_scalar(node)}
+              elif isinstance(node, yaml.SequenceNode):
+                  return {tag_suffix: loader.construct_sequence(node)}
+              elif isinstance(node, yaml.MappingNode):
+                  return {tag_suffix: loader.construct_mapping(node)}
+
+          class CFNLoader(yaml.SafeLoader):
+              pass
+
+          for tag in cfn_tags:
+              CFNLoader.add_multi_constructor(tag, cfn_constructor)
+
           print("=" * 60)
           print("AWS Marketplace Compliance Check")
           print("=" * 60)
@@ -274,7 +315,7 @@ jobs:
               errors.append(f'Master template not found: {master_file}')
           else:
               with open(master_file) as f:
-                  master = yaml.safe_load(f)
+                  master = yaml.load(f, Loader=CFNLoader)
 
               params = master.get('Parameters', {})
 
@@ -322,7 +363,7 @@ jobs:
           for f in sorted(glob.glob('templates/*.yaml')):
               template_name = f.split('/')[-1]
               with open(f) as file:
-                  data = yaml.safe_load(file)
+                  data = yaml.load(file, Loader=CFNLoader)
 
               resources = data.get('Resources', {})
               for rname, rconfig in resources.items():
