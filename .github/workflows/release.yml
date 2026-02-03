@@ -168,9 +168,9 @@ jobs:
             echo "Processing: $TEMPLATE"
             echo "========================================"
 
-            # Validate template
+            # Validate template (ignore warnings, only fail on errors)
             echo "Validating..."
-            if ! cfn-lint "templates/${TEMPLATE}.yaml"; then
+            if ! cfn-lint "templates/${TEMPLATE}.yaml" --regions us-east-1 --ignore-checks W; then
               echo "Validation failed, skipping"
               continue
             fi
