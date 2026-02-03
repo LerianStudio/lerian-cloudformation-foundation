@@ -45,7 +45,7 @@ jobs:
     name: Detect Changed Paths
     needs: check-skip
     if: needs.check-skip.outputs.should_skip != 'true'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/changed-paths.yml@v1.3.5
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/changed-paths.yml@v1.10.2
     with:
       filter_paths: '["templates"]'
       path_level: 1
@@ -475,7 +475,7 @@ jobs:
     name: Notify
     needs: [release-templates, release-summary]
     if: always() && needs.release-templates.result != 'skipped'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.3.5
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.10.2
     with:
       status: ${{ needs.release-templates.result }}
       workflow_name: "CloudFormation Release"

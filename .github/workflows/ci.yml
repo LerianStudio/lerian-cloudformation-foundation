@@ -19,6 +19,7 @@ permissions:
   pull-requests: write
   issues: write
   security-events: write
+  id-token: write
 
 jobs:
   # ============================================================================
@@ -27,7 +28,7 @@ jobs:
   pr-validation:
     name: PR Validation
     if: github.event_name == 'pull_request'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-validation.yml@v1.3.5
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-validation.yml@v1.10.2
     with:
       runner_type: blacksmith-4vcpu-ubuntu-2404
       pr_title_types: |
@@ -76,7 +77,7 @@ jobs:
   security-scan:
     name: Security Scan
     if: github.event_name == 'pull_request'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-security-scan.yml@v1.3.5
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-security-scan.yml@v1.10.2
     with:
       runner_type: blacksmith-4vcpu-ubuntu-2404
       filter_paths: |
@@ -425,7 +426,7 @@ jobs:
     name: Notify
     needs: [ci-summary]
     if: always() && github.event_name == 'pull_request'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.3.5
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.10.2
     with:
       status: ${{ needs.ci-summary.result }}
       workflow_name: "CloudFormation CI"
