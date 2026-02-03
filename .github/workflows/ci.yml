@@ -7,38 +7,91 @@ on:
       - develop
     paths:
       - 'templates/**'
+      - 'infrastructure/**'
       - '.github/workflows/**'
   pull_request:
     branches:
       - main
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  security-events: write
 
 jobs:
-  commitlint:
-    name: Validate Commit Messages
-    runs-on: ubuntu-latest
+  # ============================================================================
+  # Shared Workflow: PR Validation
+  # ============================================================================
+  pr-validation:
+    name: PR Validation
     if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-validation.yml@v1.3.5
+    with:
+      runner_type: blacksmith-4vcpu-ubuntu-2404
+      pr_title_types: |
+        feat
+        fix
+        docs
+        style
+        refactor
+        perf
+        test
+        chore
+        ci
+        build
+        revert
+      pr_title_scopes: |
+        vpc
+        eks
+        rds
+        documentdb
+        elasticache
+        amazonmq
+        route53
+        alb-controller
+        external-dns
+        midaz-helm
+        midaz-infrastructure
+        midaz-application
+        midaz-complete
+        scripts
+        ci
+        docs
+        infra
+      require_scope: false
+      min_description_length: 30
+      check_changelog: true
+      enable_auto_labeler: true
+      labeler_config_path: '.github/labeler.yml'
+      enforce_source_branches: true
+      allowed_source_branches: 'develop|release/*|hotfix/*|feature/*|fix/*'
+      target_branches_for_source_check: 'main'
+    secrets: inherit
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+  # ============================================================================
+  # Shared Workflow: Security Scan
+  # ============================================================================
+  security-scan:
+    name: Security Scan
+    if: github.event_name == 'pull_request'
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-security-scan.yml@v1.3.5
+    with:
+      runner_type: blacksmith-4vcpu-ubuntu-2404
+      filter_paths: |
+        templates
+        infrastructure
+      path_level: '1'
+      enable_docker_scan: false
+    secrets: inherit
 
-      - name: Install commitlint
-        run: |
-          npm install --save-dev @commitlint/cli @commitlint/config-conventional
-
-      - name: Validate commits
-        run: |
-          npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
-
-  lint:
-    name: Lint Templates
-    runs-on: ubuntu-latest
+  # ============================================================================
+  # CloudFormation-Specific: Template Linting
+  # ============================================================================
+  cfn-lint:
+    name: CloudFormation Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -46,40 +99,60 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install cfn-lint
         run: pip install cfn-lint
 
-      - name: Run cfn-lint
+      - name: Run cfn-lint on templates
         run: |
-          cfn-lint templates/*.yaml --format parseable
+          echo "## CloudFormation Lint Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
+          if cfn-lint templates/*.yaml --format parseable; then
+            echo "All templates passed linting" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Some templates have linting errors" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Run cfn-lint on infrastructure templates
+        run: |
+          if [ -d "infrastructure" ] && ls infrastructure/*.yaml 1> /dev/null 2>&1; then
+            cfn-lint infrastructure/*.yaml --format parseable
+          fi
+
+  # ============================================================================
+  # CloudFormation-Specific: Checkov Security Scan
+  # ============================================================================
+  checkov:
+    name: Checkov Security Scan
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run Checkov
+      - name: Run Checkov on templates
         uses: bridgecrewio/checkov-action@v12
         with:
           directory: templates/
           framework: cloudformation
           soft_fail: true
           output_format: sarif
-          output_file_path: results.sarif
+          output_file_path: checkov-results.sarif
 
-      - name: Upload SARIF
+      - name: Upload Checkov SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: results.sarif
+          sarif_file: checkov-results.sarif
 
-  validate:
+  # ============================================================================
+  # CloudFormation-Specific: Template Validation
+  # ============================================================================
+  validate-templates:
     name: Validate Templates
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -87,113 +160,275 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: pip install pyyaml
 
-      - name: Validate YAML syntax
+      - name: Validate YAML syntax and structure
         run: |
           python << 'EOF'
           import yaml
           import glob
           import sys
 
-          print("Validating YAML syntax...")
+          print("=" * 60)
+          print("CloudFormation Template Validation")
+          print("=" * 60)
+
           errors = []
+          warnings = []
+          validated = 0
 
           for f in sorted(glob.glob('templates/*.yaml')):
               try:
                   with open(f) as file:
                       data = yaml.safe_load(file)
 
+                  template_name = f.split('/')[-1]
+
                   # Check required CloudFormation structure
                   if 'AWSTemplateFormatVersion' not in data:
-                      errors.append(f'{f}: Missing AWSTemplateFormatVersion')
+                      errors.append(f'{template_name}: Missing AWSTemplateFormatVersion')
                   if 'Description' not in data:
-                      errors.append(f'{f}: Missing Description')
+                      errors.append(f'{template_name}: Missing Description')
                   if 'Resources' not in data:
-                      errors.append(f'{f}: Missing Resources section')
+                      errors.append(f'{template_name}: Missing Resources section')
 
-                  print(f'  ✓ {f}')
+                  # Check for Metadata (recommended for Marketplace)
+                  if 'Metadata' not in data:
+                      warnings.append(f'{template_name}: Missing Metadata section (recommended)')
+
+                  # Check Parameters have descriptions
+                  params = data.get('Parameters', {})
+                  for pname, pconfig in params.items():
+                      if not pconfig.get('Description'):
+                          warnings.append(f'{template_name}: Parameter {pname} missing Description')
+
+                  print(f'  [PASS] {template_name}')
+                  validated += 1
+
               except Exception as e:
                   errors.append(f'{f}: {e}')
-                  print(f'  ✗ {f}: {e}')
+                  print(f'  [FAIL] {f}: {e}')
+
+          print("")
+          print(f"Validated: {validated} templates")
+
+          if warnings:
+              print(f"\nWarnings ({len(warnings)}):")
+              for w in warnings[:10]:  # Show first 10
+                  print(f"  - {w}")
+              if len(warnings) > 10:
+                  print(f"  ... and {len(warnings) - 10} more")
 
           if errors:
-              print("\nErrors found:")
+              print(f"\nErrors ({len(errors)}):")
               for e in errors:
                   print(f"  - {e}")
               sys.exit(1)
 
-          print("\n✓ All templates valid!")
+          print("\n" + "=" * 60)
+          print("All templates validated successfully!")
+          print("=" * 60)
           EOF
 
-      - name: Check Marketplace compliance
+  # ============================================================================
+  # CloudFormation-Specific: AWS Marketplace Compliance
+  # ============================================================================
+  marketplace-compliance:
+    name: Marketplace Compliance
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Check AWS Marketplace compliance
         run: |
           python << 'EOF'
           import yaml
           import glob
           import sys
+          import os
 
-          print("Checking AWS Marketplace compliance...")
+          print("=" * 60)
+          print("AWS Marketplace Compliance Check")
+          print("=" * 60)
+
           errors = []
           warnings = []
 
           # Check master template
-          with open('templates/midaz-complete.yaml') as f:
-              master = yaml.safe_load(f)
+          master_file = 'templates/midaz-complete.yaml'
+          if not os.path.exists(master_file):
+              errors.append(f'Master template not found: {master_file}')
+          else:
+              with open(master_file) as f:
+                  master = yaml.safe_load(f)
 
-          params = master.get('Parameters', {})
+              params = master.get('Parameters', {})
 
-          # Required Marketplace parameters
-          required_params = ['MPS3BucketName', 'MPS3BucketRegion', 'MPS3KeyPrefix']
-          for p in required_params:
-              if p not in params:
-                  errors.append(f'Missing required Marketplace parameter: {p}')
-              else:
-                  print(f'  ✓ {p} found')
-
-          # Check TemplateURL format in nested stacks
-          resources = master.get('Resources', {})
-          for name, resource in resources.items():
-              if resource.get('Type') == 'AWS::CloudFormation::Stack':
-                  props = resource.get('Properties', {})
-                  template_url = props.get('TemplateURL', '')
-                  if isinstance(template_url, str):
-                      if template_url.startswith('./') or template_url.startswith('../'):
-                          errors.append(f'{name}: TemplateURL uses relative path. Must use S3 URL.')
-                      else:
-                          print(f'  ✓ {name} uses S3 TemplateURL')
-
-          # Check for NoEcho on sensitive parameters
-          sensitive_keywords = ['password', 'secret', 'key', 'username']
-          for pname, pconfig in params.items():
-              pname_lower = pname.lower()
-              if any(kw in pname_lower for kw in sensitive_keywords):
-                  if not pconfig.get('NoEcho'):
-                      warnings.append(f'{pname}: Sensitive parameter should have NoEcho: true')
+              # Required Marketplace parameters
+              required_params = ['MPS3BucketName', 'MPS3BucketRegion', 'MPS3KeyPrefix']
+              for p in required_params:
+                  if p not in params:
+                      errors.append(f'Missing required Marketplace parameter: {p}')
                   else:
-                      print(f'  ✓ {pname} has NoEcho')
+                      print(f'  [PASS] Required parameter: {p}')
 
-          # Check all parameters have ConstraintDescription where needed
-          for pname, pconfig in params.items():
-              if pconfig.get('AllowedPattern') and not pconfig.get('ConstraintDescription'):
-                  warnings.append(f'{pname}: Has AllowedPattern but missing ConstraintDescription')
+              # Check TemplateURL format in nested stacks
+              resources = master.get('Resources', {})
+              for name, resource in resources.items():
+                  if resource.get('Type') == 'AWS::CloudFormation::Stack':
+                      props = resource.get('Properties', {})
+                      template_url = props.get('TemplateURL', '')
+                      if isinstance(template_url, str):
+                          if template_url.startswith('./') or template_url.startswith('../'):
+                              errors.append(f'{name}: TemplateURL uses relative path. Must use S3 URL.')
+                          elif 'Sub' not in str(props.get('TemplateURL', {})):
+                              warnings.append(f'{name}: TemplateURL should use !Sub for dynamic S3 paths')
+                      else:
+                          print(f'  [PASS] Nested stack {name} uses S3 TemplateURL')
+
+              # Check for NoEcho on sensitive parameters
+              sensitive_keywords = ['password', 'secret', 'key', 'token', 'credential']
+              for pname, pconfig in params.items():
+                  pname_lower = pname.lower()
+                  if any(kw in pname_lower for kw in sensitive_keywords):
+                      if 'username' in pname_lower or 'keyprefix' in pname_lower:
+                          continue  # Skip false positives
+                      if not pconfig.get('NoEcho'):
+                          warnings.append(f'{pname}: Sensitive parameter should have NoEcho: true')
+                      else:
+                          print(f'  [PASS] Sensitive parameter {pname} has NoEcho')
+
+              # Check all parameters with AllowedPattern have ConstraintDescription
+              for pname, pconfig in params.items():
+                  if pconfig.get('AllowedPattern') and not pconfig.get('ConstraintDescription'):
+                      warnings.append(f'{pname}: Has AllowedPattern but missing ConstraintDescription')
+
+          # Check all templates for consistent tagging
+          print("\nChecking all templates for tagging consistency...")
+          for f in sorted(glob.glob('templates/*.yaml')):
+              template_name = f.split('/')[-1]
+              with open(f) as file:
+                  data = yaml.safe_load(file)
+
+              resources = data.get('Resources', {})
+              for rname, rconfig in resources.items():
+                  rtype = rconfig.get('Type', '')
+                  # Skip resources that don't support tags
+                  if any(skip in rtype for skip in ['Policy', 'Rule', 'Permission', 'Output']):
+                      continue
+                  props = rconfig.get('Properties', {})
+                  if 'Tags' not in props and 'AWS::' in rtype:
+                      # Check if it's a resource that typically supports tags
+                      taggable = ['EC2', 'RDS', 'EKS', 'ElastiCache', 'AmazonMQ', 'S3', 'KMS', 'IAM::Role']
+                      if any(t in rtype for t in taggable):
+                          warnings.append(f'{template_name}: Resource {rname} ({rtype}) may be missing Tags')
+
+          print("")
 
           if errors:
-              print("\n❌ Errors:")
+              print(f"ERRORS ({len(errors)}):")
               for e in errors:
-                  print(f"  - {e}")
+                  print(f"  [ERROR] {e}")
 
           if warnings:
-              print("\n⚠️  Warnings:")
-              for w in warnings:
-                  print(f"  - {w}")
+              print(f"\nWARNINGS ({len(warnings)}):")
+              for w in warnings[:15]:
+                  print(f"  [WARN] {w}")
+              if len(warnings) > 15:
+                  print(f"  ... and {len(warnings) - 15} more")
 
           if errors:
+              print("\nMarketplace compliance check FAILED")
               sys.exit(1)
 
-          print("\n✓ Marketplace compliance check passed!")
+          print("\n" + "=" * 60)
+          print("Marketplace compliance check PASSED")
+          print("=" * 60)
           EOF
 
+  # ============================================================================
+  # CloudFormation-Specific: Multi-Region Validation
+  # ============================================================================
+  multi-region-lint:
+    name: Multi-Region Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    strategy:
+      matrix:
+        region:
+          - us-east-1
+          - us-west-2
+          - eu-west-1
+          - eu-central-1
+          - ap-southeast-1
+          - ap-northeast-1
+          - sa-east-1
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Validate templates for ${{ matrix.region }}
+        run: |
+          echo "Validating templates for region: ${{ matrix.region }}"
+          cfn-lint templates/*.yaml --regions ${{ matrix.region }} --format parseable || true
+
+  # ============================================================================
+  # Summary Job
+  # ============================================================================
+  ci-summary:
+    name: CI Summary
+    needs: [cfn-lint, checkov, validate-templates, marketplace-compliance]
+    if: always()
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Check results
+        run: |
+          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CloudFormation Lint | ${{ needs.cfn-lint.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Checkov Security | ${{ needs.checkov.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Template Validation | ${{ needs.validate-templates.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Marketplace Compliance | ${{ needs.marketplace-compliance.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any check failed
+        if: |
+          needs.cfn-lint.result == 'failure' ||
+          needs.validate-templates.result == 'failure' ||
+          needs.marketplace-compliance.result == 'failure'
+        run: exit 1
+
+  # ============================================================================
+  # Shared Workflow: Slack Notification
+  # ============================================================================
+  notify:
+    name: Notify
+    needs: [ci-summary]
+    if: always() && github.event_name == 'pull_request'
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.3.5
+    with:
+      status: ${{ needs.ci-summary.result }}
+      workflow_name: "CloudFormation CI"
+      failed_jobs: ${{ needs.ci-summary.result == 'failure' && 'CI Validation' || '' }}
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

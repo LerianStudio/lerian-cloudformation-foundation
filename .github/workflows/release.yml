@@ -1,4 +1,4 @@
-name: Auto Release
+name: Release
 
 on:
   push:
@@ -6,34 +6,88 @@ on:
       - main
     paths:
       - 'templates/**'
+      - 'infrastructure/**'
 
 env:
   AWS_REGION: us-east-1
   S3_BUCKET: midaz-cloudformation-templates
 
-jobs:
-  detect-changes:
-    name: Detect Changed Templates
-    runs-on: ubuntu-latest
-    outputs:
-      changed_templates: ${{ steps.detect.outputs.changed_templates }}
-      has_changes: ${{ steps.detect.outputs.has_changes }}
-      bump_type: ${{ steps.detect.outputs.bump_type }}
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
 
+jobs:
+  # ============================================================================
+  # Check Skip Conditions
+  # ============================================================================
+  check-skip:
+    name: Check Skip
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      should_skip: ${{ steps.check.outputs.should_skip }}
+    steps:
+      - name: Check if should skip
+        id: check
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if echo "$COMMIT_MSG" | grep -qiE '\[skip ci\]|chore\(release\)|chore: update template versions'; then
+            echo "should_skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_skip=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ============================================================================
+  # Shared Workflow: Detect Changed Paths
+  # ============================================================================
+  detect-changed-paths:
+    name: Detect Changed Paths
+    needs: check-skip
+    if: needs.check-skip.outputs.should_skip != 'true'
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/changed-paths.yml@v1.3.5
+    with:
+      filter_paths: '["templates"]'
+      path_level: 1
+      runner_type: blacksmith-4vcpu-ubuntu-2404
+
+  # ============================================================================
+  # Process Changes
+  # ============================================================================
+  detect-changes:
+    name: Process Changes
+    needs: [check-skip, detect-changed-paths]
+    if: needs.check-skip.outputs.should_skip != 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      changed_templates: ${{ steps.process.outputs.changed_templates }}
+      has_changes: ${{ steps.process.outputs.has_changes }}
+      bump_type: ${{ steps.process.outputs.bump_type }}
+      should_skip: ${{ needs.check-skip.outputs.should_skip }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect changed templates and bump type
-        id: detect
+      - name: Process detected changes
+        id: process
+        env:
+          HAS_PATH_CHANGES: ${{ needs.detect-changed-paths.outputs.has_changes }}
         run: |
-          # Get changed files
+          # Check if shared workflow detected changes in templates
+          if [ "$HAS_PATH_CHANGES" != "true" ]; then
+            echo "No template changes detected by shared workflow"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "changed_templates=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get specific changed template files
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- templates/*.yaml 2>/dev/null || echo "")
 
           if [ -z "$CHANGED_FILES" ]; then
-            echo "No template changes detected"
+            echo "No template .yaml files changed"
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "changed_templates=[]" >> $GITHUB_OUTPUT
             exit 0
@@ -61,15 +115,19 @@ jobs:
           echo "Bump type: $BUMP_TYPE"
           echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
 
-  release:
-    name: Release Templates & Bundle
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-
+  # ============================================================================
+  # Release Templates
+  # ============================================================================
+  release-templates:
+    name: Release Templates
+    needs: [check-skip, detect-changes]
+    if: needs.detect-changes.outputs.has_changes == 'true' && needs.check-skip.outputs.should_skip != 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      released_templates: ${{ steps.release.outputs.released_templates }}
+      template_tags: ${{ steps.release.outputs.template_tags }}
+      bundle_version: ${{ steps.bundle.outputs.version }}
+      bundle_tag: ${{ steps.bundle.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -80,7 +138,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: pip install cfn-lint pyyaml
@@ -92,7 +150,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Release individual templates
-        id: release-templates
+        id: release
         env:
           CHANGED_TEMPLATES: ${{ needs.detect-changes.outputs.changed_templates }}
           BUMP_TYPE: ${{ needs.detect-changes.outputs.bump_type }}
@@ -106,14 +164,14 @@ jobs:
 
           for TEMPLATE in $(echo "$CHANGED_TEMPLATES" | jq -r '.[]'); do
             echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "📦 Processing: $TEMPLATE"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "========================================"
+            echo "Processing: $TEMPLATE"
+            echo "========================================"
 
             # Validate template
             echo "Validating..."
             if ! cfn-lint "templates/${TEMPLATE}.yaml"; then
-              echo "❌ Validation failed, skipping"
+              echo "Validation failed, skipping"
               continue
             fi
 
@@ -133,7 +191,7 @@ jobs:
 
             # Check if tag exists
             if git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; then
-              echo "⚠️ Tag $TAG_NAME exists, skipping"
+              echo "Tag $TAG_NAME exists, skipping"
               continue
             fi
 
@@ -174,14 +232,14 @@ jobs:
             RELEASED_TEMPLATES="$RELEASED_TEMPLATES $TEMPLATE:v$NEW_VERSION"
             TEMPLATE_TAGS="$TEMPLATE_TAGS $TAG_NAME"
 
-            echo "✓ Released $TEMPLATE v$NEW_VERSION"
+            echo "Released $TEMPLATE v$NEW_VERSION"
           done
 
           echo "released_templates=$RELEASED_TEMPLATES" >> $GITHUB_OUTPUT
           echo "template_tags=$TEMPLATE_TAGS" >> $GITHUB_OUTPUT
 
       - name: Calculate bundle version
-        id: bundle-version
+        id: bundle
         env:
           BUMP_TYPE: ${{ needs.detect-changes.outputs.bump_type }}
         run: |
@@ -209,21 +267,20 @@ jobs:
           echo "tag=release-v$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Release bundle
-        id: release-bundle
         env:
-          BUNDLE_VERSION: ${{ steps.bundle-version.outputs.version }}
+          BUNDLE_VERSION: ${{ steps.bundle.outputs.version }}
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🎁 Releasing Bundle v$BUNDLE_VERSION"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "========================================"
+          echo "Releasing Bundle v$BUNDLE_VERSION"
+          echo "========================================"
 
           # Upload all templates to bundle folder
           for TEMPLATE_FILE in templates/*.yaml; do
             TEMPLATE=$(basename "$TEMPLATE_FILE" .yaml)
-            echo "  → $TEMPLATE"
+            echo "  -> $TEMPLATE"
 
             aws s3 cp "$TEMPLATE_FILE" \
               "s3://${{ env.S3_BUCKET }}/releases/v${BUNDLE_VERSION}/${TEMPLATE}.yaml" \
@@ -260,7 +317,6 @@ jobs:
           with open('/tmp/bundle-manifest.json', 'w') as f:
               json.dump(manifest, f, indent=2)
 
-          # Print template versions for summary
           print("\nBundle contents:")
           for tpl, info in manifest['templates'].items():
               print(f"  {tpl}: {info['version']}")
@@ -289,7 +345,7 @@ jobs:
 
           aws s3 cp /tmp/releases-index.json "s3://${{ env.S3_BUCKET }}/releases/index.json"
 
-          echo "✓ Bundle v$BUNDLE_VERSION released"
+          echo "Bundle v$BUNDLE_VERSION released"
 
       - name: Commit version updates
         run: |
@@ -304,10 +360,10 @@ jobs:
 
       - name: Create tags and releases
         env:
-          TEMPLATE_TAGS: ${{ steps.release-templates.outputs.template_tags }}
-          BUNDLE_TAG: ${{ steps.bundle-version.outputs.tag }}
-          BUNDLE_VERSION: ${{ steps.bundle-version.outputs.version }}
-          RELEASED_TEMPLATES: ${{ steps.release-templates.outputs.released_templates }}
+          TEMPLATE_TAGS: ${{ steps.release.outputs.template_tags }}
+          BUNDLE_TAG: ${{ steps.bundle.outputs.tag }}
+          BUNDLE_VERSION: ${{ steps.bundle.outputs.version }}
+          RELEASED_TEMPLATES: ${{ steps.release.outputs.released_templates }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Create template tags
@@ -324,19 +380,23 @@ jobs:
 
           **Template URL:** \`https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/templates/${TEMPLATE}/v${VERSION}/${TEMPLATE}.yaml\`
 
-          To use this version, set parameter:
-          \`\`\`
-          $(echo $TEMPLATE | tr '[:lower:]-' '[:upper:]_' | sed 's/_$//')TemplateVersion=v$VERSION
-          \`\`\`"
+          ### Usage
 
-            echo "✓ Created $TAG"
+          To use this template version, set the following parameter:
+          \`\`\`
+          MPS3KeyPrefix=templates/${TEMPLATE}/v${VERSION}/
+          \`\`\`
+
+          Or use the direct S3 URL in your CloudFormation deployment."
+
+            echo "Created $TAG"
           done
 
           # Create bundle tag and release
           git tag -a "$BUNDLE_TAG" -m "Release Bundle v$BUNDLE_VERSION"
           git push origin "$BUNDLE_TAG"
 
-          # Generate template list
+          # Generate template list for release notes
           TEMPLATE_TABLE=$(python3 << 'PYEOF'
           import json
           with open('/tmp/bundle-manifest.json', 'r') as f:
@@ -359,34 +419,67 @@ jobs:
           $TEMPLATE_TABLE
 
           ### AWS Marketplace Parameters
-          \`\`\`
+          \`\`\`yaml
           MPS3BucketName: ${{ env.S3_BUCKET }}
           MPS3BucketRegion: ${{ env.AWS_REGION }}
           MPS3KeyPrefix: releases/v$BUNDLE_VERSION/
           \`\`\`
 
           ### Quick Launch
+
           [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/quickcreate?stackName=midaz&templateURL=https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/midaz-complete.yaml)
+
+          ### Documentation
+
+          - [README](https://github.com/${{ github.repository }}/blob/main/README.md)
+          - [Architecture](https://github.com/${{ github.repository }}/blob/main/docs/ARCHITECTURE.md)
+          - [Troubleshooting](https://github.com/${{ github.repository }}/blob/main/docs/TROUBLESHOOTING.md)
+          - [Cost Estimation](https://github.com/${{ github.repository }}/blob/main/docs/COST_ESTIMATION.md)
           "
 
-          echo "✓ Created $BUNDLE_TAG"
+          echo "Created $BUNDLE_TAG"
 
+  # ============================================================================
+  # Release Summary
+  # ============================================================================
+  release-summary:
+    name: Release Summary
+    needs: [detect-changes, release-templates]
+    if: always() && needs.detect-changes.outputs.has_changes == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
       - name: Summary
         env:
-          RELEASED_TEMPLATES: ${{ steps.release-templates.outputs.released_templates }}
-          BUNDLE_VERSION: ${{ steps.bundle-version.outputs.version }}
+          RELEASED_TEMPLATES: ${{ needs.release-templates.outputs.released_templates }}
+          BUNDLE_VERSION: ${{ needs.release-templates.outputs.bundle_version }}
         run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ Release Complete"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-          echo "📦 Templates released:"
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Released Templates" >> $GITHUB_STEP_SUMMARY
           for item in $RELEASED_TEMPLATES; do
-            echo "   • $item"
+            echo "- $item" >> $GITHUB_STEP_SUMMARY
           done
-          echo ""
-          echo "🎁 Bundle: v$BUNDLE_VERSION"
-          echo ""
-          echo "🛒 Marketplace:"
-          echo "   MPS3KeyPrefix=releases/v$BUNDLE_VERSION/"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Bundle Version" >> $GITHUB_STEP_SUMMARY
+          echo "**v$BUNDLE_VERSION**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Marketplace Parameters" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "MPS3KeyPrefix=releases/v$BUNDLE_VERSION/" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Shared Workflow: Slack Notification
+  # ============================================================================
+  notify:
+    name: Notify
+    needs: [release-templates, release-summary]
+    if: always() && needs.release-templates.result != 'skipped'
+    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.3.5
+    with:
+      status: ${{ needs.release-templates.result }}
+      workflow_name: "CloudFormation Release"
+      custom_message: "Bundle v${{ needs.release-templates.outputs.bundle_version }} released"
+      failed_jobs: ${{ needs.release-templates.result == 'failure' && 'Release Templates' || '' }}
+    secrets:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

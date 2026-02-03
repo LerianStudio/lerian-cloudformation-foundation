@@ -1,0 +1,121 @@
+# Configuration for actions/labeler
+# Used by pr-validation workflow to auto-label PRs based on changed files
+
+# Template labels
+template:vpc:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/vpc.yaml'
+
+template:eks:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/eks.yaml'
+
+template:rds:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/rds.yaml'
+
+template:documentdb:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/documentdb.yaml'
+
+template:elasticache:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/elasticache.yaml'
+
+template:amazonmq:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/amazonmq.yaml'
+
+template:route53:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/route53.yaml'
+
+template:alb-controller:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/alb-controller.yaml'
+
+template:external-dns:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/external-dns.yaml'
+
+# Composite template labels
+template:midaz-complete:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/midaz-complete.yaml'
+
+template:midaz-infrastructure:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/midaz-infrastructure.yaml'
+
+template:midaz-helm:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/midaz-helm.yaml'
+
+template:midaz-application:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/midaz-application.yaml'
+
+# Area labels
+area:templates:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/**'
+
+area:infrastructure:
+  - changed-files:
+      - any-glob-to-any-file: 'infrastructure/**'
+
+area:scripts:
+  - changed-files:
+      - any-glob-to-any-file: 'scripts/**'
+
+area:ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+area:documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '*.md'
+          - 'docs/**'
+          - 'examples/**'
+
+# Type labels based on common patterns
+type:security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/security*.yaml'
+          - '**/*-sg.yaml'
+
+type:networking:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'templates/vpc.yaml'
+          - 'templates/route53.yaml'
+
+type:database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'templates/rds.yaml'
+          - 'templates/documentdb.yaml'
+          - 'templates/elasticache.yaml'
+
+type:kubernetes:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'templates/eks.yaml'
+          - 'templates/alb-controller.yaml'
+          - 'templates/external-dns.yaml'
+          - 'templates/midaz-helm.yaml'
+
+type:messaging:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/amazonmq.yaml'
+
+# Dependencies
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'package.json'
+          - 'package-lock.json'
+          - 'requirements.txt'
+          - '.cfnlintrc'
