@@ -973,6 +973,7 @@ Resources:
       - DocumentDBStack
       - ElastiCacheStack
       - AmazonMQStack
+      - ALBControllerStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
       Parameters:
