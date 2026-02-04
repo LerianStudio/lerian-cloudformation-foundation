@@ -677,6 +677,13 @@ Parameters:
     AllowedPattern: "^$|^arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+$"
     ConstraintDescription: "Must be a valid ACM certificate ARN or empty"
 
+Rules:
+  IngressRequiresALBController:
+    RuleCondition: !Equals [!Ref EnableIngress, "true"]
+    Assertions:
+      - Assert: !Equals [!Ref EnableALBController, "true"]
+        AssertDescription: "EnableALBController must be 'true' when EnableIngress is 'true'"
+
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
   HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
@@ -687,6 +694,12 @@ Conditions:
 
   # Application conditions
   ShouldDeployApplication: !Equals [!Ref DeployMidazApplication, "true"]
+  ShouldDeployWithALB: !And
+    - !Condition ShouldDeployApplication
+    - !Condition ShouldEnableALBController
+  ShouldDeployWithoutALB: !And
+    - !Condition ShouldDeployApplication
+    - !Not [!Condition ShouldEnableALBController]
   HasIngress: !Equals [!Ref EnableIngress, "true"]
   HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
 
@@ -963,10 +976,11 @@ Resources:
 
   # =============================================================================
   # MIDAZ APPLICATION (HELM DEPLOYMENT)
+  # With ALB Controller dependency (when ALB Controller is enabled)
   # =============================================================================
   MidazHelmStack:
     Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployApplication
+    Condition: ShouldDeployWithALB
     DependsOn:
       - EKSStack
       - RDSStack
@@ -974,6 +988,51 @@ Resources:
       - ElastiCacheStack
       - AmazonMQStack
       - ALBControllerStack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
+      Parameters:
+        ProjectName: !Ref AWS::StackName
+        EnvironmentName: !Ref EnvironmentName
+        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
+        ClusterSecurityGroupId: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
+        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+        # Database connections
+        RDSEndpoint: !GetAtt RDSStack.Outputs.Endpoint
+        RDSSecretArn: !GetAtt RDSStack.Outputs.SecretArn
+        DocumentDBEndpoint: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
+        DocumentDBSecretArn: !GetAtt DocumentDBStack.Outputs.SecretArn
+        ElastiCacheEndpoint: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
+        AmazonMQEndpoint: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
+        AmazonMQSecretArn: !GetAtt AmazonMQStack.Outputs.SecretArn
+        # Application settings
+        MidazChartVersion: !Ref MidazVersion
+        EnableIngress: !Ref EnableIngress
+        DomainName: !Ref DomainName
+        IngressHostname: !Ref IngressHostname
+        IngressScheme: "internal"
+        IngressCertificateArn: !Ref IngressCertificateArn
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-midaz-app-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =============================================================================
+  # MIDAZ APPLICATION (HELM DEPLOYMENT)
+  # Without ALB Controller dependency (when ALB Controller is disabled)
+  # =============================================================================
+  MidazHelmStackNoALB:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployWithoutALB
+    DependsOn:
+      - EKSStack
+      - RDSStack
+      - DocumentDBStack
+      - ElastiCacheStack
+      - AmazonMQStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
       Parameters:
@@ -1155,14 +1214,20 @@ Outputs:
   MidazNamespace:
     Condition: ShouldDeployApplication
     Description: Kubernetes namespace where Midaz is deployed
-    Value: !GetAtt MidazHelmStack.Outputs.HelmNamespace
+    Value: !If
+      - ShouldDeployWithALB
+      - !GetAtt MidazHelmStack.Outputs.HelmNamespace
+      - !GetAtt MidazHelmStackNoALB.Outputs.HelmNamespace
     Export:
       Name: !Sub "${AWS::StackName}-MidazNamespace"
 
   MidazAPIEndpoint:
     Condition: ShouldDeployApplication
     Description: Midaz Ledger API endpoint
-    Value: !GetAtt MidazHelmStack.Outputs.LedgerAPIEndpoint
+    Value: !If
+      - ShouldDeployWithALB
+      - !GetAtt MidazHelmStack.Outputs.LedgerAPIEndpoint
+      - !GetAtt MidazHelmStackNoALB.Outputs.LedgerAPIEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-MidazAPIEndpoint"
 
