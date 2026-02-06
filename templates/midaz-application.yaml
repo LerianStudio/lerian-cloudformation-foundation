@@ -16,6 +16,7 @@ Metadata:
           default: "AWS Marketplace Configuration"
         Parameters:
           - MPS3BucketName
+          - MPS3BucketRegion
           - MPS3KeyPrefix
       - Label:
           default: "Application Configuration"
@@ -35,6 +36,8 @@ Metadata:
         default: "Infrastructure Stack Name"
       MPS3BucketName:
         default: "Template S3 Bucket Name"
+      MPS3BucketRegion:
+        default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
       MidazVersion:
@@ -69,6 +72,13 @@ Parameters:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates"
     Default: "midaz-cloudformation-foundation"
+
+  MPS3BucketRegion:
+    Type: String
+    Description: "AWS Region where the S3 bucket is located (fixed to sa-east-1)"
+    Default: "sa-east-1"
+    AllowedValues:
+      - sa-east-1
 
   MPS3KeyPrefix:
     Type: String
@@ -146,7 +156,7 @@ Resources:
   MidazHelmStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.sa-east-1.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
       Parameters:
         ProjectName:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-ProjectName"
@@ -219,7 +229,7 @@ Outputs:
     Value: !Sub |
       aws cloudformation update-stack \
         --stack-name ${AWS::StackName} \
-        --template-url https://${MPS3BucketName}.s3.sa-east-1.amazonaws.com/${MPS3KeyPrefix}midaz-application.yaml \
+        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}midaz-application.yaml \
         --parameters ParameterKey=InfrastructureStackName,ParameterValue=${InfrastructureStackName} \
                      ParameterKey=MidazVersion,ParameterValue=NEW_VERSION \
         --capabilities CAPABILITY_IAM
