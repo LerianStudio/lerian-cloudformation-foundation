@@ -15,18 +15,6 @@ Metadata:
           - MPS3BucketRegion
           - MPS3KeyPrefix
       - Label:
-          default: "Template Version Overrides (Advanced)"
-        Parameters:
-          - VPCTemplateVersion
-          - EKSTemplateVersion
-          - RDSTemplateVersion
-          - DocumentDBTemplateVersion
-          - ElastiCacheTemplateVersion
-          - AmazonMQTemplateVersion
-          - Route53TemplateVersion
-          - ALBControllerTemplateVersion
-          - ExternalDNSTemplateVersion
-      - Label:
           default: "General Configuration"
         Parameters:
           - EnvironmentName
@@ -92,25 +80,6 @@ Metadata:
         default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
-      # Version Overrides
-      VPCTemplateVersion:
-        default: "VPC Template Version"
-      EKSTemplateVersion:
-        default: "EKS Template Version"
-      RDSTemplateVersion:
-        default: "RDS Template Version"
-      DocumentDBTemplateVersion:
-        default: "DocumentDB Template Version"
-      ElastiCacheTemplateVersion:
-        default: "ElastiCache Template Version"
-      AmazonMQTemplateVersion:
-        default: "AmazonMQ Template Version"
-      Route53TemplateVersion:
-        default: "Route53 Template Version"
-      ALBControllerTemplateVersion:
-        default: "ALB Controller Template Version"
-      ExternalDNSTemplateVersion:
-        default: "ExternalDNS Template Version"
       # General
       EnvironmentName:
         default: "Environment"
@@ -210,75 +179,6 @@ Parameters:
     Default: "releases/latest/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
-
-  # =============================================================================
-  # TEMPLATE VERSION OVERRIDES (Advanced)
-  # Use these to pin specific versions of individual templates
-  # Format: "latest" or semver like "1.0.0"
-  # When set, overrides the MPS3KeyPrefix path for that specific template
-  # =============================================================================
-  VPCTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "VPC template version override (e.g., 'latest' or 'v1.0.0'). Empty uses default MPS3KeyPrefix"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  EKSTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "EKS template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  RDSTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "RDS template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  DocumentDBTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "DocumentDB template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  ElastiCacheTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "ElastiCache template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  AmazonMQTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "AmazonMQ template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  Route53TemplateVersion:
-    Type: String
-    Default: ""
-    Description: "Route53 template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  ALBControllerTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "ALB Controller template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
-
-  ExternalDNSTemplateVersion:
-    Type: String
-    Default: ""
-    Description: "ExternalDNS template version override (e.g., 'latest' or 'v1.0.0')"
-    AllowedPattern: "^$|^latest$|^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-    ConstraintDescription: "Must be empty, 'latest', or 'v' followed by semver (e.g., v1.0.0)"
 
   # =============================================================================
   # GENERAL CONFIGURATION
@@ -603,17 +503,6 @@ Conditions:
     - !Condition HasDomainName
     - !Equals [!Ref EnableExternalDNS, "true"]
 
-  # Version override conditions
-  HasVPCVersionOverride: !Not [!Equals [!Ref VPCTemplateVersion, ""]]
-  HasEKSVersionOverride: !Not [!Equals [!Ref EKSTemplateVersion, ""]]
-  HasRDSVersionOverride: !Not [!Equals [!Ref RDSTemplateVersion, ""]]
-  HasDocumentDBVersionOverride: !Not [!Equals [!Ref DocumentDBTemplateVersion, ""]]
-  HasElastiCacheVersionOverride: !Not [!Equals [!Ref ElastiCacheTemplateVersion, ""]]
-  HasAmazonMQVersionOverride: !Not [!Equals [!Ref AmazonMQTemplateVersion, ""]]
-  HasRoute53VersionOverride: !Not [!Equals [!Ref Route53TemplateVersion, ""]]
-  HasALBControllerVersionOverride: !Not [!Equals [!Ref ALBControllerTemplateVersion, ""]]
-  HasExternalDNSVersionOverride: !Not [!Equals [!Ref ExternalDNSTemplateVersion, ""]]
-
 Resources:
   # =============================================================================
   # VPC STACK
@@ -621,10 +510,7 @@ Resources:
   VPCStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !If
-        - HasVPCVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/vpc/${VPCTemplateVersion}/vpc.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -649,10 +535,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: VPCStack
     Properties:
-      TemplateURL: !If
-        - HasRDSVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/rds/${RDSTemplateVersion}/rds.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -684,10 +567,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: VPCStack
     Properties:
-      TemplateURL: !If
-        - HasDocumentDBVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/documentdb/${DocumentDBTemplateVersion}/documentdb.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -714,10 +594,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: VPCStack
     Properties:
-      TemplateURL: !If
-        - HasElastiCacheVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/elasticache/${ElastiCacheTemplateVersion}/elasticache.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -740,10 +617,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: VPCStack
     Properties:
-      TemplateURL: !If
-        - HasAmazonMQVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/amazonmq/${AmazonMQTemplateVersion}/amazonmq.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -772,10 +646,7 @@ Resources:
       - ElastiCacheStack
       - AmazonMQStack
     Properties:
-      TemplateURL: !If
-        - HasEKSVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/eks/${EKSTemplateVersion}/eks.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -802,10 +673,7 @@ Resources:
     Condition: HasDomainName
     DependsOn: VPCStack
     Properties:
-      TemplateURL: !If
-        - HasRoute53VersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/route53/${Route53TemplateVersion}/route53.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}route53.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}route53.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -827,10 +695,7 @@ Resources:
     Condition: ShouldEnableALBController
     DependsOn: EKSStack
     Properties:
-      TemplateURL: !If
-        - HasALBControllerVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/alb-controller/${ALBControllerTemplateVersion}/alb-controller.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -855,10 +720,7 @@ Resources:
       - EKSStack
       - Route53Stack
     Properties:
-      TemplateURL: !If
-        - HasExternalDNSVersionOverride
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/templates/external-dns/${ExternalDNSTemplateVersion}/external-dns.yaml"
-        - !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
