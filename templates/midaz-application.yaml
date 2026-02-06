@@ -71,12 +71,12 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates"
-    Default: "midaz-cloudformation-templates"
+    Default: "midaz-cloudformation-foundation"
 
   MPS3BucketRegion:
     Type: String
     Description: "AWS Region where the S3 bucket is located"
-    Default: "us-east-1"
+    Default: "sa-east-1"
     AllowedValues:
       - us-east-1
       - us-east-2
@@ -93,7 +93,7 @@ Parameters:
   MPS3KeyPrefix:
     Type: String
     Description: "S3 key prefix for the CloudFormation templates"
-    Default: "templates/"
+    Default: "releases/latest/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
 

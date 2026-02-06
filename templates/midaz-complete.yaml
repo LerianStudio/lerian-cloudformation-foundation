@@ -217,12 +217,12 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
-    Default: "midaz-cloudformation-templates"
+    Default: "midaz-cloudformation-foundation"
 
   MPS3BucketRegion:
     Type: String
     Description: "AWS Region where the S3 bucket is located"
-    Default: "us-east-1"
+    Default: "sa-east-1"
     AllowedValues:
       - us-east-1
       - us-east-2
@@ -239,7 +239,7 @@ Parameters:
   MPS3KeyPrefix:
     Type: String
     Description: "S3 key prefix for the CloudFormation templates"
-    Default: "templates/"
+    Default: "releases/latest/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
 
@@ -479,9 +479,8 @@ Parameters:
 
   RDSMasterUsername:
     Type: String
-    Default: postgres
     NoEcho: true
-    Description: Master username for RDS (sensitive)
+    Description: Master username for RDS (required, no default for security)
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
     MinLength: 1
     MaxLength: 63
@@ -546,9 +545,8 @@ Parameters:
 
   DocumentDBMasterUsername:
     Type: String
-    Default: docdbadmin
     NoEcho: true
-    Description: Master username for DocumentDB (sensitive)
+    Description: Master username for DocumentDB (required, no default for security)
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
     MinLength: 1
     MaxLength: 63
@@ -596,9 +594,8 @@ Parameters:
 
   AmazonMQAdminUsername:
     Type: String
-    Default: mqadmin
     NoEcho: true
-    Description: Admin username for AmazonMQ (sensitive)
+    Description: Admin username for AmazonMQ (required, no default for security)
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
     MinLength: 1
     MaxLength: 100
