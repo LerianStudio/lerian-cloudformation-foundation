@@ -106,7 +106,6 @@ See [docs/COST_ESTIMATION.md](docs/COST_ESTIMATION.md) for breakdown.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
 - [Security](SECURITY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Contributing](CONTRIBUTING.md)
