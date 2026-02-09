@@ -14,6 +14,7 @@ Metadata:
           - MPS3BucketName
           - MPS3BucketRegion
           - MPS3KeyPrefix
+          - MarketplaceAMI
       - Label:
           default: "General Configuration"
         Parameters:
@@ -89,6 +90,8 @@ Metadata:
         default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
+      MarketplaceAMI:
+        default: "Marketplace AMI ID"
       # Midaz Application
       DeployMidazApplication:
         default: "Deploy Midaz Application"
@@ -201,6 +204,11 @@ Parameters:
     Default: "releases/latest/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
+
+  MarketplaceAMI:
+    Type: AWS::EC2::Image::Id
+    Description: "AWS Marketplace AMI ID (required by Marketplace, EKS uses managed AMIs)"
+    Default: "ami-0ed5cea6dbb6973be"
 
   # =============================================================================
   # GENERAL CONFIGURATION
