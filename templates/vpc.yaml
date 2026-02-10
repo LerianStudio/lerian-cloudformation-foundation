@@ -431,6 +431,7 @@ Resources:
     Condition: EnableFlowLogsCondition
     Properties:
       RoleName: !Sub "${ProjectName}-flow-logs-role"
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
