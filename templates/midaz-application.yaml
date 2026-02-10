@@ -23,6 +23,9 @@ Metadata:
         Parameters:
           - MidazVersion
           - MidazReplicas
+          - EnableCRM
+          - EnableCRMIngress
+          - CRMIngressHostname
       - Label:
           default: "Ingress Configuration"
         Parameters:
@@ -54,6 +57,12 @@ Metadata:
         default: "Ingress Scheme"
       IngressCertificateArn:
         default: "ACM Certificate ARN"
+      EnableCRM:
+        default: "Enable CRM Service"
+      EnableCRMIngress:
+        default: "Enable CRM Ingress (ALB)"
+      CRMIngressHostname:
+        default: "CRM Ingress Hostname"
 
 Parameters:
   # =============================================================================
@@ -144,6 +153,29 @@ Parameters:
     AllowedPattern: "^$|^arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+$"
     ConstraintDescription: "Must be a valid ACM certificate ARN or empty"
 
+  EnableCRM:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Enable CRM service (optional, uses same DocumentDB as Midaz)"
+
+  EnableCRMIngress:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Enable ALB Ingress for CRM service (requires EnableCRM=true)"
+
+  CRMIngressHostname:
+    Type: String
+    Default: ""
+    Description: "Full hostname for CRM Ingress (e.g., crm.midaz.net)"
+    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
+    ConstraintDescription: "Must be a valid hostname or empty"
+
 Conditions:
   HasIngress: !Equals [!Ref EnableIngress, "true"]
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
@@ -193,6 +225,10 @@ Resources:
         IngressHostname: !Ref IngressHostname
         IngressScheme: !Ref IngressScheme
         IngressCertificateArn: !Ref IngressCertificateArn
+        # Optional services
+        EnableCRM: !Ref EnableCRM
+        EnableCRMIngress: !Ref EnableCRMIngress
+        CRMIngressHostname: !Ref CRMIngressHostname
       Tags:
         - Key: Name
           Value: !Sub "midaz-application-${InfrastructureStackName}"

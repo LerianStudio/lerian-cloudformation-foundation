@@ -82,6 +82,9 @@ Metadata:
           - EnableIngress
           - IngressHostname
           - IngressCertificateArn
+          - EnableCRM
+          - EnableCRMIngress
+          - CRMIngressHostname
     ParameterLabels:
       # AWS Marketplace
       MPS3BucketName:
@@ -105,6 +108,12 @@ Metadata:
         default: "Ingress Hostname"
       IngressCertificateArn:
         default: "HTTPS Certificate ARN"
+      EnableCRM:
+        default: "Enable CRM Service"
+      EnableCRMIngress:
+        default: "Enable CRM Ingress (ALB)"
+      CRMIngressHostname:
+        default: "CRM Ingress Hostname"
       # General
       EnvironmentName:
         default: "Environment"
@@ -206,9 +215,9 @@ Parameters:
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
 
   MarketplaceAMI:
-    Type: AWS::EC2::Image::Id
-    Description: "AWS Marketplace AMI ID (required by Marketplace, EKS uses managed AMIs)"
-    Default: "ami-0ed5cea6dbb6973be"
+    Type: String
+    Description: "AWS Marketplace AMI ID (required by Marketplace form only, EKS uses managed AMIs)"
+    Default: "ami-placeholder"
 
   # =============================================================================
   # GENERAL CONFIGURATION
@@ -255,12 +264,12 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Default: "false"
+    Default: "true"
     Description: Enable VPC Flow Logs for network traffic auditing and security analysis.
 
   FlowLogsRetentionDays:
     Type: Number
-    Default: 14
+    Default: 30
     AllowedValues:
       - 1
       - 3
@@ -340,7 +349,7 @@ Parameters:
   # RDS
   RDSInstanceClass:
     Type: String
-    Default: db.t3.medium
+    Default: db.r7g.large
     AllowedValues:
       - db.t3.micro
       - db.t3.small
@@ -354,14 +363,14 @@ Parameters:
 
   RDSAllocatedStorage:
     Type: Number
-    Default: 20
+    Default: 100
     MinValue: 20
     MaxValue: 65536
     Description: Initial storage allocation in GB
 
   RDSMaxAllocatedStorage:
     Type: Number
-    Default: 100
+    Default: 500
     MinValue: 20
     MaxValue: 65536
     Description: Maximum storage for autoscaling in GB
@@ -386,7 +395,7 @@ Parameters:
 
   CreateReadReplica:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
@@ -402,7 +411,7 @@ Parameters:
 
   RDSMultiAZ:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
@@ -410,7 +419,7 @@ Parameters:
 
   RDSDeletionProtection:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
@@ -418,7 +427,7 @@ Parameters:
 
   RDSBackupRetentionPeriod:
     Type: Number
-    Default: 7
+    Default: 30
     MinValue: 1
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
@@ -426,7 +435,7 @@ Parameters:
   # DocumentDB
   DocumentDBInstanceClass:
     Type: String
-    Default: db.t3.medium
+    Default: db.r6g.large
     AllowedValues:
       - db.t3.medium
       - db.r6g.large
@@ -436,7 +445,7 @@ Parameters:
 
   DocumentDBInstanceCount:
     Type: Number
-    Default: 2
+    Default: 3
     MinValue: 1
     MaxValue: 16
     Description: Number of DocumentDB instances
@@ -452,7 +461,7 @@ Parameters:
 
   DocumentDBDeletionProtection:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues:
       - "true"
       - "false"
@@ -460,7 +469,7 @@ Parameters:
 
   DocumentDBBackupRetentionPeriod:
     Type: Number
-    Default: 7
+    Default: 30
     MinValue: 1
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
@@ -482,7 +491,7 @@ Parameters:
   # AmazonMQ
   AmazonMQInstanceType:
     Type: String
-    Default: mq.t3.micro
+    Default: mq.m5.large
     AllowedValues:
       - mq.t3.micro
       - mq.m5.large
@@ -571,6 +580,29 @@ Parameters:
     Description: ACM Certificate ARN for HTTPS (optional, requires EnableIngress=true)
     AllowedPattern: "^$|^arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+$"
     ConstraintDescription: "Must be a valid ACM certificate ARN or empty"
+
+  EnableCRM:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable CRM service (optional, uses same DocumentDB as Midaz)
+
+  EnableCRMIngress:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable ALB Ingress for CRM service (requires EnableCRM=true)
+
+  CRMIngressHostname:
+    Type: String
+    Default: ""
+    Description: Full hostname for CRM Ingress (e.g., crm.midaz.net). Required if EnableCRMIngress=true.
+    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
+    ConstraintDescription: "Must be a valid hostname or empty"
 
 Rules:
   IngressRequiresALBController:
@@ -869,6 +901,9 @@ Resources:
         IngressHostname: !Ref IngressHostname
         IngressScheme: "internal"
         IngressCertificateArn: !Ref IngressCertificateArn
+        EnableCRM: !Ref EnableCRM
+        EnableCRMIngress: !Ref EnableCRMIngress
+        CRMIngressHostname: !Ref CRMIngressHostname
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-midaz-app-stack"
@@ -914,6 +949,9 @@ Resources:
         IngressHostname: !Ref IngressHostname
         IngressScheme: "internal"
         IngressCertificateArn: !Ref IngressCertificateArn
+        EnableCRM: !Ref EnableCRM
+        EnableCRMIngress: !Ref EnableCRMIngress
+        CRMIngressHostname: !Ref CRMIngressHostname
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-midaz-app-stack"

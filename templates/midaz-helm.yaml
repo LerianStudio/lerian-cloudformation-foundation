@@ -106,6 +106,28 @@ Parameters:
     Default: ""
     Description: ACM Certificate ARN for HTTPS (optional). If not provided, HTTP only.
 
+  # CRM Configuration
+  EnableCRM:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable CRM service deployment (uses same DocumentDB as Midaz)
+
+  EnableCRMIngress:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Ingress for CRM service (requires EnableCRM and ALB Controller)
+
+  CRMIngressHostname:
+    Type: String
+    Default: ""
+    Description: Full hostname for CRM Ingress (e.g., crm.midaz.net). Required if EnableCRMIngress is true.
+
 Conditions:
   HasRDSReplica: !Not [!Equals [!Ref RDSReplicaEndpoint, ""]]
   ShouldEnableIngress: !Equals [!Ref EnableIngress, "true"]
@@ -212,6 +234,9 @@ Resources:
           INGRESS_HOSTNAME: !Ref IngressHostname
           INGRESS_SCHEME: !Ref IngressScheme
           INGRESS_CERTIFICATE_ARN: !Ref IngressCertificateArn
+          ENABLE_CRM: !Ref EnableCRM
+          ENABLE_CRM_INGRESS: !Ref EnableCRMIngress
+          CRM_INGRESS_HOSTNAME: !Ref CRMIngressHostname
       Code:
         ZipFile: |
           import json
@@ -529,6 +554,58 @@ Resources:
 
               return ingress_config
 
+          def get_crm_ingress_config():
+              """Generate Ingress configuration block for CRM section"""
+              enable_crm_ingress = os.environ.get('ENABLE_CRM_INGRESS', 'false').lower() == 'true'
+              if not enable_crm_ingress:
+                  return '''ingress:
+              enabled: false'''
+
+              crm_hostname = os.environ.get('CRM_INGRESS_HOSTNAME', '')
+              ingress_scheme = os.environ.get('INGRESS_SCHEME', 'internal')
+              certificate_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
+
+              if not crm_hostname:
+                  logger.warning("CRM Ingress enabled but no hostname provided")
+                  return '''ingress:
+              enabled: false'''
+
+              # Build annotations for AWS ALB
+              annotations = {
+                  'kubernetes.io/ingress.class': 'alb',
+                  'alb.ingress.kubernetes.io/scheme': ingress_scheme,
+                  'alb.ingress.kubernetes.io/target-type': 'ip',
+                  'alb.ingress.kubernetes.io/healthcheck-path': '/health',
+                  'alb.ingress.kubernetes.io/healthcheck-interval-seconds': '"30"',
+                  'alb.ingress.kubernetes.io/healthcheck-timeout-seconds': '"5"',
+                  'alb.ingress.kubernetes.io/healthy-threshold-count': '"2"',
+                  'alb.ingress.kubernetes.io/unhealthy-threshold-count': '"3"',
+              }
+
+              # Add SSL/TLS configuration if certificate is provided
+              if certificate_arn:
+                  annotations['alb.ingress.kubernetes.io/listen-ports'] = '\'[{"HTTP": 80}, {"HTTPS": 443}]\''
+                  annotations['alb.ingress.kubernetes.io/ssl-redirect'] = '"443"'
+                  annotations['alb.ingress.kubernetes.io/certificate-arn'] = certificate_arn
+              else:
+                  annotations['alb.ingress.kubernetes.io/listen-ports'] = '\'[{"HTTP": 80}]\''
+
+              # Format annotations as YAML
+              annotations_yaml = '\n'.join([f'          {k}: {v}' for k, v in annotations.items()])
+
+              ingress_config = f'''ingress:
+              enabled: true
+              className: alb
+              annotations:
+          {annotations_yaml}
+              hosts:
+                - host: {crm_hostname}
+                  paths:
+                    - path: /
+                      pathType: Prefix'''
+
+              return ingress_config
+
           def create_values_file():
               project = os.environ['PROJECT_NAME']
               rds_endpoint = os.environ['RDS_ENDPOINT']
@@ -604,7 +681,34 @@ Resources:
 
           transaction:
             enabled: false
+          '''
 
+              # Add CRM section if enabled
+              enable_crm = os.environ.get('ENABLE_CRM', 'false').lower() == 'true'
+              if enable_crm:
+                  crm_ingress_config = get_crm_ingress_config()
+                  crm_config = f'''
+          crm:
+            enabled: true
+            configmap:
+              MONGO_HOST: "{docdb_endpoint}"
+              MONGO_PORT: "27017"
+              MONGO_USER: "{docdb_secret['username']}"
+              MONGO_NAME: "crm"
+              MONGO_URI: "mongodb"
+              MONGO_PARAMETERS: "tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+            secrets:
+              MONGO_PASSWORD: "{docdb_secret['password']}"
+            {crm_ingress_config}
+          '''
+                  values += crm_config
+              else:
+                  values += '''
+          crm:
+            enabled: false
+          '''
+
+              values += f'''
           global:
             externalPostgresDefinitions:
               enabled: true
@@ -718,7 +822,7 @@ Resources:
       ClusterName: !Ref ClusterName
       # Force update hash
       ConfigHash: !Base64
-        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}"
+        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${EnableCRM}-${EnableCRMIngress}-${CRMIngressHostname}"
 
 Outputs:
   HelmReleaseName:
