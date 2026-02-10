@@ -117,6 +117,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-eks-cluster-role"
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -135,6 +136,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-eks-node-role"
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -272,6 +274,7 @@ Resources:
     DependsOn: OIDCProvider
     Properties:
       RoleName: !Sub "${ProjectName}-ebs-csi-driver-role"
+      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
