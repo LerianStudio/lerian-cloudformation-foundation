@@ -1,7 +1,7 @@
 {
   "description": "Current versions of each template. Updated automatically by CI/CD.",
   "templates": {
-    "vpc": "0.1.1",
+    "vpc": "0.1.2",
     "eks": "0.1.1",
     "rds": "0.1.1",
     "documentdb": "0.1.1",
