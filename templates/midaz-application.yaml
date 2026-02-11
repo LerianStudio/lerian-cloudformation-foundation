@@ -101,7 +101,7 @@ Parameters:
   # =============================================================================
   MidazVersion:
     Type: String
-    Default: "5.3.0"
+    Default: "5.5.1"
     Description: "Midaz Helm chart version to deploy"
     AllowedPattern: "^[a-zA-Z0-9.-]+$"
     ConstraintDescription: "Must be a valid version string"
