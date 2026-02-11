@@ -10,9 +10,9 @@
     "route53": "0.1.1",
     "alb-controller": "0.1.2",
     "external-dns": "0.1.2",
-    "midaz-helm": "0.1.2",
+    "midaz-helm": "0.1.3",
     "midaz-infrastructure": "0.1.6",
-    "midaz-application": "0.1.5",
-    "midaz-complete": "0.1.10"
+    "midaz-application": "0.1.6",
+    "midaz-complete": "0.1.11"
   }
 }
