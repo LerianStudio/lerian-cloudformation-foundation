@@ -274,7 +274,6 @@ Parameters:
     Type: String
     Default: c7g.large
     AllowedValues:
-      # ARM64 Graviton3 instances (compatible with AL2_ARM_64 AMI)
       - c7g.medium
       - c7g.large
       - c7g.xlarge
@@ -286,14 +285,17 @@ Parameters:
       - r7g.medium
       - r7g.large
       - r7g.xlarge
-      # ARM64 Graviton2 instances (fallback options)
       - c6g.medium
       - c6g.large
       - c6g.xlarge
+      - c6g.2xlarge
+      - c6i.large
+      - c6i.xlarge
+      - c6i.2xlarge
       - m6g.medium
       - m6g.large
       - m6g.xlarge
-    Description: EC2 instance type for EKS worker nodes (ARM64 Graviton only)
+    Description: EC2 instance type for EKS worker nodes (ARM64 Graviton)
 
   NodeGroupMinSize:
     Type: Number
