@@ -51,6 +51,10 @@ Parameters:
       - c6g.medium
       - c6g.large
       - c6g.xlarge
+      - c6g.2xlarge
+      - c6i.large
+      - c6i.xlarge
+      - c6i.2xlarge
       - m6g.medium
       - m6g.large
       - m6g.xlarge

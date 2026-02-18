@@ -42,6 +42,8 @@ Metadata:
           - RDSInstanceClass
           - RDSAllocatedStorage
           - RDSMaxAllocatedStorage
+          - RDSStorageType
+          - RDSIops
           - RDSDatabaseName
           - RDSMasterUsername
           - CreateReadReplica
@@ -65,6 +67,7 @@ Metadata:
           default: "AmazonMQ (RabbitMQ) Configuration"
         Parameters:
           - AmazonMQInstanceType
+          - AmazonMQDeploymentMode
           - AmazonMQAdminUsername
       - Label:
           default: "DNS and Ingress Configuration"
@@ -116,6 +119,10 @@ Metadata:
         default: "Initial Storage (GB)"
       RDSMaxAllocatedStorage:
         default: "Maximum Storage (GB)"
+      RDSStorageType:
+        default: "Storage Type"
+      RDSIops:
+        default: "Provisioned IOPS"
       RDSDatabaseName:
         default: "Database RDS Name"
       RDSMasterUsername:
@@ -147,6 +154,8 @@ Metadata:
       # AmazonMQ
       AmazonMQInstanceType:
         default: "Broker Instance Type"
+      AmazonMQDeploymentMode:
+        default: "Deployment Mode"
       AmazonMQAdminUsername:
         default: "Admin Username"
       # DNS
@@ -320,6 +329,11 @@ Parameters:
       - db.m7g.xlarge
       - db.r7g.large
       - db.r7g.xlarge
+      - db.r7g.2xlarge
+      - db.r7g.4xlarge
+      - db.r7g.8xlarge
+      - db.r7g.12xlarge
+      - db.r7g.16xlarge
     Description: RDS instance class
 
   RDSAllocatedStorage:
@@ -335,6 +349,22 @@ Parameters:
     MinValue: 20
     MaxValue: 65536
     Description: Maximum storage for autoscaling in GB
+
+  RDSStorageType:
+    Type: String
+    Default: gp3
+    AllowedValues:
+      - gp3
+      - io1
+      - io2
+    Description: Storage type for RDS instance
+
+  RDSIops:
+    Type: Number
+    Default: 3000
+    MinValue: 3000
+    MaxValue: 64000
+    Description: Provisioned IOPS for RDS storage. For gp3 max is 16000, for io1/io2 max is 64000.
 
   RDSDatabaseName:
     Type: String
@@ -402,13 +432,16 @@ Parameters:
       - db.r6g.large
       - db.r6g.xlarge
       - db.r6g.2xlarge
+      - db.r6g.4xlarge
+      - db.r6g.8xlarge
+      - db.r6g.12xlarge
     Description: DocumentDB instance class
 
   DocumentDBInstanceCount:
     Type: Number
     Default: 2
     MinValue: 1
-    MaxValue: 16
+    MaxValue: 10
     Description: Number of DocumentDB instances
 
   DocumentDBMasterUsername:
@@ -458,7 +491,23 @@ Parameters:
       - mq.m5.large
       - mq.m5.xlarge
       - mq.m5.2xlarge
+      - mq.m5.4xlarge
+      - mq.m7g.large
+      - mq.m7g.xlarge
+      - mq.m7g.2xlarge
+      - mq.m7g.4xlarge
+      - mq.m7g.8xlarge
+      - mq.m7g.12xlarge
+      - mq.m7g.16xlarge
     Description: AmazonMQ broker instance type
+
+  AmazonMQDeploymentMode:
+    Type: String
+    Default: SINGLE_INSTANCE
+    AllowedValues:
+      - SINGLE_INSTANCE
+      - CLUSTER_MULTI_AZ
+    Description: Broker deployment mode. CLUSTER_MULTI_AZ deploys 3 nodes across AZs for HA.
 
   AmazonMQAdminUsername:
     Type: String
@@ -545,6 +594,8 @@ Resources:
         InstanceClass: !Ref RDSInstanceClass
         AllocatedStorage: !Ref RDSAllocatedStorage
         MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
+        StorageType: !Ref RDSStorageType
+        Iops: !Ref RDSIops
         DatabaseName: !Ref RDSDatabaseName
         MasterUsername: !Ref RDSMasterUsername
         CreateReadReplica: !Ref CreateReadReplica
@@ -623,8 +674,9 @@ Resources:
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetId: !Select [0, !Split [",", !GetAtt VPCStack.Outputs.PrivateSubnetIds]]
+        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
         InstanceType: !Ref AmazonMQInstanceType
+        DeploymentMode: !Ref AmazonMQDeploymentMode
         AdminUsername: !Ref AmazonMQAdminUsername
       Tags:
         - Key: Name

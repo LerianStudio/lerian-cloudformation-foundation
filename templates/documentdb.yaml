@@ -38,14 +38,17 @@ Parameters:
       - db.r6g.large
       - db.r6g.xlarge
       - db.r6g.2xlarge
+      - db.r6g.4xlarge
+      - db.r6g.8xlarge
+      - db.r6g.12xlarge
 
   InstanceCount:
     Type: Number
     Description: Number of DocumentDB instances
     MinValue: 1
-    MaxValue: 16
+    MaxValue: 10
     Default: 2
-    ConstraintDescription: "Must be between 1 and 16"
+    ConstraintDescription: "Must be between 1 and 10"
 
   MasterUsername:
     Type: String
@@ -236,8 +239,157 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
+  DocumentDBInstance3:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateThirdInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-3"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-3"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance4:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateFourthInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-4"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-4"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance5:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateFifthInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-5"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-5"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance6:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateSixthInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-6"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-6"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance7:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateSeventhInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-7"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-7"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance8:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateEighthInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-8"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-8"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance9:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateNinthInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-9"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-9"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DocumentDBInstance10:
+    Type: AWS::DocDB::DBInstance
+    Condition: CreateTenthInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-documentdb-instance-10"
+      DBClusterIdentifier: !Ref DocumentDBCluster
+      DBInstanceClass: !Ref InstanceClass
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-instance-10"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
 Conditions:
   CreateSecondInstance: !Not [!Equals [!Ref InstanceCount, 1]]
+  CreateThirdInstance: !And
+    - !Not [!Equals [!Ref InstanceCount, 1]]
+    - !Not [!Equals [!Ref InstanceCount, 2]]
+  CreateFourthInstance: !Or
+    - !Equals [!Ref InstanceCount, 4]
+    - !Equals [!Ref InstanceCount, 5]
+    - !Equals [!Ref InstanceCount, 6]
+    - !Equals [!Ref InstanceCount, 7]
+    - !Equals [!Ref InstanceCount, 8]
+    - !Equals [!Ref InstanceCount, 9]
+    - !Equals [!Ref InstanceCount, 10]
+  CreateFifthInstance: !Or
+    - !Equals [!Ref InstanceCount, 5]
+    - !Equals [!Ref InstanceCount, 6]
+    - !Equals [!Ref InstanceCount, 7]
+    - !Equals [!Ref InstanceCount, 8]
+    - !Equals [!Ref InstanceCount, 9]
+    - !Equals [!Ref InstanceCount, 10]
+  CreateSixthInstance: !Or
+    - !Equals [!Ref InstanceCount, 6]
+    - !Equals [!Ref InstanceCount, 7]
+    - !Equals [!Ref InstanceCount, 8]
+    - !Equals [!Ref InstanceCount, 9]
+    - !Equals [!Ref InstanceCount, 10]
+  CreateSeventhInstance: !Or
+    - !Equals [!Ref InstanceCount, 7]
+    - !Equals [!Ref InstanceCount, 8]
+    - !Equals [!Ref InstanceCount, 9]
+    - !Equals [!Ref InstanceCount, 10]
+  CreateEighthInstance: !Or
+    - !Equals [!Ref InstanceCount, 8]
+    - !Equals [!Ref InstanceCount, 9]
+    - !Equals [!Ref InstanceCount, 10]
+  CreateNinthInstance: !Or
+    - !Equals [!Ref InstanceCount, 9]
+    - !Equals [!Ref InstanceCount, 10]
+  CreateTenthInstance: !Equals [!Ref InstanceCount, 10]
 
 Outputs:
   ClusterEndpoint:

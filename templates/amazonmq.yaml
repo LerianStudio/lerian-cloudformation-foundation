@@ -26,9 +26,9 @@ Parameters:
     AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
     ConstraintDescription: "Must be a valid CIDR block (e.g., 10.0.0.0/16)"
 
-  PrivateSubnetId:
-    Type: AWS::EC2::Subnet::Id
-    Description: Private subnet ID for the broker
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs (1 for single-instance, 3 for cluster deployment)
 
   InstanceType:
     Type: String
@@ -38,6 +38,22 @@ Parameters:
       - mq.m5.large
       - mq.m5.xlarge
       - mq.m5.2xlarge
+      - mq.m5.4xlarge
+      - mq.m7g.large
+      - mq.m7g.xlarge
+      - mq.m7g.2xlarge
+      - mq.m7g.4xlarge
+      - mq.m7g.8xlarge
+      - mq.m7g.12xlarge
+      - mq.m7g.16xlarge
+
+  DeploymentMode:
+    Type: String
+    Description: Broker deployment mode. CLUSTER_MULTI_AZ deploys 3 nodes across AZs for HA.
+    Default: SINGLE_INSTANCE
+    AllowedValues:
+      - SINGLE_INSTANCE
+      - CLUSTER_MULTI_AZ
 
   AdminUsername:
     Type: String
@@ -47,6 +63,9 @@ Parameters:
     MinLength: 1
     MaxLength: 100
     ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+Conditions:
+  IsClusterDeployment: !Equals [!Ref DeploymentMode, "CLUSTER_MULTI_AZ"]
 
 Resources:
   # =============================================================================
@@ -118,11 +137,13 @@ Resources:
       EngineType: RABBITMQ
       EngineVersion: "3.13"
       HostInstanceType: !Ref InstanceType
-      DeploymentMode: SINGLE_INSTANCE
+      DeploymentMode: !Ref DeploymentMode
       PubliclyAccessible: false
       AutoMinorVersionUpgrade: true
-      SubnetIds:
-        - !Ref PrivateSubnetId
+      SubnetIds: !If
+        - IsClusterDeployment
+        - !Ref PrivateSubnetIds
+        - - !Select [0, !Ref PrivateSubnetIds]
       SecurityGroups:
         - !Ref AmazonMQSecurityGroup
       Users:

@@ -42,6 +42,11 @@ Parameters:
       - db.m7g.xlarge
       - db.r7g.large
       - db.r7g.xlarge
+      - db.r7g.2xlarge
+      - db.r7g.4xlarge
+      - db.r7g.8xlarge
+      - db.r7g.12xlarge
+      - db.r7g.16xlarge
 
   AllocatedStorage:
     Type: Number
@@ -56,6 +61,22 @@ Parameters:
     MinValue: 20
     MaxValue: 65536
     ConstraintDescription: "Must be between 20 and 65536 GB"
+
+  StorageType:
+    Type: String
+    Description: Storage type for RDS instance
+    Default: gp3
+    AllowedValues:
+      - gp3
+      - io1
+      - io2
+
+  Iops:
+    Type: Number
+    Description: Provisioned IOPS for RDS storage. For gp3 max is 16000, for io1/io2 max is 64000.
+    Default: 3000
+    MinValue: 3000
+    MaxValue: 64000
 
   DatabaseName:
     Type: String
@@ -262,7 +283,8 @@ Resources:
       EngineVersion: "16.8"
       AllocatedStorage: !Ref AllocatedStorage
       MaxAllocatedStorage: !Ref MaxAllocatedStorage
-      StorageType: gp3
+      StorageType: !Ref StorageType
+      Iops: !Ref Iops
       StorageEncrypted: true
       KmsKeyId: !GetAtt RDSKMSKey.Arn
       DBName: !Ref DatabaseName
