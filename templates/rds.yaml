@@ -67,6 +67,7 @@ Parameters:
     Description: Storage type for RDS instance
     Default: gp3
     AllowedValues:
+      - gp2
       - gp3
       - io1
       - io2
@@ -136,6 +137,9 @@ Parameters:
 
 Conditions:
   CreateReplica: !Equals [!Ref CreateReadReplica, "true"]
+  UseProvisionedIops: !Or
+    - !Equals [!Ref StorageType, "io1"]
+    - !Equals [!Ref StorageType, "io2"]
 
 Resources:
   # =============================================================================
@@ -284,7 +288,7 @@ Resources:
       AllocatedStorage: !Ref AllocatedStorage
       MaxAllocatedStorage: !Ref MaxAllocatedStorage
       StorageType: !Ref StorageType
-      Iops: !Ref Iops
+      Iops: !If [UseProvisionedIops, !Ref Iops, !Ref "AWS::NoValue"]
       StorageEncrypted: true
       KmsKeyId: !GetAtt RDSKMSKey.Arn
       DBName: !Ref DatabaseName
