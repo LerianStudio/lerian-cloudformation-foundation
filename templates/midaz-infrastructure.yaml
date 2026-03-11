@@ -70,6 +70,12 @@ Metadata:
           - AmazonMQDeploymentMode
           - AmazonMQAdminUsername
       - Label:
+          default: "Additional Network Access"
+        Parameters:
+          - AdditionalIngressCIDR1
+          - AdditionalIngressCIDR2
+          - AdditionalIngressCIDR3
+      - Label:
           default: "DNS and Ingress Configuration"
         Parameters:
           - DomainName
@@ -158,6 +164,13 @@ Metadata:
         default: "Deployment Mode"
       AmazonMQAdminUsername:
         default: "Admin Username"
+      # Additional Network Access
+      AdditionalIngressCIDR1:
+        default: "Additional CIDR 1"
+      AdditionalIngressCIDR2:
+        default: "Additional CIDR 2"
+      AdditionalIngressCIDR3:
+        default: "Additional CIDR 3"
       # DNS
       DomainName:
         default: "Domain Name (Optional)"
@@ -521,6 +534,30 @@ Parameters:
     ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
 
   # =============================================================================
+  # ADDITIONAL NETWORK ACCESS
+  # =============================================================================
+  AdditionalIngressCIDR1:
+    Type: String
+    Default: ""
+    Description: "Additional CIDR block for resource access (e.g., VPN, VPC peering). Leave empty to skip."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block or empty"
+
+  AdditionalIngressCIDR2:
+    Type: String
+    Default: ""
+    Description: "Additional CIDR block for resource access (e.g., VPN, VPC peering). Leave empty to skip."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block or empty"
+
+  AdditionalIngressCIDR3:
+    Type: String
+    Default: ""
+    Description: "Additional CIDR block for resource access (e.g., VPN, VPC peering). Leave empty to skip."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block or empty"
+
+  # =============================================================================
   # DNS AND INGRESS CONFIGURATION
   # =============================================================================
   DomainName:
@@ -605,6 +642,9 @@ Resources:
         MultiAZ: !Ref RDSMultiAZ
         DeletionProtection: !Ref RDSDeletionProtection
         BackupRetentionPeriod: !Ref RDSBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-rds-stack"
@@ -632,6 +672,9 @@ Resources:
         MasterUsername: !Ref DocumentDBMasterUsername
         DeletionProtection: !Ref DocumentDBDeletionProtection
         BackupRetentionPeriod: !Ref DocumentDBBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-documentdb-stack"
@@ -655,6 +698,9 @@ Resources:
         VpcCIDR: !Ref VpcCIDR
         CacheSubnetIds: !GetAtt VPCStack.Outputs.DatabaseSubnetIds
         NodeType: !Ref ElastiCacheNodeType
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-elasticache-stack"
@@ -680,6 +726,9 @@ Resources:
         InstanceType: !Ref AmazonMQInstanceType
         DeploymentMode: !Ref AmazonMQDeploymentMode
         AdminUsername: !Ref AmazonMQAdminUsername
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-amazonmq-stack"
