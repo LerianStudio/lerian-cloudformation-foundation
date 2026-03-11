@@ -87,9 +87,18 @@ Parameters:
 
 Conditions:
   IsClusterDeployment: !Equals [!Ref DeploymentMode, "CLUSTER_MULTI_AZ"]
-  HasAdditionalCIDR1: !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
-  HasAdditionalCIDR2: !Not [!Equals [!Ref AdditionalIngressCIDR2, ""]]
-  HasAdditionalCIDR3: !Not [!Equals [!Ref AdditionalIngressCIDR3, ""]]
+  HasAdditionalCIDR1: !And
+    - !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
+    - !Not [!Equals [!Ref AdditionalIngressCIDR1, !Ref VpcCIDR]]
+  HasAdditionalCIDR2: !And
+    - !Not [!Equals [!Ref AdditionalIngressCIDR2, ""]]
+    - !Not [!Equals [!Ref AdditionalIngressCIDR2, !Ref VpcCIDR]]
+    - !Not [!Equals [!Ref AdditionalIngressCIDR2, !Ref AdditionalIngressCIDR1]]
+  HasAdditionalCIDR3: !And
+    - !Not [!Equals [!Ref AdditionalIngressCIDR3, ""]]
+    - !Not [!Equals [!Ref AdditionalIngressCIDR3, !Ref VpcCIDR]]
+    - !Not [!Equals [!Ref AdditionalIngressCIDR3, !Ref AdditionalIngressCIDR1]]
+    - !Not [!Equals [!Ref AdditionalIngressCIDR3, !Ref AdditionalIngressCIDR2]]
 
 Resources:
   # =============================================================================
