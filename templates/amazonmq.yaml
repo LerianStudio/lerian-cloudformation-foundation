@@ -309,7 +309,7 @@ Outputs:
 
   ConsoleURL:
     Description: AmazonMQ Management Console URL
-    Value: !Sub "https://${AmazonMQBroker}.mq.${AWS::Region}.amazonaws.com"
+    Value: !Sub "https://${AmazonMQBroker}.mq.${AWS::Region}.on.aws"
 
   SecretArn:
     Description: AmazonMQ Password Secret ARN
