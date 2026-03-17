@@ -11,7 +11,7 @@ on:
 
 env:
   AWS_REGION: sa-east-1
-  S3_BUCKET: midaz-cloudformation-foundation
+  S3_BUCKET: lerian-cloudformation-templates
 
 permissions:
   contents: write
