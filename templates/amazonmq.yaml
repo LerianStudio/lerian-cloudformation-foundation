@@ -85,7 +85,16 @@ Parameters:
     AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
     ConstraintDescription: "Must be a valid CIDR block or empty"
 
+  EnableKMSEncryption:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: "Encrypt Secrets Manager secret and CloudWatch Log Group with a customer-managed KMS key (CMK)."
+
 Conditions:
+  UseKMSEncryption: !Equals [!Ref EnableKMSEncryption, "true"]
   IsClusterDeployment: !Equals [!Ref DeploymentMode, "CLUSTER_MULTI_AZ"]
   HasAdditionalCIDR1: !And
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
@@ -102,13 +111,59 @@ Conditions:
 
 Resources:
   # =============================================================================
+  # KMS KEY
+  # =============================================================================
+  AmazonMQKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for AmazonMQ secrets and log group encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow CloudWatch Logs
+            Effect: Allow
+            Principal:
+              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-amazonmq-kms"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  AmazonMQKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-amazonmq"
+      TargetKeyId: !Ref AmazonMQKMSKey
+
+  # =============================================================================
   # SECRETS
   # =============================================================================
   AmazonMQSecret:
     Type: AWS::SecretsManager::Secret
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_149"
+            comment: "KMS CMK encryption is optional, configurable via EnableKMSEncryption parameter"
     Properties:
       Name: !Sub "${ProjectName}/amazonmq-password"
       Description: AmazonMQ Admin Password
+      KmsKeyId: !If [UseKMSEncryption, !Ref AmazonMQKMSKey, !Ref "AWS::NoValue"]
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${AdminUsername}"}'
         GenerateStringKey: password
@@ -258,9 +313,15 @@ Resources:
   # =============================================================================
   AmazonMQLogGroup:
     Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_158"
+            comment: "KMS encryption is optional, configurable via EnableKMSEncryption parameter"
     Properties:
       LogGroupName: !Sub "/aws/amazonmq/${ProjectName}"
       RetentionInDays: 30
+      KmsKeyId: !If [UseKMSEncryption, !GetAtt AmazonMQKMSKey.Arn, !Ref "AWS::NoValue"]
 
   # =============================================================================
   # AMAZONMQ BROKER

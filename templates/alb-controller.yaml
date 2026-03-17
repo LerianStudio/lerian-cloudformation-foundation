@@ -41,10 +41,75 @@ Parameters:
 
 Resources:
   # =============================================================================
+  # KMS KEY FOR LAMBDA
+  # =============================================================================
+  ALBControllerLambdaKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for ALB Controller deployer Lambda environment variable encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow Lambda Service
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-alb-controller-lambda-kms"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ALBControllerLambdaKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-alb-controller-lambda"
+      TargetKeyId: !Ref ALBControllerLambdaKMSKey
+
+  # =============================================================================
+  # SQS DEAD LETTER QUEUE FOR LAMBDA
+  # =============================================================================
+  ALBControllerDeployerDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-alb-controller-deployer-dlq"
+      KmsMasterKeyId: !Ref ALBControllerLambdaKMSKey
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-alb-controller-deployer-dlq"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
   # ALB CONTROLLER IAM ROLE (IRSA)
   # =============================================================================
   ALBControllerRole:
     Type: AWS::IAM::Role
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_107"
+            comment: "Official AWS ALB Controller policy — required permissions, cannot be further restricted"
+          - id: "CKV_AWS_108"
+            comment: "Official AWS ALB Controller policy — required permissions, cannot be further restricted"
+          - id: "CKV_AWS_109"
+            comment: "Official AWS ALB Controller policy — iam:CreateServiceLinkedRole is scoped to elasticloadbalancing.amazonaws.com"
+          - id: "CKV_AWS_110"
+            comment: "Official AWS ALB Controller policy — required permissions, cannot be further restricted"
+          - id: "CKV_AWS_111"
+            comment: "Official AWS ALB Controller policy — required permissions, cannot be further restricted"
     Properties:
       RoleName: !Sub "${ProjectName}-alb-controller-role"
       PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
@@ -304,6 +369,19 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+        - PolicyName: DLQAndKMS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt ALBControllerDeployerDLQ.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt ALBControllerLambdaKMSKey.Arn
 
   # =============================================================================
   # EKS ACCESS ENTRY FOR LAMBDA ROLE
@@ -324,6 +402,11 @@ Resources:
   # =============================================================================
   ALBControllerDeployerFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_117"
+            comment: "Deployer Lambda requires internet access to download kubectl/helm binaries"
     Properties:
       FunctionName: !Sub "${ProjectName}-alb-controller-deployer"
       Description: Deploys AWS Load Balancer Controller to EKS cluster
@@ -332,6 +415,10 @@ Resources:
       Timeout: 900
       MemorySize: 1024
       Role: !GetAtt ALBControllerDeployerRole.Arn
+      ReservedConcurrentExecutions: 1
+      KmsKeyArn: !GetAtt ALBControllerLambdaKMSKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt ALBControllerDeployerDLQ.Arn
       Environment:
         Variables:
           CLUSTER_NAME: !Ref ClusterName

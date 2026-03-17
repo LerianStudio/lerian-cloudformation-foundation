@@ -49,6 +49,58 @@ Parameters:
 
 Resources:
   # =============================================================================
+  # KMS KEY FOR LAMBDA
+  # =============================================================================
+  ExternalDNSLambdaKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for ExternalDNS deployer Lambda environment variable encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow Lambda Service
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-external-dns-lambda-kms"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ExternalDNSLambdaKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-external-dns-lambda"
+      TargetKeyId: !Ref ExternalDNSLambdaKMSKey
+
+  # =============================================================================
+  # SQS DEAD LETTER QUEUE FOR LAMBDA
+  # =============================================================================
+  ExternalDNSDeployerDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-external-dns-deployer-dlq"
+      KmsMasterKeyId: !Ref ExternalDNSLambdaKMSKey
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-external-dns-deployer-dlq"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
   # EXTERNAL DNS IAM ROLE (IRSA)
   # =============================================================================
   ExternalDNSRole:
@@ -137,6 +189,19 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+        - PolicyName: DLQAndKMS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt ExternalDNSDeployerDLQ.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt ExternalDNSLambdaKMSKey.Arn
 
   # =============================================================================
   # EKS ACCESS ENTRY FOR LAMBDA ROLE
@@ -157,6 +222,11 @@ Resources:
   # =============================================================================
   ExternalDNSDeployerFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_117"
+            comment: "Deployer Lambda requires internet access to download kubectl/helm binaries"
     Properties:
       FunctionName: !Sub "${ProjectName}-external-dns-deployer"
       Description: Deploys ExternalDNS to EKS cluster
@@ -165,6 +235,10 @@ Resources:
       Timeout: 900
       MemorySize: 1024
       Role: !GetAtt ExternalDNSDeployerRole.Arn
+      ReservedConcurrentExecutions: 1
+      KmsKeyArn: !GetAtt ExternalDNSLambdaKMSKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt ExternalDNSDeployerDLQ.Arn
       Environment:
         Variables:
           CLUSTER_NAME: !Ref ClusterName

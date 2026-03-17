@@ -67,6 +67,22 @@ Parameters:
     Default: "false"
     Description: Enable deletion protection to prevent accidental cluster deletion.
 
+  EnableTLS:
+    Type: String
+    AllowedValues:
+      - "enabled"
+      - "disabled"
+    Default: "disabled"
+    Description: "Enable TLS for DocumentDB connections. Requires all clients to connect with TLS."
+
+  EnableSecretsKMS:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: "Encrypt Secrets Manager secret with a customer-managed KMS key (CMK)."
+
   BackupRetentionPeriod:
     Type: Number
     MinValue: 1
@@ -101,9 +117,15 @@ Resources:
   # =============================================================================
   DocumentDBSecret:
     Type: AWS::SecretsManager::Secret
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_149"
+            comment: "KMS CMK encryption is optional, configurable via EnableSecretsKMS parameter"
     Properties:
       Name: !Sub "${ProjectName}/documentdb-password"
       Description: DocumentDB Master Password
+      KmsKeyId: !If [UseSecretsKMS, !Ref DocumentDBKMSKey, !Ref "AWS::NoValue"]
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
         GenerateStringKey: password
@@ -221,12 +243,23 @@ Resources:
   # =============================================================================
   DocumentDBParameterGroup:
     Type: AWS::DocDB::DBClusterParameterGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_90"
+            comment: "TLS enforcement is optional, configurable via EnableTLS parameter"
+          - id: "CKV_AWS_104"
+            comment: "Audit logging is enabled in the cluster via EnableCloudwatchLogsExports, not in the parameter group"
+          - id: "CKV_AWS_74"
+            comment: "Encryption at rest is configured in the cluster resource with KmsKeyId"
+          - id: "CKV_AWS_85"
+            comment: "Logging is enabled in the cluster via EnableCloudwatchLogsExports"
     Properties:
       Name: !Sub "${ProjectName}-documentdb-params"
       Family: docdb5.0
       Description: Parameter group for Midaz DocumentDB
       Parameters:
-        tls: "disabled"
+        tls: !If [IsTLSEnabled, "enabled", "disabled"]
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-documentdb-params"
@@ -409,6 +442,8 @@ Resources:
           Value: !Ref EnvironmentName
 
 Conditions:
+  IsTLSEnabled: !Equals [!Ref EnableTLS, "enabled"]
+  UseSecretsKMS: !Equals [!Ref EnableSecretsKMS, "true"]
   HasAdditionalCIDR1: !And
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, !Ref VpcCIDR]]

@@ -120,6 +120,14 @@ Parameters:
     Default: "false"
     Description: Enable Multi-AZ deployment for high availability. Recommended for production workloads.
 
+  EnableSecretsKMS:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: "Encrypt Secrets Manager secret with a customer-managed KMS key (CMK)."
+
   DeletionProtection:
     Type: String
     AllowedValues:
@@ -157,6 +165,7 @@ Parameters:
     ConstraintDescription: "Must be a valid CIDR block or empty"
 
 Conditions:
+  UseSecretsKMS: !Equals [!Ref EnableSecretsKMS, "true"]
   CreateReplica: !Equals [!Ref CreateReadReplica, "true"]
   UseProvisionedIops: !Or
     - !Equals [!Ref StorageType, "io1"]
@@ -180,9 +189,15 @@ Resources:
   # =============================================================================
   RDSMasterSecret:
     Type: AWS::SecretsManager::Secret
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_149"
+            comment: "KMS CMK encryption is optional, configurable via EnableSecretsKMS parameter"
     Properties:
       Name: !Sub "${ProjectName}/rds-master-password"
       Description: RDS Master Password
+      KmsKeyId: !If [UseSecretsKMS, !Ref RDSKMSKey, !Ref "AWS::NoValue"]
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
         GenerateStringKey: password
@@ -313,6 +328,11 @@ Resources:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
     UpdateReplacePolicy: Snapshot
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_157"
+            comment: "Multi-AZ is optional, configurable via MultiAZ parameter (recommended true for production)"
     Properties:
       DBInstanceIdentifier: !Sub "${ProjectName}-rds"
       DBInstanceClass: !Ref InstanceClass

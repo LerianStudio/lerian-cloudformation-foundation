@@ -42,6 +42,15 @@ Parameters:
       - cache.r7g.large
       - cache.r7g.xlarge
 
+  AuthToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+    MaxLength: 128
+    Description: "Optional AUTH token for in-transit encryption (16-128 printable chars, no spaces or @). Leave empty to disable."
+    AllowedPattern: "^$|^[\\x21-\\x7E]{16,128}$"
+    ConstraintDescription: "Must be empty or 16-128 printable ASCII characters excluding spaces and @"
+
   AdditionalIngressCIDR1:
     Type: String
     Default: ""
@@ -64,6 +73,7 @@ Parameters:
     ConstraintDescription: "Must be a valid CIDR block or empty"
 
 Conditions:
+  HasAuthToken: !Not [!Equals [!Ref AuthToken, ""]]
   HasAdditionalCIDR1: !And
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, !Ref VpcCIDR]]
@@ -171,6 +181,11 @@ Resources:
   # =============================================================================
   ElastiCacheReplicationGroup:
     Type: AWS::ElastiCache::ReplicationGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: "CKV_AWS_31"
+            comment: "AUTH token is optional, configurable via AuthToken parameter. TransitEncryptionMode is preferred to allow gradual client migration"
     Properties:
       ReplicationGroupId: !Sub "${ProjectName}-valkey"
       ReplicationGroupDescription: Valkey cluster for Midaz
@@ -186,6 +201,7 @@ Resources:
       MultiAZEnabled: true
       TransitEncryptionEnabled: true
       TransitEncryptionMode: preferred
+      AuthToken: !If [HasAuthToken, !Ref AuthToken, !Ref "AWS::NoValue"]
       AtRestEncryptionEnabled: true
       AutoMinorVersionUpgrade: true
       PreferredMaintenanceWindow: "mon:00:00-mon:03:00"
