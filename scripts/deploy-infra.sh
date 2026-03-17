@@ -18,6 +18,7 @@ STACK_NAME="${1:-midaz-infra}"
 AWS_REGION="${2:-us-east-2}"
 S3_BUCKET="${3:-midaz-dev-cfn-templates-us-east-2}"
 PROJECT_NAME="${4:-$STACK_NAME}"
+PRODUCT="${5:-midaz}"
 
 echo -e "${BLUE}==========================================${NC}"
 echo -e "${BLUE}  Midaz Infrastructure Deployment${NC}"
@@ -48,7 +49,7 @@ echo ""
 echo -e "${BLUE}Deploying infrastructure...${NC}"
 aws cloudformation deploy \
     --stack-name "$STACK_NAME" \
-    --template-url "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/templates/midaz-infrastructure.yaml" \
+    --template-url "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/products/${PRODUCT}/infrastructure.yaml" \
     --parameter-overrides \
         ProjectName="$PROJECT_NAME" \
         EnvironmentName="production" \

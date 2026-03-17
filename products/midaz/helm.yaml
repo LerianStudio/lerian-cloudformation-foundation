@@ -22,10 +22,6 @@ Parameters:
     Type: String
     Description: EKS Cluster Name
 
-  ClusterSecurityGroupId:
-    Type: String
-    Description: EKS Cluster Security Group ID
-
   RDSEndpoint:
     Type: String
     Description: RDS PostgreSQL Endpoint

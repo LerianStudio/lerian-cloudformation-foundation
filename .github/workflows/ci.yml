@@ -7,6 +7,7 @@ on:
       - develop
     paths:
       - 'templates/**'
+      - 'products/**'
       - 'infrastructure/**'
       - '.github/workflows/**'
   pull_request:
@@ -54,6 +55,7 @@ jobs:
         route53
         alb-controller
         external-dns
+        midaz
         midaz-helm
         midaz-infrastructure
         midaz-application
@@ -83,6 +85,7 @@ jobs:
       runner_type: blacksmith-4vcpu-ubuntu-2404
       filter_paths: |
         templates
+        products
         infrastructure
       path_level: '1'
       enable_docker_scan: false
@@ -106,24 +109,40 @@ jobs:
       - name: Install cfn-lint
         run: pip install cfn-lint
 
-      - name: Run cfn-lint on templates
+      - name: Run cfn-lint on core templates
         run: |
           echo "## CloudFormation Lint Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Run cfn-lint with us-east-1 region (has all services) and ignore warnings
-          # -I W = ignore warnings, only fail on errors (E)
+          # Lint core templates
+          echo "### Core Templates" >> $GITHUB_STEP_SUMMARY
           if cfn-lint templates/*.yaml --regions us-east-1 --ignore-checks W --format parseable; then
-            echo "All templates passed linting (errors only)" >> $GITHUB_STEP_SUMMARY
+            echo "All core templates passed linting (errors only)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "Some templates have linting errors" >> $GITHUB_STEP_SUMMARY
+            echo "Some core templates have linting errors" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
+
+      - name: Run cfn-lint on product templates
+        run: |
+          echo "### Product Templates" >> $GITHUB_STEP_SUMMARY
+          for product_dir in products/*/; do
+            product=$(basename "$product_dir")
+            echo "#### $product" >> $GITHUB_STEP_SUMMARY
+            if ls "$product_dir"*.yaml 1> /dev/null 2>&1; then
+              if cfn-lint "$product_dir"*.yaml --regions us-east-1 --ignore-checks W --format parseable; then
+                echo "All $product templates passed" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "$product templates have linting errors" >> $GITHUB_STEP_SUMMARY
+                exit 1
+              fi
+            fi
+          done
 
           # Show warnings separately (non-blocking)
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Warnings (non-blocking)" >> $GITHUB_STEP_SUMMARY
-          cfn-lint templates/*.yaml --regions us-east-1 --include-checks W --format parseable 2>&1 | grep ":W" | head -20 >> $GITHUB_STEP_SUMMARY || echo "No warnings" >> $GITHUB_STEP_SUMMARY
+          cfn-lint templates/*.yaml products/**/*.yaml --regions us-east-1 --include-checks W --format parseable 2>&1 | grep ":W" | head -20 >> $GITHUB_STEP_SUMMARY || echo "No warnings" >> $GITHUB_STEP_SUMMARY
 
       - name: Run cfn-lint on infrastructure templates
         run: |
@@ -141,21 +160,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run Checkov on templates
+      - name: Run Checkov on core templates
         uses: bridgecrewio/checkov-action@v12
         with:
           directory: templates/
           framework: cloudformation
           soft_fail: true
           output_format: sarif
-          output_file_path: checkov-results.sarif
+          output_file_path: checkov-core-results.sarif
+
+      - name: Run Checkov on product templates
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: products/
+          framework: cloudformation
+          soft_fail: true
+          output_format: sarif
+          output_file_path: checkov-products-results.sarif
 
       - name: Upload Checkov SARIF
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         continue-on-error: true
         with:
-          sarif_file: checkov-results.sarif
+          sarif_file: checkov-core-results.sarif
 
   # ============================================================================
   # CloudFormation-Specific: Template Validation
@@ -210,32 +238,33 @@ jobs:
           warnings = []
           validated = 0
 
-          for f in sorted(glob.glob('templates/*.yaml')):
+          # Validate core templates and product templates
+          template_files = sorted(glob.glob('templates/*.yaml') + glob.glob('products/**/*.yaml', recursive=True))
+
+          for f in template_files:
               try:
                   with open(f) as file:
                       data = yaml.load(file, Loader=CFNLoader)
 
-                  template_name = f.split('/')[-1]
-
                   # Check required CloudFormation structure
                   if 'AWSTemplateFormatVersion' not in data:
-                      errors.append(f'{template_name}: Missing AWSTemplateFormatVersion')
+                      errors.append(f'{f}: Missing AWSTemplateFormatVersion')
                   if 'Description' not in data:
-                      errors.append(f'{template_name}: Missing Description')
+                      errors.append(f'{f}: Missing Description')
                   if 'Resources' not in data:
-                      errors.append(f'{template_name}: Missing Resources section')
+                      errors.append(f'{f}: Missing Resources section')
 
                   # Check for Metadata (recommended for Marketplace)
                   if 'Metadata' not in data:
-                      warnings.append(f'{template_name}: Missing Metadata section (recommended)')
+                      warnings.append(f'{f}: Missing Metadata section (recommended)')
 
                   # Check Parameters have descriptions
                   params = data.get('Parameters', {})
                   for pname, pconfig in params.items():
                       if isinstance(pconfig, dict) and not pconfig.get('Description'):
-                          warnings.append(f'{template_name}: Parameter {pname} missing Description')
+                          warnings.append(f'{f}: Parameter {pname} missing Description')
 
-                  print(f'  [PASS] {template_name}')
+                  print(f'  [PASS] {f}')
                   validated += 1
 
               except Exception as e:
@@ -316,11 +345,17 @@ jobs:
           errors = []
           warnings = []
 
-          # Check master template
-          master_file = 'templates/midaz-complete.yaml'
-          if not os.path.exists(master_file):
-              errors.append(f'Master template not found: {master_file}')
-          else:
+          # Check for full-stack.yaml in each product
+          for product_dir in sorted(glob.glob('products/*/')):
+              product = os.path.basename(os.path.normpath(product_dir))
+              master_file = os.path.join(product_dir, 'full-stack.yaml')
+
+              if not os.path.exists(master_file):
+                  warnings.append(f'Product {product}: No full-stack.yaml (Marketplace template)')
+                  continue
+
+              print(f"\nChecking product: {product}")
+
               with open(master_file) as f:
                   master = yaml.load(f, Loader=CFNLoader)
 
@@ -330,7 +365,7 @@ jobs:
               required_params = ['MPS3BucketName', 'MPS3BucketRegion', 'MPS3KeyPrefix']
               for p in required_params:
                   if p not in params:
-                      errors.append(f'Missing required Marketplace parameter: {p}')
+                      errors.append(f'{product}/full-stack.yaml: Missing required Marketplace parameter: {p}')
                   else:
                       print(f'  [PASS] Required parameter: {p}')
 
@@ -342,9 +377,9 @@ jobs:
                       template_url = props.get('TemplateURL', '')
                       if isinstance(template_url, str):
                           if template_url.startswith('./') or template_url.startswith('../'):
-                              errors.append(f'{name}: TemplateURL uses relative path. Must use S3 URL.')
+                              errors.append(f'{product}/{name}: TemplateURL uses relative path. Must use S3 URL.')
                           elif 'Sub' not in str(props.get('TemplateURL', {})):
-                              warnings.append(f'{name}: TemplateURL should use !Sub for dynamic S3 paths')
+                              warnings.append(f'{product}/{name}: TemplateURL should use !Sub for dynamic S3 paths')
                       else:
                           print(f'  [PASS] Nested stack {name} uses S3 TemplateURL')
 
@@ -356,19 +391,19 @@ jobs:
                       if 'username' in pname_lower or 'keyprefix' in pname_lower:
                           continue  # Skip false positives
                       if not pconfig.get('NoEcho'):
-                          warnings.append(f'{pname}: Sensitive parameter should have NoEcho: true')
+                          warnings.append(f'{product}/{pname}: Sensitive parameter should have NoEcho: true')
                       else:
                           print(f'  [PASS] Sensitive parameter {pname} has NoEcho')
 
               # Check all parameters with AllowedPattern have ConstraintDescription
               for pname, pconfig in params.items():
                   if pconfig.get('AllowedPattern') and not pconfig.get('ConstraintDescription'):
-                      warnings.append(f'{pname}: Has AllowedPattern but missing ConstraintDescription')
+                      warnings.append(f'{product}/{pname}: Has AllowedPattern but missing ConstraintDescription')
 
           # Check all templates for consistent tagging
           print("\nChecking all templates for tagging consistency...")
-          for f in sorted(glob.glob('templates/*.yaml')):
-              template_name = f.split('/')[-1]
+          all_templates = sorted(glob.glob('templates/*.yaml') + glob.glob('products/**/*.yaml', recursive=True))
+          for f in all_templates:
               with open(f) as file:
                   data = yaml.load(file, Loader=CFNLoader)
 
@@ -383,7 +418,7 @@ jobs:
                       # Check if it's a resource that typically supports tags
                       taggable = ['EC2', 'RDS', 'EKS', 'ElastiCache', 'AmazonMQ', 'S3', 'KMS', 'IAM::Role']
                       if any(t in rtype for t in taggable):
-                          warnings.append(f'{template_name}: Resource {rname} ({rtype}) may be missing Tags')
+                          warnings.append(f'{f}: Resource {rname} ({rtype}) may be missing Tags')
 
           print("")
 
@@ -439,7 +474,7 @@ jobs:
       - name: Validate templates for ${{ matrix.region }}
         run: |
           echo "Validating templates for region: ${{ matrix.region }}"
-          cfn-lint templates/*.yaml --regions ${{ matrix.region }} --format parseable || true
+          cfn-lint templates/*.yaml products/**/*.yaml --regions ${{ matrix.region }} --format parseable || true
 
   # ============================================================================
   # Summary Job

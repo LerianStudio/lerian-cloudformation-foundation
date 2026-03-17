@@ -20,6 +20,7 @@ REGION="${2:-us-east-1}"
 CHART_VERSION="${3:-5.3.0}"
 NAMESPACE="${4:-midaz}"
 HELM_REPOSITORY="${5:-oci://registry-1.docker.io/lerianstudio/midaz-helm}"
+PRODUCT="${6:-midaz}"
 
 HELM_STACK_NAME="${INFRA_STACK_NAME}-helm"
 
@@ -139,15 +140,15 @@ echo ""
 # UPLOAD HELM TEMPLATE TO S3
 # =============================================================================
 echo "Uploading Helm template to S3..."
-aws s3 cp "${TEMPLATES_DIR}/midaz-helm.yaml" \
-    "s3://${S3_BUCKET}/templates/midaz-helm.yaml" \
+aws s3 cp "${PROJECT_DIR}/products/${PRODUCT}/helm.yaml" \
+    "s3://${S3_BUCKET}/products/${PRODUCT}/helm.yaml" \
     --region "${REGION}"
 
 # Use regional S3 endpoint
 if [ "${REGION}" == "us-east-1" ]; then
-    TEMPLATE_URL="https://${S3_BUCKET}.s3.amazonaws.com/templates/midaz-helm.yaml"
+    TEMPLATE_URL="https://${S3_BUCKET}.s3.amazonaws.com/products/${PRODUCT}/helm.yaml"
 else
-    TEMPLATE_URL="https://${S3_BUCKET}.s3.${REGION}.amazonaws.com/templates/midaz-helm.yaml"
+    TEMPLATE_URL="https://${S3_BUCKET}.s3.${REGION}.amazonaws.com/products/${PRODUCT}/helm.yaml"
 fi
 echo "Template URL: ${TEMPLATE_URL}"
 echo ""

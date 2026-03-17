@@ -66,26 +66,32 @@ done
 echo ""
 echo "2. Checking required Marketplace parameters..."
 echo "-------------------------------------------"
-MASTER_TEMPLATE="$TEMPLATES_DIR/midaz-complete.yaml"
 required_params=("MPS3BucketName" "MPS3BucketRegion" "MPS3KeyPrefix")
-for param in "${required_params[@]}"; do
-    if grep -q "$param:" "$MASTER_TEMPLATE"; then
-        echo "  [OK] $param found"
-    else
-        echo "  [FAIL] $param not found in master template"
-        exit 1
-    fi
+for complete_template in "${PROJECT_DIR}"/products/*/full-stack.yaml; do
+    product=$(basename "$(dirname "$complete_template")")
+    echo "  Checking product: $product"
+    for param in "${required_params[@]}"; do
+        if grep -q "$param:" "$complete_template"; then
+            echo "  [OK] $param found in $product/full-stack.yaml"
+        else
+            echo "  [FAIL] $param not found in $product/full-stack.yaml"
+            exit 1
+        fi
+    done
 done
 
 echo ""
 echo "3. Checking TemplateURL format..."
 echo "-------------------------------------------"
-if grep -q "TemplateURL: \./\|TemplateURL: \"\./" "$MASTER_TEMPLATE"; then
-    echo "  [FAIL] Found relative TemplateURL paths. Use S3 URLs for Marketplace."
-    exit 1
-else
-    echo "  [OK] All TemplateURLs use S3 format"
-fi
+for complete_template in "${PROJECT_DIR}"/products/*/full-stack.yaml; do
+    product=$(basename "$(dirname "$complete_template")")
+    if grep -q "TemplateURL: \./\|TemplateURL: \"\./" "$complete_template"; then
+        echo "  [FAIL] $product/full-stack.yaml: Found relative TemplateURL paths. Use S3 URLs."
+        exit 1
+    else
+        echo "  [OK] $product/full-stack.yaml: All TemplateURLs use S3 format"
+    fi
+done
 
 echo ""
 echo "4. Checking for hardcoded credentials..."
@@ -118,7 +124,7 @@ if [ "$CFN_LINT_AVAILABLE" = true ]; then
     echo "6. Running cfn-lint..."
     echo "-------------------------------------------"
     cd "$PROJECT_DIR"
-    cfn-lint templates/*.yaml || true
+    cfn-lint templates/*.yaml products/**/*.yaml || true
 fi
 
 echo ""

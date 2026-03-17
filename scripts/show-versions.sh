@@ -24,15 +24,24 @@ import json
 with open('template-versions.json', 'r') as f:
     data = json.load(f)
 
+# Core templates
 templates = data.get('templates', {})
-max_len = max(len(t) for t in templates.keys())
+if templates:
+    print("  Core templates:")
+    max_len = max(len(t) for t in templates.keys())
+    for template, version in sorted(templates.items()):
+        tag = "(not released)" if version == "0.0.0" else f"{template}-v{version}"
+        print(f"    {template:<{max_len+2}} {version:<10} {tag}")
 
-for template, version in sorted(templates.items()):
-    if version == "0.0.0":
-        tag = "(not released)"
-    else:
-        tag = f"{template}-v{version}"
-    print(f"  {template:<{max_len+2}} {version:<10} {tag}")
+# Product templates
+products = data.get('products', {})
+for product, ptemplates in sorted(products.items()):
+    print(f"\n  Product: {product}")
+    if ptemplates:
+        max_len = max(len(t) for t in ptemplates.keys())
+        for template, version in sorted(ptemplates.items()):
+            tag = "(not released)" if version == "0.0.0" else f"{product}-{template}-v{version}"
+            print(f"    {template:<{max_len+2}} {version:<10} {tag}")
 EOF
 else
     echo "  (no template-versions.json found)"
