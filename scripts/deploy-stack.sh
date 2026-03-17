@@ -28,16 +28,17 @@ NC='\033[0m'
 # Default values
 STACK_NAME="${STACK_NAME:-midaz}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
+PRODUCT="${PRODUCT:-midaz}"
 
 # Get script directory for absolute paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="${PROJECT_DIR}/templates"
-TEMPLATE_FILE="${TEMPLATES_DIR}/midaz-complete.yaml"
+TEMPLATE_FILE="${PROJECT_DIR}/products/${PRODUCT}/full-stack.yaml"
 
 # Infrastructure defaults
 ENVIRONMENT="${ENVIRONMENT:-production}"
-PROJECT_NAME="${PROJECT_NAME:-midaz}"
+PROJECT_NAME="${PROJECT_NAME:-${PRODUCT}}"
 VPC_CIDR="${VPC_CIDR:-10.50.0.0/16}"
 
 # EKS defaults
@@ -75,6 +76,7 @@ usage() {
     echo "Usage: $0 [options]"
     echo ""
     echo "General Options:"
+    echo "  --product NAME           Product name (default: midaz, looks up products/<name>/full-stack.yaml)"
     echo "  --stack-name NAME        Stack name (default: midaz)"
     echo "  --region REGION          AWS region (default: us-east-1)"
     echo "  --environment ENV        Environment name (default: production)"
@@ -140,6 +142,11 @@ DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --product)
+            PRODUCT="$2"
+            TEMPLATE_FILE="${PROJECT_DIR}/products/${PRODUCT}/full-stack.yaml"
+            shift 2
+            ;;
         --stack-name)
             STACK_NAME="$2"
             shift 2
@@ -401,6 +408,19 @@ for template in "$TEMPLATES_DIR"/*.yaml; do
         --quiet
 done
 
+# Upload product templates
+PRODUCTS_DIR="${PROJECT_DIR}/products"
+for product_dir in "$PRODUCTS_DIR"/*/; do
+    product=$(basename "$product_dir")
+    for template in "$product_dir"*.yaml; do
+        template_name=$(basename "$template")
+        echo "  Uploading: products/$product/$template_name"
+        aws s3 cp "$template" "s3://$S3_BUCKET/${S3_PREFIX}products/${product}/${template_name}" \
+            --region "$AWS_REGION" \
+            --quiet
+    done
+done
+
 echo -e "  ${GREEN}✓${NC} Templates uploaded to s3://$S3_BUCKET/$S3_PREFIX"
 echo ""
 
@@ -465,9 +485,9 @@ echo ""
 
 # Use regional S3 URL
 if [ "$AWS_REGION" == "us-east-1" ]; then
-    TEMPLATE_URL="https://$S3_BUCKET.s3.amazonaws.com/${S3_PREFIX}midaz-complete.yaml"
+    TEMPLATE_URL="https://$S3_BUCKET.s3.amazonaws.com/${S3_PREFIX}products/${PRODUCT}/full-stack.yaml"
 else
-    TEMPLATE_URL="https://$S3_BUCKET.s3.$AWS_REGION.amazonaws.com/${S3_PREFIX}midaz-complete.yaml"
+    TEMPLATE_URL="https://$S3_BUCKET.s3.$AWS_REGION.amazonaws.com/${S3_PREFIX}products/${PRODUCT}/full-stack.yaml"
 fi
 
 # Check if stack exists

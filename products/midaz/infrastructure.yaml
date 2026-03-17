@@ -20,6 +20,14 @@ Metadata:
           - EnvironmentName
           - ProjectName
       - Label:
+          default: "Cluster Configuration"
+        Parameters:
+          - UseExistingCluster
+          - ExistingClusterName
+          - ExistingVpcId
+          - ExistingPrivateSubnetIds
+          - ExistingOIDCProviderArn
+      - Label:
           default: "Network Configuration"
         Parameters:
           - VpcCIDR
@@ -94,6 +102,17 @@ Metadata:
         default: "Environment"
       ProjectName:
         default: "Project Name"
+      # Cluster
+      UseExistingCluster:
+        default: "Use Existing Cluster"
+      ExistingClusterName:
+        default: "Existing Cluster Name"
+      ExistingVpcId:
+        default: "Existing VPC ID"
+      ExistingPrivateSubnetIds:
+        default: "Existing Private Subnet IDs"
+      ExistingOIDCProviderArn:
+        default: "Existing OIDC Provider ARN"
       # Network
       VpcCIDR:
         default: "VPC CIDR Block"
@@ -222,6 +241,40 @@ Parameters:
     MinLength: 3
     MaxLength: 128
     ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-128 characters long"
+
+  # =============================================================================
+  # CLUSTER CONFIGURATION
+  # =============================================================================
+  UseExistingCluster:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: |
+      Set to true to deploy services into an existing VPC and EKS cluster
+      (e.g., when deploying a second product to a shared cluster).
+      When true, ExistingClusterName, ExistingVpcId and ExistingPrivateSubnetIds are required.
+
+  ExistingClusterName:
+    Type: String
+    Default: ""
+    Description: "Name of the existing EKS cluster (required when UseExistingCluster=true)"
+
+  ExistingVpcId:
+    Type: String
+    Default: ""
+    Description: "VPC ID where services will be deployed (required when UseExistingCluster=true)"
+
+  ExistingPrivateSubnetIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated list of private subnet IDs (required when UseExistingCluster=true)"
+
+  ExistingOIDCProviderArn:
+    Type: String
+    Default: ""
+    Description: "OIDC Provider ARN of the existing EKS cluster (required when EnableALBController=true or EnableExternalDNS=true with UseExistingCluster=true)"
 
   # Network
   VpcCIDR:
@@ -584,6 +637,7 @@ Parameters:
     Description: Enable ExternalDNS for automatic DNS management (requires DomainName)
 
 Conditions:
+  CreateNewCluster: !Equals [!Ref UseExistingCluster, "false"]
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
   HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
   ShouldEnableALBController: !Equals [!Ref EnableALBController, "true"]
@@ -597,6 +651,7 @@ Resources:
   # =============================================================================
   VPCStack:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateNewCluster
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
       Parameters:
@@ -621,15 +676,14 @@ Resources:
   # =============================================================================
   RDSStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        DatabaseSubnetIds: !GetAtt VPCStack.Outputs.DatabaseSubnetIds
+        DatabaseSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
         InstanceClass: !Ref RDSInstanceClass
         AllocatedStorage: !Ref RDSAllocatedStorage
         MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
@@ -658,15 +712,14 @@ Resources:
   # =============================================================================
   DocumentDBStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+        PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
         InstanceClass: !Ref DocumentDBInstanceClass
         InstanceCount: !Ref DocumentDBInstanceCount
         MasterUsername: !Ref DocumentDBMasterUsername
@@ -688,15 +741,14 @@ Resources:
   # =============================================================================
   ElastiCacheStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        CacheSubnetIds: !GetAtt VPCStack.Outputs.DatabaseSubnetIds
+        CacheSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
         NodeType: !Ref ElastiCacheNodeType
         AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
         AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
@@ -714,15 +766,14 @@ Resources:
   # =============================================================================
   AmazonMQStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+        PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
         InstanceType: !Ref AmazonMQInstanceType
         DeploymentMode: !Ref AmazonMQDeploymentMode
         AdminUsername: !Ref AmazonMQAdminUsername
@@ -742,8 +793,8 @@ Resources:
   # =============================================================================
   EKSStack:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateNewCluster
     DependsOn:
-      - VPCStack
       - RDSStack
       - DocumentDBStack
       - ElastiCacheStack
@@ -774,14 +825,13 @@ Resources:
   Route53Stack:
     Type: AWS::CloudFormation::Stack
     Condition: HasDomainName
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}route53.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         DomainName: !Ref DomainName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-route53-stack"
@@ -796,15 +846,14 @@ Resources:
   ALBControllerStack:
     Type: AWS::CloudFormation::Stack
     Condition: ShouldEnableALBController
-    DependsOn: EKSStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
-        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
-        OIDCProviderArn: !GetAtt EKSStack.Outputs.OIDCProviderArn
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
+        ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
+        OIDCProviderArn: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-alb-controller-stack"
@@ -819,16 +868,14 @@ Resources:
   ExternalDNSStack:
     Type: AWS::CloudFormation::Stack
     Condition: ShouldEnableExternalDNS
-    DependsOn:
-      - EKSStack
-      - Route53Stack
+    DependsOn: Route53Stack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
-        OIDCProviderArn: !GetAtt EKSStack.Outputs.OIDCProviderArn
+        ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
+        OIDCProviderArn: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
         PrivateHostedZoneId: !GetAtt Route53Stack.Outputs.PrivateHostedZoneId
         DomainName: !Ref DomainName
       Tags:
@@ -860,13 +907,13 @@ Outputs:
   # =============================================================================
   VpcId:
     Description: VPC ID
-    Value: !GetAtt VPCStack.Outputs.VpcId
+    Value: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
     Export:
       Name: !Sub "${AWS::StackName}-VpcId"
 
   PrivateSubnetIds:
     Description: Private Subnet IDs
-    Value: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+    Value: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
     Export:
       Name: !Sub "${AWS::StackName}-PrivateSubnetIds"
 
@@ -875,11 +922,12 @@ Outputs:
   # =============================================================================
   EKSClusterName:
     Description: EKS Cluster Name
-    Value: !GetAtt EKSStack.Outputs.ClusterName
+    Value: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
     Export:
       Name: !Sub "${AWS::StackName}-EKSClusterName"
 
   EKSClusterEndpoint:
+    Condition: CreateNewCluster
     Description: EKS Cluster Endpoint
     Value: !GetAtt EKSStack.Outputs.ClusterEndpoint
     Export:
@@ -887,11 +935,12 @@ Outputs:
 
   OIDCProviderArn:
     Description: EKS OIDC Provider ARN
-    Value: !GetAtt EKSStack.Outputs.OIDCProviderArn
+    Value: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
     Export:
       Name: !Sub "${AWS::StackName}-OIDCProviderArn"
 
   ClusterSecurityGroupId:
+    Condition: CreateNewCluster
     Description: EKS Cluster Security Group ID
     Value: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
     Export:
@@ -993,7 +1042,9 @@ Outputs:
   # =============================================================================
   KubeconfigCommand:
     Description: Command to configure kubectl
-    Value: !Sub "aws eks update-kubeconfig --name ${EKSStack.Outputs.ClusterName} --region ${AWS::Region}"
+    Value: !Sub
+      - "aws eks update-kubeconfig --name ${ClusterName} --region ${AWS::Region}"
+      - ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
 
   DeployApplicationCommand:
     Description: Command to deploy the Midaz application

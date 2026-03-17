@@ -162,25 +162,28 @@ echo ""
 echo "5. Checking nested stack references..."
 
 ruby << 'RUBYEOF'
-# Get all template names
-templates = Dir.glob('templates/*.yaml').map { |f| File.basename(f, '.yaml') }.to_set
+# Get all core template names
+core_templates = Dir.glob('templates/*.yaml').map { |f| File.basename(f, '.yaml') }.to_set
+puts "   Found #{core_templates.size} core templates"
 
-puts "   Found #{templates.size} templates"
+# Check each product's full-stack.yaml references
+Dir.glob('products/*/full-stack.yaml').sort.each do |complete_file|
+  product = complete_file.split('/')[1]
+  product_templates = Dir.glob("products/#{product}/*.yaml").map { |f| File.basename(f, '.yaml') }.to_set
+  all_templates = core_templates + product_templates
 
-# Check midaz-complete.yaml references
-content = File.read('templates/midaz-complete.yaml')
+  content = File.read(complete_file)
+  refs = content.scan(/\$\{MPS3KeyPrefix\}(?:products\/#{product}\/)?([a-z-]+)\.yaml/).flatten.to_set
 
-# Find all template references in TemplateURL
-refs = content.scan(/\$\{MPS3KeyPrefix\}([a-z-]+)\.yaml/).flatten.to_set
+  puts "   #{product}/full-stack.yaml references: #{refs.size} templates"
 
-puts "   midaz-complete.yaml references: #{refs.size} templates"
-
-missing = refs - templates
-if missing.any?
-  puts "\n   ❌ Missing templates: #{missing.to_a.join(', ')}"
-  exit 1
-else
-  puts "   ✓ All referenced templates exist"
+  missing = refs - all_templates
+  if missing.any?
+    puts "\n   ❌ #{product}: Missing templates: #{missing.to_a.join(', ')}"
+    exit 1
+  else
+    puts "   ✓ #{product}: All referenced templates exist"
+  end
 end
 RUBYEOF
 
@@ -194,13 +197,12 @@ if [ "$HAS_AWSCLI" = true ]; then
     echo "   (Requires AWS credentials)"
 
     if aws sts get-caller-identity &>/dev/null; then
-        for template in "$TEMPLATES_DIR"/midaz-complete.yaml "$TEMPLATES_DIR"/midaz-infrastructure.yaml "$TEMPLATES_DIR"/midaz-application.yaml; do
+        for template in products/*/full-stack.yaml products/*/infrastructure.yaml; do
             if [ -f "$template" ]; then
-                name=$(basename "$template")
                 if aws cloudformation validate-template --template-body "file://$template" &>/dev/null; then
-                    echo -e "  ${GREEN}✓${NC} $name"
+                    echo -e "  ${GREEN}✓${NC} $template"
                 else
-                    echo -e "  ${RED}✗${NC} $name"
+                    echo -e "  ${RED}✗${NC} $template"
                 fi
             fi
         done
@@ -225,10 +227,10 @@ echo ""
 echo "  # 1. Upload templates to S3 (or use local file://)"
 echo "  aws s3 sync templates/ s3://your-bucket/templates/"
 echo ""
-echo "  # 2. Deploy complete stack"
+echo "  # 2. Deploy complete stack (replace <product> with your product name)"
 echo "  aws cloudformation deploy \\"
-echo "    --stack-name midaz-test \\"
-echo "    --template-file templates/midaz-complete.yaml \\"
+echo "    --stack-name <product>-test \\"
+echo "    --template-file products/<product>/full-stack.yaml \\"
 echo "    --parameter-overrides \\"
 echo "      AvailabilityZone1=us-east-1a \\"
 echo "      AvailabilityZone2=us-east-1b \\"

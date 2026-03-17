@@ -16,6 +16,7 @@ INFRA_STACK="${1:-midaz-infra}"
 AWS_REGION="${2:-us-east-2}"
 S3_BUCKET="${3:-midaz-dev-cfn-templates-us-east-2}"
 HELM_STACK="${4:-${INFRA_STACK}-helm}"
+PRODUCT="${5:-midaz}"
 
 echo -e "${BLUE}==========================================${NC}"
 echo -e "${BLUE}  Midaz Helm Stack Deployment${NC}"
@@ -96,7 +97,7 @@ echo ""
 echo -e "${BLUE}Deploying Helm stack...${NC}"
 aws cloudformation deploy \
     --stack-name "$HELM_STACK" \
-    --template-url "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/templates/midaz-helm.yaml" \
+    --template-url "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/products/${PRODUCT}/helm.yaml" \
     --parameter-overrides \
         ProjectName="$PROJECT_NAME" \
         EnvironmentName="production" \

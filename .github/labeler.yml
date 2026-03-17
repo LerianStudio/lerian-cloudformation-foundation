@@ -1,7 +1,7 @@
 # Configuration for actions/labeler
 # Used by pr-validation workflow to auto-label PRs based on changed files
 
-# Template labels
+# Core template labels
 template:vpc:
   - changed-files:
       - any-glob-to-any-file: 'templates/vpc.yaml'
@@ -38,27 +38,35 @@ template:external-dns:
   - changed-files:
       - any-glob-to-any-file: 'templates/external-dns.yaml'
 
-# Composite template labels
-template:midaz-complete:
+# Product: midaz
+product:midaz:
   - changed-files:
-      - any-glob-to-any-file: 'templates/midaz-complete.yaml'
+      - any-glob-to-any-file: 'products/midaz/**'
 
-template:midaz-infrastructure:
+product:midaz-complete:
   - changed-files:
-      - any-glob-to-any-file: 'templates/midaz-infrastructure.yaml'
+      - any-glob-to-any-file: 'products/midaz/full-stack.yaml'
 
-template:midaz-helm:
+product:midaz-infrastructure:
   - changed-files:
-      - any-glob-to-any-file: 'templates/midaz-helm.yaml'
+      - any-glob-to-any-file: 'products/midaz/infrastructure.yaml'
 
-template:midaz-application:
+product:midaz-helm:
   - changed-files:
-      - any-glob-to-any-file: 'templates/midaz-application.yaml'
+      - any-glob-to-any-file: 'products/midaz/helm.yaml'
+
+product:midaz-application:
+  - changed-files:
+      - any-glob-to-any-file: 'products/midaz/application.yaml'
 
 # Area labels
 area:templates:
   - changed-files:
       - any-glob-to-any-file: 'templates/**'
+
+area:products:
+  - changed-files:
+      - any-glob-to-any-file: 'products/**'
 
 area:infrastructure:
   - changed-files:
@@ -105,7 +113,7 @@ type:kubernetes:
           - 'templates/eks.yaml'
           - 'templates/alb-controller.yaml'
           - 'templates/external-dns.yaml'
-          - 'templates/midaz-helm.yaml'
+          - 'products/*/helm.yaml'
 
 type:messaging:
   - changed-files:

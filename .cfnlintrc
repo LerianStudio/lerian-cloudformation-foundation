@@ -1,5 +1,6 @@
 templates:
   - templates/*.yaml
+  - products/**/*.yaml
 
 regions:
   - us-east-1
