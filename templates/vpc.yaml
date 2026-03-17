@@ -625,3 +625,4 @@ Outputs:
   FlowLogsEnabled:
     Description: Whether VPC Flow Logs are enabled
     Value: !Ref EnableFlowLogs
+
