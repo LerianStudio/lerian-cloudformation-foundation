@@ -75,24 +75,6 @@ jobs:
     secrets: inherit
 
   # ============================================================================
-  # Shared Workflow: Security Scan
-  # ============================================================================
-  security-scan:
-    name: Security Scan
-    if: github.event_name == 'pull_request'
-    continue-on-error: true
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-security-scan.yml@v1.10.2
-    with:
-      runner_type: blacksmith-4vcpu-ubuntu-2404
-      filter_paths: |
-        templates
-        products
-        infrastructure
-      path_level: '1'
-      enable_docker_scan: false
-    secrets: inherit
-
-  # ============================================================================
   # CloudFormation-Specific: Template Linting
   # ============================================================================
   cfn-lint:
