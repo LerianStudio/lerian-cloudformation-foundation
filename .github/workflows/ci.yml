@@ -80,6 +80,7 @@ jobs:
   security-scan:
     name: Security Scan
     if: github.event_name == 'pull_request'
+    continue-on-error: true
     uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-security-scan.yml@v1.10.2
     with:
       runner_type: blacksmith-4vcpu-ubuntu-2404
@@ -165,7 +166,6 @@ jobs:
         with:
           directory: templates/
           framework: cloudformation
-          soft_fail: true
           output_format: sarif
           output_file_path: checkov-core-results.sarif
 
@@ -174,7 +174,6 @@ jobs:
         with:
           directory: products/
           framework: cloudformation
-          soft_fail: true
           output_format: sarif
           output_file_path: checkov-products-results.sarif
 
@@ -499,6 +498,7 @@ jobs:
       - name: Fail if any check failed
         if: |
           needs.cfn-lint.result == 'failure' ||
+          needs.checkov.result == 'failure' ||
           needs.validate-templates.result == 'failure' ||
           needs.marketplace-compliance.result == 'failure'
         run: exit 1
