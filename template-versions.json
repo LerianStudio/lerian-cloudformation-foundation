@@ -9,7 +9,8 @@
     "amazonmq": "0.2.2",
     "route53": "0.1.2",
     "alb-controller": "0.1.3",
-    "external-dns": "0.1.3"
+    "external-dns": "0.1.3",
+    "foundation": "0.1.0"
   },
   "products": {
     "midaz": {
@@ -17,6 +18,9 @@
       "helm": "0.1.3",
       "application": "0.1.7",
       "complete": "0.2.0"
+    },
+    "tracer": {
+      "infrastructure": "0.1.0"
     }
   }
 }
