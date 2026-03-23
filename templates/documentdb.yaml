@@ -491,3 +491,4 @@ Outputs:
     Description: DocumentDB Security Group ID
     Value: !Ref DocumentDBSecurityGroup
 
+
