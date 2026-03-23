@@ -112,6 +112,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}/documentdb-password"
       Description: DocumentDB Master Password
+      KmsKeyId: !GetAtt DocumentDBKMSKey.Arn
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
         GenerateStringKey: password
@@ -235,6 +236,7 @@ Resources:
       Description: Parameter group for Midaz DocumentDB
       Parameters:
         tls: !Ref EnableTLS
+        audit_logs: "enabled"
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-documentdb-params"

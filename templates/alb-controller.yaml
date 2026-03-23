@@ -44,6 +44,7 @@ Resources:
   # ALB CONTROLLER IAM ROLE (IRSA)
   # =============================================================================
   ALBControllerRole:
+    # checkov:skip=CKV_AWS_111:ALB Controller requires broad write permissions to manage ELBv2 resources across the account as per AWS documentation
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-alb-controller-role"
@@ -323,6 +324,9 @@ Resources:
   # LAMBDA FUNCTION FOR ALB CONTROLLER DEPLOYMENT
   # =============================================================================
   ALBControllerDeployerFunction:
+    # checkov:skip=CKV_AWS_116:Deployer Lambda is one-shot during stack creation, DLQ not applicable
+    # checkov:skip=CKV_AWS_117:Deployer Lambda requires internet access for Helm chart deployment to EKS
+    # checkov:skip=CKV_AWS_173:Environment variables contain only non-sensitive configuration (cluster name, VPC ID, region, chart version)
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "${ProjectName}-alb-controller-deployer"
@@ -331,6 +335,7 @@ Resources:
       Handler: index.handler
       Timeout: 900
       MemorySize: 1024
+      ReservedConcurrentExecutions: 1
       Role: !GetAtt ALBControllerDeployerRole.Arn
       Environment:
         Variables:

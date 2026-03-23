@@ -102,6 +102,49 @@ Conditions:
 
 Resources:
   # =============================================================================
+  # KMS KEY
+  # =============================================================================
+  AmazonMQKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for AmazonMQ encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow CloudWatch Logs
+            Effect: Allow
+            Principal:
+              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/amazonmq/${ProjectName}"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-amazonmq-kms"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  AmazonMQKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-amazonmq"
+      TargetKeyId: !Ref AmazonMQKMSKey
+
+  # =============================================================================
   # SECRETS
   # =============================================================================
   AmazonMQSecret:
@@ -109,6 +152,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}/amazonmq-password"
       Description: AmazonMQ Admin Password
+      KmsKeyId: !GetAtt AmazonMQKMSKey.Arn
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${AdminUsername}"}'
         GenerateStringKey: password
@@ -261,6 +305,7 @@ Resources:
     Properties:
       LogGroupName: !Sub "/aws/amazonmq/${ProjectName}"
       RetentionInDays: 30
+      KmsKeyId: !GetAtt AmazonMQKMSKey.Arn
 
   # =============================================================================
   # AMAZONMQ BROKER

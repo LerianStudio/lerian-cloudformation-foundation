@@ -79,6 +79,54 @@ Conditions:
 
 Resources:
   # =============================================================================
+  # KMS KEY
+  # =============================================================================
+  ElastiCacheKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for ElastiCache secrets encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: kms:*
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-elasticache-kms"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ElastiCacheKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-elasticache"
+      TargetKeyId: !Ref ElastiCacheKMSKey
+
+  # =============================================================================
+  # SECRETS
+  # =============================================================================
+  ElastiCacheAuthSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/elasticache-auth-token"
+      Description: ElastiCache Auth Token for transit encryption
+      KmsKeyId: !GetAtt ElastiCacheKMSKey.Arn
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludeCharacters: '"@/\!'
+        ExcludePunctuation: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-elasticache-auth-secret"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
   # SECURITY GROUP
   # =============================================================================
   ElastiCacheSecurityGroup:
@@ -185,7 +233,8 @@ Resources:
       AutomaticFailoverEnabled: true
       MultiAZEnabled: true
       TransitEncryptionEnabled: true
-      TransitEncryptionMode: preferred
+      TransitEncryptionMode: required
+      AuthToken: !Sub "{{resolve:secretsmanager:${ElastiCacheAuthSecret}:SecretString}}"
       AtRestEncryptionEnabled: true
       AutoMinorVersionUpgrade: true
       PreferredMaintenanceWindow: "mon:00:00-mon:03:00"
@@ -211,6 +260,10 @@ Outputs:
   ReaderEndpoint:
     Description: ElastiCache Reader Endpoint
     Value: !GetAtt ElastiCacheReplicationGroup.ReaderEndPoint.Address
+
+  AuthSecretArn:
+    Description: ElastiCache Auth Token Secret ARN
+    Value: !Ref ElastiCacheAuthSecret
 
   SecurityGroupId:
     Description: ElastiCache Security Group ID
