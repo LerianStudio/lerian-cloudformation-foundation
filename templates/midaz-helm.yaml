@@ -204,6 +204,9 @@ Resources:
   # NOTE: Lambda runs outside VPC to access CloudFormation response URL
   # It connects to EKS via public endpoint (EndpointPublicAccess: true)
   HelmDeployerFunction:
+    # checkov:skip=CKV_AWS_116:Deployer Lambda is one-shot during stack creation, DLQ not applicable
+    # checkov:skip=CKV_AWS_117:Deployer Lambda requires internet access for Helm chart deployment to EKS
+    # checkov:skip=CKV_AWS_173:Environment variables contain non-sensitive configuration references (endpoints, ARNs, chart version)
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "${ProjectName}-helm-deployer"
@@ -212,6 +215,7 @@ Resources:
       Handler: index.handler
       Timeout: 900
       MemorySize: 1024
+      ReservedConcurrentExecutions: 1
       Role: !GetAtt HelmDeployerRole.Arn
       # No VpcConfig - Lambda runs outside VPC to access internet
       # EKS is accessed via public endpoint

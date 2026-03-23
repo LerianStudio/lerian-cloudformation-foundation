@@ -109,7 +109,7 @@ Parameters:
     AllowedValues:
       - "0"
       - "1"
-    Default: "0"
+    Default: "1"
     Description: Force SSL/TLS connections to RDS (1 = enabled, 0 = disabled). Recommended for production with sensitive data.
 
   MultiAZ:
@@ -117,7 +117,7 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Default: "false"
+    Default: "true"
     Description: Enable Multi-AZ deployment for high availability. Recommended for production workloads.
 
   DeletionProtection:
@@ -183,6 +183,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}/rds-master-password"
       Description: RDS Master Password
+      KmsKeyId: !GetAtt RDSKMSKey.Arn
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
         GenerateStringKey: password
