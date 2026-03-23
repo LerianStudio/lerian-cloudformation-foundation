@@ -28,6 +28,7 @@ STACK_NAME="${1:-midaz}"
 REGION="${2:-us-east-1}"
 ENVIRONMENT="${3:-production}"
 NODE_INSTANCE_TYPE="${4:-c7g.large}"
+PRODUCT="${5:-midaz}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -100,7 +101,7 @@ else
 fi
 
 aws cloudformation package \
-    --template-file "${TEMPLATES_DIR}/midaz-complete.yaml" \
+    --template-file "${PROJECT_DIR}/products/${PRODUCT}/full-stack.yaml" \
     --s3-bucket "${S3_BUCKET}" \
     --s3-prefix "templates" \
     --output-template-file "${PROJECT_DIR}/packaged-template.yaml" \

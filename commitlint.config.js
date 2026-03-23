@@ -22,6 +22,7 @@ module.exports = {
       1,
       'always',
       [
+        // Core templates
         'vpc',
         'eks',
         'rds',
@@ -31,13 +32,17 @@ module.exports = {
         'route53',
         'alb-controller',
         'external-dns',
+        // Product: midaz
+        'midaz',
         'midaz-helm',
         'midaz-complete',
         'midaz-infrastructure',
         'midaz-application',
+        // General
         'ci',
         'deps',
         'release',
+        'scripts',
       ],
     ],
     'subject-case': [0],

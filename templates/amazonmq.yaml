@@ -363,3 +363,4 @@ Outputs:
   SecurityGroupId:
     Description: AmazonMQ Security Group ID
     Value: !Ref AmazonMQSecurityGroup
+

@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
-  Midaz - Complete Stack (AWS Marketplace)
-  Deploys complete Midaz infrastructure AND application in a single stack.
-  Includes: VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and Midaz application.
+  Midaz Infrastructure Stack
+  Deploys VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and supporting services.
+  Use midaz-application.yaml to deploy the Midaz application after this stack completes.
   (c) Lerian Studio - https://lerian.studio
 
 Metadata:
@@ -14,12 +14,19 @@ Metadata:
           - MPS3BucketName
           - MPS3BucketRegion
           - MPS3KeyPrefix
-          - MarketplaceAMI
       - Label:
           default: "General Configuration"
         Parameters:
           - EnvironmentName
           - ProjectName
+      - Label:
+          default: "Cluster Configuration"
+        Parameters:
+          - UseExistingCluster
+          - ExistingClusterName
+          - ExistingVpcId
+          - ExistingPrivateSubnetIds
+          - ExistingOIDCProviderArn
       - Label:
           default: "Network Configuration"
         Parameters:
@@ -82,18 +89,6 @@ Metadata:
           - DomainName
           - EnableALBController
           - EnableExternalDNS
-      - Label:
-          default: "Midaz Application"
-        Parameters:
-          - DeployMidazApplication
-          - MidazVersion
-          - MidazReplicas
-          - EnableIngress
-          - IngressHostname
-          - IngressCertificateArn
-          - EnableCRM
-          - EnableCRMIngress
-          - CRMIngressHostname
     ParameterLabels:
       # AWS Marketplace
       MPS3BucketName:
@@ -102,32 +97,22 @@ Metadata:
         default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
-      MarketplaceAMI:
-        default: "Marketplace AMI ID"
-      # Midaz Application
-      DeployMidazApplication:
-        default: "Deploy Midaz Application"
-      MidazVersion:
-        default: "Midaz Version"
-      MidazReplicas:
-        default: "Number of Replicas"
-      EnableIngress:
-        default: "Enable Ingress (ALB)"
-      IngressHostname:
-        default: "Ingress Hostname"
-      IngressCertificateArn:
-        default: "HTTPS Certificate ARN"
-      EnableCRM:
-        default: "Enable CRM Service"
-      EnableCRMIngress:
-        default: "Enable CRM Ingress (ALB)"
-      CRMIngressHostname:
-        default: "CRM Ingress Hostname"
       # General
       EnvironmentName:
         default: "Environment"
       ProjectName:
         default: "Project Name"
+      # Cluster
+      UseExistingCluster:
+        default: "Use Existing Cluster"
+      ExistingClusterName:
+        default: "Existing Cluster Name"
+      ExistingVpcId:
+        default: "Existing VPC ID"
+      ExistingPrivateSubnetIds:
+        default: "Existing Private Subnet IDs"
+      ExistingOIDCProviderArn:
+        default: "Existing OIDC Provider ARN"
       # Network
       VpcCIDR:
         default: "VPC CIDR Block"
@@ -164,7 +149,7 @@ Metadata:
       RDSIops:
         default: "Provisioned IOPS"
       RDSDatabaseName:
-        default: "Database Name"
+        default: "Database RDS Name"
       RDSMasterUsername:
         default: "Master Username"
       CreateReadReplica:
@@ -236,11 +221,6 @@ Parameters:
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
 
-  MarketplaceAMI:
-    Type: String
-    Description: "AWS Marketplace AMI ID (required by Marketplace form only, EKS uses managed AMIs)"
-    Default: "ami-placeholder"
-
   # =============================================================================
   # GENERAL CONFIGURATION
   # =============================================================================
@@ -261,6 +241,40 @@ Parameters:
     MinLength: 3
     MaxLength: 128
     ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-128 characters long"
+
+  # =============================================================================
+  # CLUSTER CONFIGURATION
+  # =============================================================================
+  UseExistingCluster:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: |
+      Set to true to deploy services into an existing VPC and EKS cluster
+      (e.g., when deploying a second product to a shared cluster).
+      When true, ExistingClusterName, ExistingVpcId and ExistingPrivateSubnetIds are required.
+
+  ExistingClusterName:
+    Type: String
+    Default: ""
+    Description: "Name of the existing EKS cluster (required when UseExistingCluster=true)"
+
+  ExistingVpcId:
+    Type: String
+    Default: ""
+    Description: "VPC ID where services will be deployed (required when UseExistingCluster=true)"
+
+  ExistingPrivateSubnetIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated list of private subnet IDs (required when UseExistingCluster=true)"
+
+  ExistingOIDCProviderArn:
+    Type: String
+    Default: ""
+    Description: "OIDC Provider ARN of the existing EKS cluster (required when EnableALBController=true or EnableExternalDNS=true with UseExistingCluster=true)"
 
   # Network
   VpcCIDR:
@@ -286,12 +300,12 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Default: "true"
+    Default: "false"
     Description: Enable VPC Flow Logs for network traffic auditing and security analysis.
 
   FlowLogsRetentionDays:
     Type: Number
-    Default: 30
+    Default: 14
     AllowedValues:
       - 1
       - 3
@@ -373,7 +387,7 @@ Parameters:
   # RDS
   RDSInstanceClass:
     Type: String
-    Default: db.r7g.large
+    Default: db.t3.medium
     AllowedValues:
       - db.t3.micro
       - db.t3.small
@@ -392,14 +406,14 @@ Parameters:
 
   RDSAllocatedStorage:
     Type: Number
-    Default: 100
+    Default: 20
     MinValue: 20
     MaxValue: 65536
     Description: Initial storage allocation in GB
 
   RDSMaxAllocatedStorage:
     Type: Number
-    Default: 500
+    Default: 100
     MinValue: 20
     MaxValue: 65536
     Description: Maximum storage for autoscaling in GB
@@ -440,7 +454,7 @@ Parameters:
 
   CreateReadReplica:
     Type: String
-    Default: "true"
+    Default: "false"
     AllowedValues:
       - "true"
       - "false"
@@ -456,7 +470,7 @@ Parameters:
 
   RDSMultiAZ:
     Type: String
-    Default: "true"
+    Default: "false"
     AllowedValues:
       - "true"
       - "false"
@@ -464,7 +478,7 @@ Parameters:
 
   RDSDeletionProtection:
     Type: String
-    Default: "true"
+    Default: "false"
     AllowedValues:
       - "true"
       - "false"
@@ -472,7 +486,7 @@ Parameters:
 
   RDSBackupRetentionPeriod:
     Type: Number
-    Default: 30
+    Default: 7
     MinValue: 1
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
@@ -480,7 +494,7 @@ Parameters:
   # DocumentDB
   DocumentDBInstanceClass:
     Type: String
-    Default: db.r6g.large
+    Default: db.t3.medium
     AllowedValues:
       - db.t3.medium
       - db.r6g.large
@@ -493,7 +507,7 @@ Parameters:
 
   DocumentDBInstanceCount:
     Type: Number
-    Default: 3
+    Default: 2
     MinValue: 1
     MaxValue: 10
     Description: Number of DocumentDB instances
@@ -509,7 +523,7 @@ Parameters:
 
   DocumentDBDeletionProtection:
     Type: String
-    Default: "true"
+    Default: "false"
     AllowedValues:
       - "true"
       - "false"
@@ -517,7 +531,7 @@ Parameters:
 
   DocumentDBBackupRetentionPeriod:
     Type: Number
-    Default: 30
+    Default: 7
     MinValue: 1
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
@@ -539,7 +553,7 @@ Parameters:
   # AmazonMQ
   AmazonMQInstanceType:
     Type: String
-    Default: mq.m5.large
+    Default: mq.t3.micro
     AllowedValues:
       - mq.t3.micro
       - mq.m5.large
@@ -622,84 +636,8 @@ Parameters:
       - "false"
     Description: Enable ExternalDNS for automatic DNS management (requires DomainName)
 
-  # =============================================================================
-  # MIDAZ APPLICATION CONFIGURATION
-  # =============================================================================
-  DeployMidazApplication:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Deploy Midaz application via Helm (set to false for infrastructure-only deployment)
-
-  MidazVersion:
-    Type: String
-    Default: "5.5.1"
-    Description: Midaz Helm chart version to deploy
-    AllowedPattern: "^[a-zA-Z0-9.-]+$"
-    ConstraintDescription: "Must be a valid version string"
-
-  MidazReplicas:
-    Type: Number
-    Default: 2
-    MinValue: 1
-    MaxValue: 10
-    Description: Number of Midaz application replicas
-
-  EnableIngress:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable ALB Ingress for external access to Midaz API
-
-  IngressHostname:
-    Type: String
-    Default: ""
-    Description: Full hostname for Ingress (e.g., ledger.midaz.net). Required if EnableIngress=true.
-    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
-    ConstraintDescription: "Must be a valid hostname or empty"
-
-  IngressCertificateArn:
-    Type: String
-    Default: ""
-    Description: ACM Certificate ARN for HTTPS (optional, requires EnableIngress=true)
-    AllowedPattern: "^$|^arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+$"
-    ConstraintDescription: "Must be a valid ACM certificate ARN or empty"
-
-  EnableCRM:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable CRM service (optional, uses same DocumentDB as Midaz)
-
-  EnableCRMIngress:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable ALB Ingress for CRM service (requires EnableCRM=true)
-
-  CRMIngressHostname:
-    Type: String
-    Default: ""
-    Description: Full hostname for CRM Ingress (e.g., crm.midaz.net). Required if EnableCRMIngress=true.
-    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
-    ConstraintDescription: "Must be a valid hostname or empty"
-
-Rules:
-  IngressRequiresALBController:
-    RuleCondition: !Equals [!Ref EnableIngress, "true"]
-    Assertions:
-      - Assert: !Equals [!Ref EnableALBController, "true"]
-        AssertDescription: "EnableALBController must be 'true' when EnableIngress is 'true'"
-
 Conditions:
+  CreateNewCluster: !Equals [!Ref UseExistingCluster, "false"]
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
   HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
   ShouldEnableALBController: !Equals [!Ref EnableALBController, "true"]
@@ -707,23 +645,13 @@ Conditions:
     - !Condition HasDomainName
     - !Equals [!Ref EnableExternalDNS, "true"]
 
-  # Application conditions
-  ShouldDeployApplication: !Equals [!Ref DeployMidazApplication, "true"]
-  ShouldDeployWithALB: !And
-    - !Condition ShouldDeployApplication
-    - !Condition ShouldEnableALBController
-  ShouldDeployWithoutALB: !And
-    - !Condition ShouldDeployApplication
-    - !Not [!Condition ShouldEnableALBController]
-  HasIngress: !Equals [!Ref EnableIngress, "true"]
-  HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
-
 Resources:
   # =============================================================================
   # VPC STACK
   # =============================================================================
   VPCStack:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateNewCluster
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
       Parameters:
@@ -748,15 +676,14 @@ Resources:
   # =============================================================================
   RDSStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        DatabaseSubnetIds: !GetAtt VPCStack.Outputs.DatabaseSubnetIds
+        DatabaseSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
         InstanceClass: !Ref RDSInstanceClass
         AllocatedStorage: !Ref RDSAllocatedStorage
         MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
@@ -785,15 +712,14 @@ Resources:
   # =============================================================================
   DocumentDBStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+        PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
         InstanceClass: !Ref DocumentDBInstanceClass
         InstanceCount: !Ref DocumentDBInstanceCount
         MasterUsername: !Ref DocumentDBMasterUsername
@@ -815,15 +741,14 @@ Resources:
   # =============================================================================
   ElastiCacheStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        CacheSubnetIds: !GetAtt VPCStack.Outputs.DatabaseSubnetIds
+        CacheSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
         NodeType: !Ref ElastiCacheNodeType
         AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
         AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
@@ -841,15 +766,14 @@ Resources:
   # =============================================================================
   AmazonMQStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+        PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
         InstanceType: !Ref AmazonMQInstanceType
         DeploymentMode: !Ref AmazonMQDeploymentMode
         AdminUsername: !Ref AmazonMQAdminUsername
@@ -869,8 +793,8 @@ Resources:
   # =============================================================================
   EKSStack:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateNewCluster
     DependsOn:
-      - VPCStack
       - RDSStack
       - DocumentDBStack
       - ElastiCacheStack
@@ -901,14 +825,13 @@ Resources:
   Route53Stack:
     Type: AWS::CloudFormation::Stack
     Condition: HasDomainName
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}route53.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         DomainName: !Ref DomainName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-route53-stack"
@@ -923,15 +846,14 @@ Resources:
   ALBControllerStack:
     Type: AWS::CloudFormation::Stack
     Condition: ShouldEnableALBController
-    DependsOn: EKSStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
-        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
-        OIDCProviderArn: !GetAtt EKSStack.Outputs.OIDCProviderArn
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
+        ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
+        OIDCProviderArn: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-alb-controller-stack"
@@ -946,118 +868,19 @@ Resources:
   ExternalDNSStack:
     Type: AWS::CloudFormation::Stack
     Condition: ShouldEnableExternalDNS
-    DependsOn:
-      - EKSStack
-      - Route53Stack
+    DependsOn: Route53Stack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
-        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
-        OIDCProviderArn: !GetAtt EKSStack.Outputs.OIDCProviderArn
+        ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
+        OIDCProviderArn: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
         PrivateHostedZoneId: !GetAtt Route53Stack.Outputs.PrivateHostedZoneId
         DomainName: !Ref DomainName
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-external-dns-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # =============================================================================
-  # MIDAZ APPLICATION (HELM DEPLOYMENT)
-  # With ALB Controller dependency (when ALB Controller is enabled)
-  # =============================================================================
-  MidazHelmStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployWithALB
-    DependsOn:
-      - EKSStack
-      - RDSStack
-      - DocumentDBStack
-      - ElastiCacheStack
-      - AmazonMQStack
-      - ALBControllerStack
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
-      Parameters:
-        ProjectName: !Ref AWS::StackName
-        EnvironmentName: !Ref EnvironmentName
-        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
-        ClusterSecurityGroupId: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
-        # Database connections
-        RDSEndpoint: !GetAtt RDSStack.Outputs.Endpoint
-        RDSSecretArn: !GetAtt RDSStack.Outputs.SecretArn
-        DocumentDBEndpoint: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
-        DocumentDBSecretArn: !GetAtt DocumentDBStack.Outputs.SecretArn
-        ElastiCacheEndpoint: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
-        AmazonMQEndpoint: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
-        AmazonMQSecretArn: !GetAtt AmazonMQStack.Outputs.SecretArn
-        # Application settings
-        MidazChartVersion: !Ref MidazVersion
-        EnableIngress: !Ref EnableIngress
-        DomainName: !Ref DomainName
-        IngressHostname: !Ref IngressHostname
-        IngressScheme: "internal"
-        IngressCertificateArn: !Ref IngressCertificateArn
-        EnableCRM: !Ref EnableCRM
-        EnableCRMIngress: !Ref EnableCRMIngress
-        CRMIngressHostname: !Ref CRMIngressHostname
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-midaz-app-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # =============================================================================
-  # MIDAZ APPLICATION (HELM DEPLOYMENT)
-  # Without ALB Controller dependency (when ALB Controller is disabled)
-  # =============================================================================
-  MidazHelmStackNoALB:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployWithoutALB
-    DependsOn:
-      - EKSStack
-      - RDSStack
-      - DocumentDBStack
-      - ElastiCacheStack
-      - AmazonMQStack
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
-      Parameters:
-        ProjectName: !Ref AWS::StackName
-        EnvironmentName: !Ref EnvironmentName
-        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
-        ClusterSecurityGroupId: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
-        # Database connections
-        RDSEndpoint: !GetAtt RDSStack.Outputs.Endpoint
-        RDSSecretArn: !GetAtt RDSStack.Outputs.SecretArn
-        DocumentDBEndpoint: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
-        DocumentDBSecretArn: !GetAtt DocumentDBStack.Outputs.SecretArn
-        ElastiCacheEndpoint: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
-        AmazonMQEndpoint: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
-        AmazonMQSecretArn: !GetAtt AmazonMQStack.Outputs.SecretArn
-        # Application settings
-        MidazChartVersion: !Ref MidazVersion
-        EnableIngress: !Ref EnableIngress
-        DomainName: !Ref DomainName
-        IngressHostname: !Ref IngressHostname
-        IngressScheme: "internal"
-        IngressCertificateArn: !Ref IngressCertificateArn
-        EnableCRM: !Ref EnableCRM
-        EnableCRMIngress: !Ref EnableCRMIngress
-        CRMIngressHostname: !Ref CRMIngressHostname
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-midaz-app-stack"
         - Key: Environment
           Value: !Ref EnvironmentName
         - Key: ManagedBy
@@ -1084,13 +907,13 @@ Outputs:
   # =============================================================================
   VpcId:
     Description: VPC ID
-    Value: !GetAtt VPCStack.Outputs.VpcId
+    Value: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
     Export:
       Name: !Sub "${AWS::StackName}-VpcId"
 
   PrivateSubnetIds:
     Description: Private Subnet IDs
-    Value: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+    Value: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
     Export:
       Name: !Sub "${AWS::StackName}-PrivateSubnetIds"
 
@@ -1099,11 +922,12 @@ Outputs:
   # =============================================================================
   EKSClusterName:
     Description: EKS Cluster Name
-    Value: !GetAtt EKSStack.Outputs.ClusterName
+    Value: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
     Export:
       Name: !Sub "${AWS::StackName}-EKSClusterName"
 
   EKSClusterEndpoint:
+    Condition: CreateNewCluster
     Description: EKS Cluster Endpoint
     Value: !GetAtt EKSStack.Outputs.ClusterEndpoint
     Export:
@@ -1111,9 +935,16 @@ Outputs:
 
   OIDCProviderArn:
     Description: EKS OIDC Provider ARN
-    Value: !GetAtt EKSStack.Outputs.OIDCProviderArn
+    Value: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
     Export:
       Name: !Sub "${AWS::StackName}-OIDCProviderArn"
+
+  ClusterSecurityGroupId:
+    Condition: CreateNewCluster
+    Description: EKS Cluster Security Group ID
+    Value: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterSecurityGroupId"
 
   # =============================================================================
   # RDS OUTPUTS
@@ -1207,36 +1038,23 @@ Outputs:
       Name: !Sub "${AWS::StackName}-ExternalDNSRoleArn"
 
   # =============================================================================
-  # MIDAZ APPLICATION OUTPUTS
-  # =============================================================================
-  MidazNamespace:
-    Condition: ShouldDeployApplication
-    Description: Kubernetes namespace where Midaz is deployed
-    Value: !If
-      - ShouldDeployWithALB
-      - !GetAtt MidazHelmStack.Outputs.HelmNamespace
-      - !GetAtt MidazHelmStackNoALB.Outputs.HelmNamespace
-    Export:
-      Name: !Sub "${AWS::StackName}-MidazNamespace"
-
-  MidazAPIEndpoint:
-    Condition: ShouldDeployApplication
-    Description: Midaz Ledger API endpoint
-    Value: !If
-      - ShouldDeployWithALB
-      - !GetAtt MidazHelmStack.Outputs.LedgerAPIEndpoint
-      - !GetAtt MidazHelmStackNoALB.Outputs.LedgerAPIEndpoint
-    Export:
-      Name: !Sub "${AWS::StackName}-MidazAPIEndpoint"
-
-  # =============================================================================
   # UTILITY COMMANDS
   # =============================================================================
   KubeconfigCommand:
     Description: Command to configure kubectl
-    Value: !Sub "aws eks update-kubeconfig --name ${EKSStack.Outputs.ClusterName} --region ${AWS::Region}"
+    Value: !Sub
+      - "aws eks update-kubeconfig --name ${ClusterName} --region ${AWS::Region}"
+      - ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
 
-  CheckMidazPodsCommand:
-    Condition: ShouldDeployApplication
-    Description: Command to check Midaz pods status
-    Value: "kubectl get pods -n midaz"
+  DeployApplicationCommand:
+    Description: Command to deploy the Midaz application
+    Value: !Sub |
+      aws cloudformation deploy \
+        --stack-name ${AWS::StackName}-app \
+        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}midaz-application.yaml \
+        --parameter-overrides \
+          InfrastructureStackName=${AWS::StackName} \
+          MPS3BucketName=${MPS3BucketName} \
+          MPS3KeyPrefix=${MPS3KeyPrefix} \
+        --capabilities CAPABILITY_IAM \
+        --region ${AWS::Region}

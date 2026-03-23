@@ -6,11 +6,12 @@ on:
       - main
     paths:
       - 'templates/**'
+      - 'products/**'
       - 'infrastructure/**'
 
 env:
   AWS_REGION: sa-east-1
-  S3_BUCKET: midaz-cloudformation-foundation
+  S3_BUCKET: lerian-cloudformation-templates
 
 permissions:
   contents: write
@@ -39,31 +40,20 @@ jobs:
           fi
 
   # ============================================================================
-  # Shared Workflow: Detect Changed Paths
-  # ============================================================================
-  detect-changed-paths:
-    name: Detect Changed Paths
-    needs: check-skip
-    if: needs.check-skip.outputs.should_skip != 'true'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/changed-paths.yml@v1.10.2
-    with:
-      filter_paths: '["templates"]'
-      path_level: 1
-      runner_type: blacksmith-4vcpu-ubuntu-2404
-
-  # ============================================================================
-  # Process Changes
+  # Detect Changes in templates/ and products/
   # ============================================================================
   detect-changes:
-    name: Process Changes
-    needs: [check-skip, detect-changed-paths]
+    name: Detect Changes
+    needs: check-skip
     if: needs.check-skip.outputs.should_skip != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
-      changed_templates: ${{ steps.process.outputs.changed_templates }}
+      changed_core_templates: ${{ steps.process.outputs.changed_core_templates }}
+      changed_products: ${{ steps.process.outputs.changed_products }}
+      has_core_changes: ${{ steps.process.outputs.has_core_changes }}
+      has_product_changes: ${{ steps.process.outputs.has_product_changes }}
       has_changes: ${{ steps.process.outputs.has_changes }}
       bump_type: ${{ steps.process.outputs.bump_type }}
-      should_skip: ${{ needs.check-skip.outputs.should_skip }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -72,38 +62,50 @@ jobs:
 
       - name: Process detected changes
         id: process
-        env:
-          HAS_PATH_CHANGES: ${{ needs.detect-changed-paths.outputs.has_changes }}
         run: |
-          # Check if shared workflow detected changes in templates
-          if [ "$HAS_PATH_CHANGES" != "true" ]; then
-            echo "No template changes detected by shared workflow"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "changed_templates=[]" >> $GITHUB_OUTPUT
-            exit 0
+          # Detect changed core templates
+          CHANGED_CORE=$(git diff --name-only HEAD~1 HEAD -- templates/*.yaml 2>/dev/null || echo "")
+          # Detect changed product templates
+          CHANGED_PRODUCTS=$(git diff --name-only HEAD~1 HEAD -- products/ 2>/dev/null || echo "")
+
+          HAS_CORE="false"
+          HAS_PRODUCTS="false"
+
+          # Process core templates
+          if [ -n "$CHANGED_CORE" ]; then
+            HAS_CORE="true"
+            CORE_TEMPLATES=$(echo "$CHANGED_CORE" | sed 's|templates/||g' | sed 's|\.yaml||g' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "Changed core templates: $CORE_TEMPLATES"
+            echo "changed_core_templates=$CORE_TEMPLATES" >> $GITHUB_OUTPUT
+          else
+            echo "changed_core_templates=[]" >> $GITHUB_OUTPUT
           fi
 
-          # Get specific changed template files
-          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- templates/*.yaml 2>/dev/null || echo "")
-
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "No template .yaml files changed"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "changed_templates=[]" >> $GITHUB_OUTPUT
-            exit 0
+          # Process product templates - output format: [{"product":"midaz","template":"helm"}, ...]
+          if [ -n "$CHANGED_PRODUCTS" ]; then
+            HAS_PRODUCTS="true"
+            PRODUCT_CHANGES=$(echo "$CHANGED_PRODUCTS" | grep '\.yaml$' | while read -r file; do
+              product=$(echo "$file" | cut -d'/' -f2)
+              template=$(basename "$file" .yaml)
+              echo "{\"product\":\"$product\",\"template\":\"$template\"}"
+            done | jq -s -c '.')
+            echo "Changed products: $PRODUCT_CHANGES"
+            echo "changed_products=$PRODUCT_CHANGES" >> $GITHUB_OUTPUT
+          else
+            echo "changed_products=[]" >> $GITHUB_OUTPUT
           fi
 
-          # Extract template names
-          TEMPLATES=$(echo "$CHANGED_FILES" | sed 's|templates/||g' | sed 's|\.yaml||g' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "has_core_changes=$HAS_CORE" >> $GITHUB_OUTPUT
+          echo "has_product_changes=$HAS_PRODUCTS" >> $GITHUB_OUTPUT
 
-          echo "Changed templates: $TEMPLATES"
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-          echo "changed_templates=$TEMPLATES" >> $GITHUB_OUTPUT
+          if [ "$HAS_CORE" = "true" ] || [ "$HAS_PRODUCTS" = "true" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
 
           # Determine bump type from commit message
           COMMIT_MSG=$(git log -1 --pretty=%B)
-          echo "Commit message: $COMMIT_MSG"
-
           if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|^[a-z]+(\(.+\))?!:"; then
             BUMP_TYPE="major"
           elif echo "$COMMIT_MSG" | grep -qiE "^feat(\(.+\))?:"; then
@@ -111,7 +113,6 @@ jobs:
           else
             BUMP_TYPE="patch"
           fi
-
           echo "Bump type: $BUMP_TYPE"
           echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
 
@@ -149,37 +150,32 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Release individual templates
-        id: release
+      - name: Release core templates
+        id: release-core
+        if: needs.detect-changes.outputs.has_core_changes == 'true'
         env:
-          CHANGED_TEMPLATES: ${{ needs.detect-changes.outputs.changed_templates }}
+          CHANGED_TEMPLATES: ${{ needs.detect-changes.outputs.changed_core_templates }}
           BUMP_TYPE: ${{ needs.detect-changes.outputs.bump_type }}
         run: |
           set -e
 
           VERSIONS_FILE="template-versions.json"
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          RELEASED_TEMPLATES=""
-          TEMPLATE_TAGS=""
+          RELEASED=""
+          TAGS=""
 
           for TEMPLATE in $(echo "$CHANGED_TEMPLATES" | jq -r '.[]'); do
             echo ""
             echo "========================================"
-            echo "Processing: $TEMPLATE"
+            echo "Processing core template: $TEMPLATE"
             echo "========================================"
 
-            # Validate template (ignore warnings, only fail on errors)
-            echo "Validating..."
             if ! cfn-lint "templates/${TEMPLATE}.yaml" --regions us-east-1 --ignore-checks W; then
               echo "Validation failed, skipping"
               continue
             fi
 
-            # Get current version
             CURRENT_VERSION=$(jq -r ".templates[\"$TEMPLATE\"] // \"0.0.0\"" "$VERSIONS_FILE")
-            echo "Current: v$CURRENT_VERSION"
-
-            # Calculate new version
             IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
             case $BUMP_TYPE in
               major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
@@ -188,14 +184,12 @@ jobs:
             esac
 
             TAG_NAME="${TEMPLATE}-v${NEW_VERSION}"
-
-            # Check if tag exists
             if git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; then
               echo "Tag $TAG_NAME exists, skipping"
               continue
             fi
 
-            echo "New: v$NEW_VERSION (tag: $TAG_NAME)"
+            echo "Releasing $TEMPLATE v$NEW_VERSION"
 
             # Upload to S3 - versioned
             aws s3 cp "templates/${TEMPLATE}.yaml" \
@@ -209,7 +203,7 @@ jobs:
               --cache-control "max-age=300" \
               --content-type "application/x-yaml"
 
-            # Update template versions.json in S3
+            # Update versions.json in S3
             aws s3 cp "s3://${{ env.S3_BUCKET }}/templates/${TEMPLATE}/versions.json" /tmp/tpl-versions.json 2>/dev/null || \
               echo "{\"template\":\"$TEMPLATE\",\"versions\":[],\"latest\":\"\"}" > /tmp/tpl-versions.json
 
@@ -229,32 +223,128 @@ jobs:
             jq ".templates[\"$TEMPLATE\"] = \"$NEW_VERSION\"" "$VERSIONS_FILE" > /tmp/updated.json
             mv /tmp/updated.json "$VERSIONS_FILE"
 
-            RELEASED_TEMPLATES="$RELEASED_TEMPLATES $TEMPLATE:v$NEW_VERSION"
-            TEMPLATE_TAGS="$TEMPLATE_TAGS $TAG_NAME"
-
-            echo "Released $TEMPLATE v$NEW_VERSION"
+            RELEASED="$RELEASED $TEMPLATE:v$NEW_VERSION"
+            TAGS="$TAGS $TAG_NAME"
           done
 
-          echo "released_templates=$RELEASED_TEMPLATES" >> $GITHUB_OUTPUT
-          echo "template_tags=$TEMPLATE_TAGS" >> $GITHUB_OUTPUT
+          echo "released_core=$RELEASED" >> $GITHUB_OUTPUT
+          echo "core_tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Release product templates
+        id: release-products
+        if: needs.detect-changes.outputs.has_product_changes == 'true'
+        env:
+          CHANGED_PRODUCTS: ${{ needs.detect-changes.outputs.changed_products }}
+          BUMP_TYPE: ${{ needs.detect-changes.outputs.bump_type }}
+        run: |
+          set -e
+
+          VERSIONS_FILE="template-versions.json"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          RELEASED=""
+          TAGS=""
+
+          for ITEM in $(echo "$CHANGED_PRODUCTS" | jq -r '.[] | @base64'); do
+            PRODUCT=$(echo "$ITEM" | base64 --decode | jq -r '.product')
+            TEMPLATE=$(echo "$ITEM" | base64 --decode | jq -r '.template')
+
+            echo ""
+            echo "========================================"
+            echo "Processing product: $PRODUCT / $TEMPLATE"
+            echo "========================================"
+
+            TEMPLATE_FILE="products/${PRODUCT}/${TEMPLATE}.yaml"
+            if [ ! -f "$TEMPLATE_FILE" ]; then
+              echo "File not found: $TEMPLATE_FILE, skipping"
+              continue
+            fi
+
+            if ! cfn-lint "$TEMPLATE_FILE" --regions us-east-1 --ignore-checks W; then
+              echo "Validation failed, skipping"
+              continue
+            fi
+
+            # Ensure product entry exists in versions file
+            if ! jq -e ".products[\"$PRODUCT\"]" "$VERSIONS_FILE" > /dev/null 2>&1; then
+              jq ".products[\"$PRODUCT\"] = {}" "$VERSIONS_FILE" > /tmp/updated.json
+              mv /tmp/updated.json "$VERSIONS_FILE"
+            fi
+
+            CURRENT_VERSION=$(jq -r ".products[\"$PRODUCT\"][\"$TEMPLATE\"] // \"0.0.0\"" "$VERSIONS_FILE")
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            case $BUMP_TYPE in
+              major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+              minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+              patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+            esac
+
+            TAG_NAME="${PRODUCT}-${TEMPLATE}-v${NEW_VERSION}"
+            if git tag -l "$TAG_NAME" | grep -q "$TAG_NAME"; then
+              echo "Tag $TAG_NAME exists, skipping"
+              continue
+            fi
+
+            echo "Releasing $PRODUCT/$TEMPLATE v$NEW_VERSION"
+
+            # Upload to S3 - versioned
+            aws s3 cp "$TEMPLATE_FILE" \
+              "s3://${{ env.S3_BUCKET }}/products/${PRODUCT}/${TEMPLATE}/v${NEW_VERSION}/${TEMPLATE}.yaml" \
+              --cache-control "max-age=86400" \
+              --content-type "application/x-yaml"
+
+            # Upload to S3 - latest
+            aws s3 cp "$TEMPLATE_FILE" \
+              "s3://${{ env.S3_BUCKET }}/products/${PRODUCT}/${TEMPLATE}/latest/${TEMPLATE}.yaml" \
+              --cache-control "max-age=300" \
+              --content-type "application/x-yaml"
+
+            # Update versions.json in S3
+            aws s3 cp "s3://${{ env.S3_BUCKET }}/products/${PRODUCT}/${TEMPLATE}/versions.json" /tmp/tpl-versions.json 2>/dev/null || \
+              echo "{\"product\":\"$PRODUCT\",\"template\":\"$TEMPLATE\",\"versions\":[],\"latest\":\"\"}" > /tmp/tpl-versions.json
+
+            python3 << PYEOF
+          import json
+          with open('/tmp/tpl-versions.json', 'r') as f:
+              data = json.load(f)
+          data.get('versions', []).insert(0, {'version': '$NEW_VERSION', 'released_at': '$TIMESTAMP'})
+          data['latest'] = '$NEW_VERSION'
+          with open('/tmp/tpl-versions.json', 'w') as f:
+              json.dump(data, f, indent=2)
+          PYEOF
+
+            aws s3 cp /tmp/tpl-versions.json "s3://${{ env.S3_BUCKET }}/products/${PRODUCT}/${TEMPLATE}/versions.json"
+
+            # Update local versions file
+            jq ".products[\"$PRODUCT\"][\"$TEMPLATE\"] = \"$NEW_VERSION\"" "$VERSIONS_FILE" > /tmp/updated.json
+            mv /tmp/updated.json "$VERSIONS_FILE"
+
+            RELEASED="$RELEASED ${PRODUCT}/${TEMPLATE}:v$NEW_VERSION"
+            TAGS="$TAGS $TAG_NAME"
+          done
+
+          echo "released_products=$RELEASED" >> $GITHUB_OUTPUT
+          echo "product_tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Combine release outputs
+        id: release
+        run: |
+          RELEASED="${{ steps.release-core.outputs.released_core }} ${{ steps.release-products.outputs.released_products }}"
+          TAGS="${{ steps.release-core.outputs.core_tags }} ${{ steps.release-products.outputs.product_tags }}"
+          echo "released_templates=$RELEASED" >> $GITHUB_OUTPUT
+          echo "template_tags=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Calculate bundle version
         id: bundle
         env:
           BUMP_TYPE: ${{ needs.detect-changes.outputs.bump_type }}
         run: |
-          # Get current bundle version
           LATEST_TAG=$(git tag -l "release-v*" --sort=-v:refname | head -1)
-
           if [ -z "$LATEST_TAG" ]; then
             CURRENT="0.0.0"
           else
             CURRENT=$(echo "$LATEST_TAG" | sed 's/release-v//')
           fi
 
-          echo "Current bundle: v$CURRENT"
-
-          # Calculate new bundle version
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
           case $BUMP_TYPE in
             major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
@@ -277,15 +367,27 @@ jobs:
           echo "Releasing Bundle v$BUNDLE_VERSION"
           echo "========================================"
 
-          # Upload all templates to bundle folder
+          # Upload core templates to bundle
           for TEMPLATE_FILE in templates/*.yaml; do
             TEMPLATE=$(basename "$TEMPLATE_FILE" .yaml)
-            echo "  -> $TEMPLATE"
-
+            echo "  -> core/$TEMPLATE"
             aws s3 cp "$TEMPLATE_FILE" \
               "s3://${{ env.S3_BUCKET }}/releases/v${BUNDLE_VERSION}/${TEMPLATE}.yaml" \
               --cache-control "max-age=86400" \
               --content-type "application/x-yaml"
+          done
+
+          # Upload product templates to bundle
+          for PRODUCT_DIR in products/*/; do
+            PRODUCT=$(basename "$PRODUCT_DIR")
+            for TEMPLATE_FILE in "$PRODUCT_DIR"*.yaml; do
+              TEMPLATE=$(basename "$TEMPLATE_FILE" .yaml)
+              echo "  -> ${PRODUCT}/${TEMPLATE}"
+              aws s3 cp "$TEMPLATE_FILE" \
+                "s3://${{ env.S3_BUCKET }}/releases/v${BUNDLE_VERSION}/products/${PRODUCT}/${TEMPLATE}.yaml" \
+                --cache-control "max-age=86400" \
+                --content-type "application/x-yaml"
+            done
           done
 
           # Upload to latest
@@ -293,6 +395,14 @@ jobs:
             --exclude "*.md" --exclude ".*" \
             --cache-control "max-age=300" \
             --content-type "application/x-yaml"
+
+          for PRODUCT_DIR in products/*/; do
+            PRODUCT=$(basename "$PRODUCT_DIR")
+            aws s3 sync "$PRODUCT_DIR" "s3://${{ env.S3_BUCKET }}/releases/latest/products/${PRODUCT}/" \
+              --exclude "*.md" --exclude ".*" \
+              --cache-control "max-age=300" \
+              --content-type "application/x-yaml"
+          done
 
           # Create bundle manifest
           python3 << PYEOF
@@ -305,7 +415,8 @@ jobs:
               'bundle_version': '$BUNDLE_VERSION',
               'released_at': '$TIMESTAMP',
               'commit': '${{ github.sha }}',
-              'templates': {}
+              'templates': {},
+              'products': {}
           }
 
           for tpl, ver in versions.get('templates', {}).items():
@@ -314,12 +425,25 @@ jobs:
                   'url': f"https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/{tpl}.yaml"
               }
 
+          for product, templates in versions.get('products', {}).items():
+              manifest['products'][product] = {}
+              for tpl, ver in templates.items():
+                  manifest['products'][product][tpl] = {
+                      'version': ver if ver != '0.0.0' else 'initial',
+                      'url': f"https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/products/{product}/{tpl}.yaml"
+                  }
+
           with open('/tmp/bundle-manifest.json', 'w') as f:
               json.dump(manifest, f, indent=2)
 
           print("\nBundle contents:")
+          print("  Core templates:")
           for tpl, info in manifest['templates'].items():
-              print(f"  {tpl}: {info['version']}")
+              print(f"    {tpl}: {info['version']}")
+          for product, templates in manifest['products'].items():
+              print(f"  Product: {product}")
+              for tpl, info in templates.items():
+                  print(f"    {tpl}: {info['version']}")
           PYEOF
 
           aws s3 cp /tmp/bundle-manifest.json "s3://${{ env.S3_BUCKET }}/releases/v${BUNDLE_VERSION}/manifest.json"
@@ -368,26 +492,15 @@ jobs:
         run: |
           # Create template tags
           for TAG in $TEMPLATE_TAGS; do
-            TEMPLATE=$(echo "$TAG" | sed 's/-v[0-9]*\.[0-9]*\.[0-9]*$//')
-            VERSION=$(echo "$TAG" | sed 's/.*-v//')
-
-            git tag -a "$TAG" -m "Release $TEMPLATE v$VERSION"
+            echo "Creating tag: $TAG"
+            git tag -a "$TAG" -m "Release $TAG"
             git push origin "$TAG"
 
             gh release create "$TAG" \
-              --title "$TEMPLATE v$VERSION" \
-              --notes "## $TEMPLATE v$VERSION
+              --title "$TAG" \
+              --notes "## $TAG
 
-          **Template URL:** \`https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/templates/${TEMPLATE}/v${VERSION}/${TEMPLATE}.yaml\`
-
-          ### Usage
-
-          To use this template version, set the following parameter:
-          \`\`\`
-          MPS3KeyPrefix=templates/${TEMPLATE}/v${VERSION}/
-          \`\`\`
-
-          Or use the direct S3 URL in your CloudFormation deployment."
+          Released as part of bundle v$BUNDLE_VERSION."
 
             echo "Created $TAG"
           done
@@ -396,38 +509,41 @@ jobs:
           git tag -a "$BUNDLE_TAG" -m "Release Bundle v$BUNDLE_VERSION"
           git push origin "$BUNDLE_TAG"
 
-          # Generate template list for release notes
+          # Generate template table for release notes
           TEMPLATE_TABLE=$(python3 << 'PYEOF'
           import json
           with open('/tmp/bundle-manifest.json', 'r') as f:
               m = json.load(f)
           for t, i in sorted(m.get('templates', {}).items()):
-              print(f"| {t} | {i['version']} |")
+              print(f"| {t} | {i['version']} | core |")
+          for product, templates in sorted(m.get('products', {}).items()):
+              for t, i in sorted(templates.items()):
+                  print(f"| {t} | {i['version']} | {product} |")
           PYEOF
           )
 
           gh release create "$BUNDLE_TAG" \
             --title "Release v$BUNDLE_VERSION" \
-            --notes "## Midaz CloudFormation v$BUNDLE_VERSION
+            --notes "## CloudFormation Foundation v$BUNDLE_VERSION
 
           ### What's Changed
           $RELEASED_TEMPLATES
 
           ### Template Versions
-          | Template | Version |
-          |----------|---------|
+          | Template | Version | Product |
+          |----------|---------|---------|
           $TEMPLATE_TABLE
 
           ### AWS Marketplace Parameters
           \`\`\`yaml
           MPS3BucketName: ${{ env.S3_BUCKET }}
           MPS3BucketRegion: ${{ env.AWS_REGION }}
-          MPS3KeyPrefix: releases/v$BUNDLE_VERSION/
+          MPS3KeyPrefix: releases/v$BUNDLE_VERSION/products/midaz/
           \`\`\`
 
-          ### Quick Launch
+          ### Quick Launch (Midaz)
 
-          [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/quickcreate?stackName=midaz&templateURL=https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/midaz-complete.yaml)
+          [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/quickcreate?stackName=midaz&templateURL=https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/products/midaz/full-stack.yaml)
 
           ### Documentation
 
@@ -465,7 +581,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Marketplace Parameters" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "MPS3KeyPrefix=releases/v$BUNDLE_VERSION/" >> $GITHUB_STEP_SUMMARY
+          echo "MPS3KeyPrefix=releases/v$BUNDLE_VERSION/products/midaz/" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # ============================================================================

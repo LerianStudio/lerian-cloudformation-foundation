@@ -355,3 +355,4 @@ Outputs:
   KubeconfigCommand:
     Description: Command to update kubeconfig
     Value: !Sub "aws eks update-kubeconfig --name ${ProjectName}-eks --region ${AWS::Region}"
+

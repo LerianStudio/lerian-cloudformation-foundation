@@ -196,8 +196,6 @@ Resources:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-EnvironmentName"
         ClusterName:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-EKSClusterName"
-        ClusterSecurityGroupId:
-          Fn::ImportValue: !Sub "${InfrastructureStackName}-ClusterSecurityGroupId"
         VpcId:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-VpcId"
         PrivateSubnetIds:

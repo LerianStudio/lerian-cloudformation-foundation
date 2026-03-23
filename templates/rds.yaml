@@ -441,3 +441,4 @@ Outputs:
   KMSKeyArn:
     Description: RDS KMS Key ARN for encryption
     Value: !GetAtt RDSKMSKey.Arn
+
