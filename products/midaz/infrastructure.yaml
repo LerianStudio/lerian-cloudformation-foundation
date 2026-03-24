@@ -655,7 +655,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcCIDR: !Ref VpcCIDR
         AvailabilityZone1: !Ref AvailabilityZone1
@@ -679,7 +679,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
@@ -715,7 +715,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
@@ -744,7 +744,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
@@ -769,7 +769,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
@@ -802,7 +802,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
         PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
@@ -828,7 +828,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}route53.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         DomainName: !Ref DomainName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
@@ -849,7 +849,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
@@ -872,7 +872,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
       Parameters:
-        ProjectName: !Ref AWS::StackName
+        ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
         OIDCProviderArn: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
