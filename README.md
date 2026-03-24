@@ -49,11 +49,11 @@ Option 2: Modular (multi-product, shared infrastructure)
 
 #### Foundation (Multi-Product)
 
-Use the Foundation stack when deploying **more than one product** (e.g., Midaz + Tracer). It creates shared VPC, EKS, Route53, ALB Controller, and ExternalDNS. Product infrastructure stacks auto-import Foundation outputs via `FoundationStackName` parameter.
+Use the Foundation stack when deploying **more than one product** (e.g., Midaz + Tracer). It always creates the shared VPC and EKS. Route53 and ALB Controller are created only when `DomainName` is set, and ExternalDNS only when `DomainName` is set and `EnableExternalDNS=true`. Product infrastructure stacks auto-import Foundation outputs via `FoundationStackName` parameter.
 
 | Stack | Description | Deploy |
 |-------|-------------|--------|
-| **Foundation** | Shared VPC, EKS, Route53, ALB Controller, ExternalDNS | [![Launch][img]][foundation-sa-east-1] |
+| **Foundation** | Shared VPC and EKS, with optional Route53 / ALB Controller / ExternalDNS | [![Launch][img]][foundation-sa-east-1] |
 
 [foundation-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml&stackName=lerian-foundation&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/&param_AvailabilityZone1=sa-east-1a&param_AvailabilityZone2=sa-east-1b&param_AvailabilityZone3=sa-east-1c
 
@@ -178,6 +178,9 @@ aws cloudformation create-stack \
   --stack-name lerian-foundation \
   --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml \
   --parameters \
+    ParameterKey=MPS3BucketName,ParameterValue=lerian-cloudformation-templates \
+    ParameterKey=MPS3BucketRegion,ParameterValue=sa-east-1 \
+    ParameterKey=MPS3KeyPrefix,ParameterValue=releases/latest/ \
     ParameterKey=AvailabilityZone1,ParameterValue=sa-east-1a \
     ParameterKey=AvailabilityZone2,ParameterValue=sa-east-1b \
     ParameterKey=AvailabilityZone3,ParameterValue=sa-east-1c \
@@ -192,6 +195,9 @@ aws cloudformation create-stack \
   --stack-name midaz-infra \
   --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/infrastructure.yaml \
   --parameters \
+    ParameterKey=MPS3BucketName,ParameterValue=lerian-cloudformation-templates \
+    ParameterKey=MPS3BucketRegion,ParameterValue=sa-east-1 \
+    ParameterKey=MPS3KeyPrefix,ParameterValue=releases/latest/ \
     ParameterKey=FoundationStackName,ParameterValue=lerian-foundation \
     ParameterKey=RDSMasterUsername,ParameterValue=postgres \
     ParameterKey=DocumentDBMasterUsername,ParameterValue=docdbadmin \
@@ -242,7 +248,7 @@ Add these parameters to enable external access:
 
 | Template | Description |
 |----------|-------------|
-| `foundation.yaml` | Shared VPC, EKS, Route53, ALB Controller, ExternalDNS (for multi-product deployments) |
+| `foundation.yaml` | Shared VPC and EKS, with optional Route53 / ALB Controller / ExternalDNS (for multi-product deployments) |
 
 ### Foundation Templates
 

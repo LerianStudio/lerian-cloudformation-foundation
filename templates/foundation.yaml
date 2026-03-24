@@ -508,6 +508,9 @@ Outputs:
         --stack-name midaz-infra \
         --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}products/midaz/infrastructure.yaml \
         --parameter-overrides \
+          MPS3BucketName=${MPS3BucketName} \
+          MPS3BucketRegion=${MPS3BucketRegion} \
+          MPS3KeyPrefix=${MPS3KeyPrefix} \
           FoundationStackName=${AWS::StackName} \
         --capabilities CAPABILITY_IAM \
         --region ${AWS::Region}
