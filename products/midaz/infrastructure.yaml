@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Midaz Infrastructure Stack
-  Deploys VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and supporting services.
+  Deploys RDS, DocumentDB, ElastiCache, and AmazonMQ for the Midaz product.
+  Requires a Foundation stack (VPC + EKS) to be deployed first.
   Use midaz-application.yaml to deploy the Midaz application after this stack completes.
   (c) Lerian Studio - https://lerian.studio
 
@@ -20,30 +21,18 @@ Metadata:
           - EnvironmentName
           - ProjectName
       - Label:
-          default: "Cluster Configuration"
+          default: "Foundation Stack"
         Parameters:
-          - UseExistingCluster
-          - ExistingClusterName
+          - FoundationStackName
+      - Label:
+          default: "Override Foundation Values (optional)"
+        Parameters:
           - ExistingVpcId
+          - ExistingVpcCIDR
           - ExistingPrivateSubnetIds
+          - ExistingDatabaseSubnetIds
+          - ExistingClusterName
           - ExistingOIDCProviderArn
-      - Label:
-          default: "Network Configuration"
-        Parameters:
-          - VpcCIDR
-          - AvailabilityZone1
-          - AvailabilityZone2
-          - AvailabilityZone3
-          - EnableFlowLogs
-          - FlowLogsRetentionDays
-      - Label:
-          default: "EKS Configuration"
-        Parameters:
-          - KubernetesVersion
-          - NodeInstanceType
-          - NodeGroupMinSize
-          - NodeGroupMaxSize
-          - NodeGroupDesiredSize
       - Label:
           default: "RDS PostgreSQL Configuration"
         Parameters:
@@ -83,12 +72,6 @@ Metadata:
           - AdditionalIngressCIDR1
           - AdditionalIngressCIDR2
           - AdditionalIngressCIDR3
-      - Label:
-          default: "DNS and Ingress Configuration"
-        Parameters:
-          - DomainName
-          - EnableALBController
-          - EnableExternalDNS
     ParameterLabels:
       # AWS Marketplace
       MPS3BucketName:
@@ -102,41 +85,21 @@ Metadata:
         default: "Environment"
       ProjectName:
         default: "Project Name"
-      # Cluster
-      UseExistingCluster:
-        default: "Use Existing Cluster"
-      ExistingClusterName:
-        default: "Existing Cluster Name"
+      # Foundation Stack
+      FoundationStackName:
+        default: "Foundation Stack Name"
       ExistingVpcId:
-        default: "Existing VPC ID"
+        default: "VPC ID (override)"
+      ExistingVpcCIDR:
+        default: "VPC CIDR Block (override)"
       ExistingPrivateSubnetIds:
-        default: "Existing Private Subnet IDs"
+        default: "Private Subnet IDs (override)"
+      ExistingDatabaseSubnetIds:
+        default: "Database Subnet IDs (override)"
+      ExistingClusterName:
+        default: "EKS Cluster Name (override)"
       ExistingOIDCProviderArn:
-        default: "Existing OIDC Provider ARN"
-      # Network
-      VpcCIDR:
-        default: "VPC CIDR Block"
-      AvailabilityZone1:
-        default: "Availability Zone 1"
-      AvailabilityZone2:
-        default: "Availability Zone 2"
-      AvailabilityZone3:
-        default: "Availability Zone 3"
-      EnableFlowLogs:
-        default: "Enable VPC Flow Logs"
-      FlowLogsRetentionDays:
-        default: "Flow Logs Retention (Days)"
-      # EKS
-      KubernetesVersion:
-        default: "Kubernetes Version"
-      NodeInstanceType:
-        default: "Node Instance Type"
-      NodeGroupMinSize:
-        default: "Minimum Nodes"
-      NodeGroupMaxSize:
-        default: "Maximum Nodes"
-      NodeGroupDesiredSize:
-        default: "Desired Nodes"
+        default: "OIDC Provider ARN (override)"
       # RDS
       RDSInstanceClass:
         default: "RDS Instance Class"
@@ -190,13 +153,6 @@ Metadata:
         default: "Additional CIDR 2"
       AdditionalIngressCIDR3:
         default: "Additional CIDR 3"
-      # DNS
-      DomainName:
-        default: "Domain Name (Optional)"
-      EnableALBController:
-        default: "Enable ALB Controller"
-      EnableExternalDNS:
-        default: "Enable ExternalDNS"
 
 Parameters:
   # =============================================================================
@@ -243,148 +199,50 @@ Parameters:
     ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-128 characters long"
 
   # =============================================================================
-  # CLUSTER CONFIGURATION
+  # FOUNDATION STACK
   # =============================================================================
-  UseExistingCluster:
+  FoundationStackName:
     Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: |
-      Set to true to deploy services into an existing VPC and EKS cluster
-      (e.g., when deploying a second product to a shared cluster).
-      When true, ExistingClusterName, ExistingVpcId and ExistingPrivateSubnetIds are required.
+    Default: "lerian-foundation"
+    Description: "Name of the Foundation stack to import VPC/EKS configuration from. Values are imported automatically via CloudFormation exports. Use the override parameters below to provide custom values instead."
 
-  ExistingClusterName:
-    Type: String
-    Default: ""
-    Description: "Name of the existing EKS cluster (required when UseExistingCluster=true)"
-
+  # =============================================================================
+  # OVERRIDE FOUNDATION VALUES (optional)
+  # =============================================================================
   ExistingVpcId:
     Type: String
     Default: ""
-    Description: "VPC ID where services will be deployed (required when UseExistingCluster=true)"
+    Description: "VPC ID. Leave empty to import from Foundation stack."
+
+  ExistingVpcCIDR:
+    Type: String
+    Default: ""
+    Description: "VPC CIDR block. Leave empty to import from Foundation stack."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
 
   ExistingPrivateSubnetIds:
     Type: String
     Default: ""
-    Description: "Comma-separated list of private subnet IDs (required when UseExistingCluster=true)"
+    Description: "Comma-separated list of private subnet IDs. Leave empty to import from Foundation stack."
+
+  ExistingDatabaseSubnetIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated list of database subnet IDs (isolated subnets). Leave empty to import from Foundation stack."
+
+  ExistingClusterName:
+    Type: String
+    Default: ""
+    Description: "EKS cluster name. Leave empty to import from Foundation stack."
 
   ExistingOIDCProviderArn:
     Type: String
     Default: ""
-    Description: "OIDC Provider ARN of the existing EKS cluster (required when EnableALBController=true or EnableExternalDNS=true with UseExistingCluster=true)"
+    Description: "OIDC Provider ARN. Leave empty to import from Foundation stack."
 
-  # Network
-  VpcCIDR:
-    Type: String
-    Default: 10.50.0.0/16
-    Description: CIDR block for the VPC
-    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-
-  AvailabilityZone1:
-    Type: AWS::EC2::AvailabilityZone::Name
-    Description: First Availability Zone
-
-  AvailabilityZone2:
-    Type: AWS::EC2::AvailabilityZone::Name
-    Description: Second Availability Zone
-
-  AvailabilityZone3:
-    Type: AWS::EC2::AvailabilityZone::Name
-    Description: Third Availability Zone
-
-  EnableFlowLogs:
-    Type: String
-    AllowedValues:
-      - "true"
-      - "false"
-    Default: "false"
-    Description: Enable VPC Flow Logs for network traffic auditing and security analysis.
-
-  FlowLogsRetentionDays:
-    Type: Number
-    Default: 14
-    AllowedValues:
-      - 1
-      - 3
-      - 5
-      - 7
-      - 14
-      - 30
-      - 60
-      - 90
-      - 120
-      - 150
-      - 180
-      - 365
-      - 400
-      - 545
-      - 731
-      - 1827
-      - 3653
-    Description: Number of days to retain VPC Flow Logs in CloudWatch.
-
-  # EKS
-  KubernetesVersion:
-    Type: String
-    Default: "1.32"
-    AllowedValues:
-      - "1.32"
-      - "1.31"
-      - "1.30"
-    Description: Kubernetes version for EKS cluster
-
-  NodeInstanceType:
-    Type: String
-    Default: c7g.large
-    AllowedValues:
-      - c7g.medium
-      - c7g.large
-      - c7g.xlarge
-      - c7g.2xlarge
-      - m7g.medium
-      - m7g.large
-      - m7g.xlarge
-      - m7g.2xlarge
-      - r7g.medium
-      - r7g.large
-      - r7g.xlarge
-      - c6g.medium
-      - c6g.large
-      - c6g.xlarge
-      - c6g.2xlarge
-      - c6i.large
-      - c6i.xlarge
-      - c6i.2xlarge
-      - m6g.medium
-      - m6g.large
-      - m6g.xlarge
-    Description: EC2 instance type for EKS worker nodes (ARM64 Graviton)
-
-  NodeGroupMinSize:
-    Type: Number
-    Default: 3
-    MinValue: 1
-    MaxValue: 100
-    Description: Minimum number of worker nodes
-
-  NodeGroupMaxSize:
-    Type: Number
-    Default: 15
-    MinValue: 1
-    MaxValue: 100
-    Description: Maximum number of worker nodes
-
-  NodeGroupDesiredSize:
-    Type: Number
-    Default: 3
-    MinValue: 1
-    MaxValue: 100
-    Description: Desired number of worker nodes
-
-  # RDS
+  # =============================================================================
+  # RDS POSTGRESQL CONFIGURATION
+  # =============================================================================
   RDSInstanceClass:
     Type: String
     Default: db.t3.medium
@@ -491,7 +349,9 @@ Parameters:
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
 
-  # DocumentDB
+  # =============================================================================
+  # DOCUMENTDB CONFIGURATION
+  # =============================================================================
   DocumentDBInstanceClass:
     Type: String
     Default: db.t3.medium
@@ -536,7 +396,9 @@ Parameters:
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
 
-  # ElastiCache
+  # =============================================================================
+  # ELASTICACHE CONFIGURATION
+  # =============================================================================
   ElastiCacheNodeType:
     Type: String
     Default: cache.m7g.large
@@ -550,7 +412,9 @@ Parameters:
       - cache.r7g.xlarge
     Description: ElastiCache node type
 
-  # AmazonMQ
+  # =============================================================================
+  # AMAZONMQ CONFIGURATION
+  # =============================================================================
   AmazonMQInstanceType:
     Type: String
     Default: mq.t3.micro
@@ -610,67 +474,16 @@ Parameters:
     AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
     ConstraintDescription: "Must be a valid CIDR block or empty"
 
-  # =============================================================================
-  # DNS AND INGRESS CONFIGURATION
-  # =============================================================================
-  DomainName:
-    Type: String
-    Default: ""
-    Description: Domain name for Route53 private hosted zone (e.g., midaz.empresa.com). Leave empty to skip DNS setup.
-    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
-    ConstraintDescription: "Must be a valid domain name (e.g., example.com or sub.example.com) or empty"
-
-  EnableALBController:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable AWS Load Balancer Controller for Ingress
-
-  EnableExternalDNS:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable ExternalDNS for automatic DNS management (requires DomainName)
-
 Conditions:
-  CreateNewCluster: !Equals [!Ref UseExistingCluster, "false"]
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
-  HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
-  ShouldEnableALBController: !Equals [!Ref EnableALBController, "true"]
-  ShouldEnableExternalDNS: !And
-    - !Condition HasDomainName
-    - !Equals [!Ref EnableExternalDNS, "true"]
+  HasExplicitVpcId: !Not [!Equals [!Ref ExistingVpcId, ""]]
+  HasExplicitVpcCIDR: !Not [!Equals [!Ref ExistingVpcCIDR, ""]]
+  HasExplicitPrivateSubnets: !Not [!Equals [!Ref ExistingPrivateSubnetIds, ""]]
+  HasExplicitDatabaseSubnets: !Not [!Equals [!Ref ExistingDatabaseSubnetIds, ""]]
+  HasExplicitClusterName: !Not [!Equals [!Ref ExistingClusterName, ""]]
+  HasExplicitOIDCArn: !Not [!Equals [!Ref ExistingOIDCProviderArn, ""]]
 
 Resources:
-  # =============================================================================
-  # VPC STACK
-  # =============================================================================
-  VPCStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: CreateNewCluster
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
-      Parameters:
-        ProjectName: !Ref ProjectName
-        EnvironmentName: !Ref EnvironmentName
-        VpcCIDR: !Ref VpcCIDR
-        AvailabilityZone1: !Ref AvailabilityZone1
-        AvailabilityZone2: !Ref AvailabilityZone2
-        AvailabilityZone3: !Ref AvailabilityZone3
-        EnableFlowLogs: !Ref EnableFlowLogs
-        FlowLogsRetentionDays: !Ref FlowLogsRetentionDays
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-vpc-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
   # =============================================================================
   # RDS STACK
   # =============================================================================
@@ -681,9 +494,9 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
-        VpcCIDR: !Ref VpcCIDR
-        DatabaseSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
+        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
+        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
+        DatabaseSubnetIds: !If [HasExplicitDatabaseSubnets, !Ref ExistingDatabaseSubnetIds, !ImportValue !Sub "${FoundationStackName}-DatabaseSubnetIds"]
         InstanceClass: !Ref RDSInstanceClass
         AllocatedStorage: !Ref RDSAllocatedStorage
         MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
@@ -717,9 +530,9 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
-        VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
+        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
+        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
+        PrivateSubnetIds: !If [HasExplicitPrivateSubnets, !Ref ExistingPrivateSubnetIds, !ImportValue !Sub "${FoundationStackName}-PrivateSubnetIds"]
         InstanceClass: !Ref DocumentDBInstanceClass
         InstanceCount: !Ref DocumentDBInstanceCount
         MasterUsername: !Ref DocumentDBMasterUsername
@@ -746,9 +559,9 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
-        VpcCIDR: !Ref VpcCIDR
-        CacheSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
+        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
+        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
+        CacheSubnetIds: !If [HasExplicitDatabaseSubnets, !Ref ExistingDatabaseSubnetIds, !ImportValue !Sub "${FoundationStackName}-DatabaseSubnetIds"]
         NodeType: !Ref ElastiCacheNodeType
         AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
         AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
@@ -771,9 +584,9 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
-        VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
+        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
+        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
+        PrivateSubnetIds: !If [HasExplicitPrivateSubnets, !Ref ExistingPrivateSubnetIds, !ImportValue !Sub "${FoundationStackName}-PrivateSubnetIds"]
         InstanceType: !Ref AmazonMQInstanceType
         DeploymentMode: !Ref AmazonMQDeploymentMode
         AdminUsername: !Ref AmazonMQAdminUsername
@@ -783,104 +596,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-amazonmq-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # =============================================================================
-  # EKS STACK
-  # =============================================================================
-  EKSStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: CreateNewCluster
-    DependsOn:
-      - RDSStack
-      - DocumentDBStack
-      - ElastiCacheStack
-      - AmazonMQStack
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
-      Parameters:
-        ProjectName: !Ref ProjectName
-        EnvironmentName: !Ref EnvironmentName
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
-        KubernetesVersion: !Ref KubernetesVersion
-        NodeInstanceType: !Ref NodeInstanceType
-        NodeGroupMinSize: !Ref NodeGroupMinSize
-        NodeGroupMaxSize: !Ref NodeGroupMaxSize
-        NodeGroupDesiredSize: !Ref NodeGroupDesiredSize
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-eks-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # =============================================================================
-  # ROUTE53 STACK (Private Hosted Zone)
-  # =============================================================================
-  Route53Stack:
-    Type: AWS::CloudFormation::Stack
-    Condition: HasDomainName
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}route53.yaml"
-      Parameters:
-        ProjectName: !Ref ProjectName
-        EnvironmentName: !Ref EnvironmentName
-        DomainName: !Ref DomainName
-        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-route53-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # =============================================================================
-  # ALB CONTROLLER STACK
-  # =============================================================================
-  ALBControllerStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldEnableALBController
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
-      Parameters:
-        ProjectName: !Ref ProjectName
-        EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
-        ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
-        OIDCProviderArn: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-alb-controller-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # =============================================================================
-  # EXTERNAL DNS STACK
-  # =============================================================================
-  ExternalDNSStack:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldEnableExternalDNS
-    DependsOn: Route53Stack
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
-      Parameters:
-        ProjectName: !Ref ProjectName
-        EnvironmentName: !Ref EnvironmentName
-        ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
-        OIDCProviderArn: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
-        PrivateHostedZoneId: !GetAtt Route53Stack.Outputs.PrivateHostedZoneId
-        DomainName: !Ref DomainName
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-external-dns-stack"
         - Key: Environment
           Value: !Ref EnvironmentName
         - Key: ManagedBy
@@ -903,48 +618,31 @@ Outputs:
       Name: !Sub "${AWS::StackName}-EnvironmentName"
 
   # =============================================================================
-  # VPC OUTPUTS
+  # VPC/EKS PASS-THROUGH OUTPUTS (for application stack reference)
   # =============================================================================
   VpcId:
     Description: VPC ID
-    Value: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
+    Value: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
     Export:
       Name: !Sub "${AWS::StackName}-VpcId"
 
   PrivateSubnetIds:
     Description: Private Subnet IDs
-    Value: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
+    Value: !If [HasExplicitPrivateSubnets, !Ref ExistingPrivateSubnetIds, !ImportValue !Sub "${FoundationStackName}-PrivateSubnetIds"]
     Export:
       Name: !Sub "${AWS::StackName}-PrivateSubnetIds"
 
-  # =============================================================================
-  # EKS OUTPUTS
-  # =============================================================================
   EKSClusterName:
     Description: EKS Cluster Name
-    Value: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
+    Value: !If [HasExplicitClusterName, !Ref ExistingClusterName, !ImportValue !Sub "${FoundationStackName}-EKSClusterName"]
     Export:
       Name: !Sub "${AWS::StackName}-EKSClusterName"
 
-  EKSClusterEndpoint:
-    Condition: CreateNewCluster
-    Description: EKS Cluster Endpoint
-    Value: !GetAtt EKSStack.Outputs.ClusterEndpoint
-    Export:
-      Name: !Sub "${AWS::StackName}-EKSClusterEndpoint"
-
   OIDCProviderArn:
     Description: EKS OIDC Provider ARN
-    Value: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.OIDCProviderArn, !Ref ExistingOIDCProviderArn]
+    Value: !If [HasExplicitOIDCArn, !Ref ExistingOIDCProviderArn, !ImportValue !Sub "${FoundationStackName}-OIDCProviderArn"]
     Export:
       Name: !Sub "${AWS::StackName}-OIDCProviderArn"
-
-  ClusterSecurityGroupId:
-    Condition: CreateNewCluster
-    Description: EKS Cluster Security Group ID
-    Value: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
-    Export:
-      Name: !Sub "${AWS::StackName}-ClusterSecurityGroupId"
 
   # =============================================================================
   # RDS OUTPUTS
@@ -1001,51 +699,8 @@ Outputs:
       Name: !Sub "${AWS::StackName}-AmazonMQSecretArn"
 
   # =============================================================================
-  # ROUTE53 OUTPUTS
-  # =============================================================================
-  PrivateHostedZoneId:
-    Condition: HasDomainName
-    Description: Route53 Private Hosted Zone ID
-    Value: !GetAtt Route53Stack.Outputs.PrivateHostedZoneId
-    Export:
-      Name: !Sub "${AWS::StackName}-PrivateHostedZoneId"
-
-  PrivateHostedZoneName:
-    Condition: HasDomainName
-    Description: Route53 Private Hosted Zone Name
-    Value: !GetAtt Route53Stack.Outputs.PrivateHostedZoneName
-    Export:
-      Name: !Sub "${AWS::StackName}-PrivateHostedZoneName"
-
-  # =============================================================================
-  # ALB CONTROLLER OUTPUTS
-  # =============================================================================
-  ALBControllerRoleArn:
-    Condition: ShouldEnableALBController
-    Description: ALB Controller IAM Role ARN
-    Value: !GetAtt ALBControllerStack.Outputs.ALBControllerRoleArn
-    Export:
-      Name: !Sub "${AWS::StackName}-ALBControllerRoleArn"
-
-  # =============================================================================
-  # EXTERNAL DNS OUTPUTS
-  # =============================================================================
-  ExternalDNSRoleArn:
-    Condition: ShouldEnableExternalDNS
-    Description: ExternalDNS IAM Role ARN
-    Value: !GetAtt ExternalDNSStack.Outputs.ExternalDNSRoleArn
-    Export:
-      Name: !Sub "${AWS::StackName}-ExternalDNSRoleArn"
-
-  # =============================================================================
   # UTILITY COMMANDS
   # =============================================================================
-  KubeconfigCommand:
-    Description: Command to configure kubectl
-    Value: !Sub
-      - "aws eks update-kubeconfig --name ${ClusterName} --region ${AWS::Region}"
-      - ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
-
   DeployApplicationCommand:
     Description: Command to deploy the Midaz application
     Value: !Sub |
