@@ -10,11 +10,11 @@
     "route53": "0.1.2",
     "alb-controller": "0.1.4",
     "external-dns": "0.1.4",
-    "foundation": "0.1.1"
+    "foundation": "0.1.2"
   },
   "products": {
     "midaz": {
-      "infrastructure": "0.2.1",
+      "infrastructure": "0.2.2",
       "helm": "0.1.4",
       "application": "0.1.7",
       "complete": "0.2.0"
