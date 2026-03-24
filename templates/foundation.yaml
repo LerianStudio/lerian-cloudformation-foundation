@@ -410,42 +410,58 @@ Outputs:
     Value: !Ref EnvironmentName
 
   # =============================================================================
-  # VPC OUTPUTS (used by product stacks as ExistingVpcId, ExistingPrivateSubnetIds)
+  # VPC OUTPUTS (auto-imported by product stacks via FoundationStackName)
   # =============================================================================
   VpcId:
-    Description: VPC ID — pass as ExistingVpcId to product stacks
+    Description: VPC ID
     Value: !GetAtt VPCStack.Outputs.VpcId
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
 
   VpcCIDR:
-    Description: VPC CIDR Block — pass as VpcCIDR to product stacks
+    Description: VPC CIDR Block
     Value: !Ref VpcCIDR
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcCIDR"
 
   PrivateSubnetIds:
-    Description: Private Subnet IDs — pass as ExistingPrivateSubnetIds to product stacks
+    Description: Private Subnet IDs
     Value: !GetAtt VPCStack.Outputs.PrivateSubnetIds
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetIds"
 
   DatabaseSubnetIds:
     Description: Database Subnet IDs (isolated subnets for databases)
     Value: !GetAtt VPCStack.Outputs.DatabaseSubnetIds
+    Export:
+      Name: !Sub "${AWS::StackName}-DatabaseSubnetIds"
 
   # =============================================================================
-  # EKS OUTPUTS (used by product stacks as ExistingClusterName, ExistingOIDCProviderArn)
+  # EKS OUTPUTS (auto-imported by product stacks via FoundationStackName)
   # =============================================================================
   EKSClusterName:
-    Description: EKS Cluster Name — pass as ExistingClusterName to product stacks
+    Description: EKS Cluster Name
     Value: !GetAtt EKSStack.Outputs.ClusterName
+    Export:
+      Name: !Sub "${AWS::StackName}-EKSClusterName"
 
   EKSClusterEndpoint:
     Description: EKS Cluster Endpoint
     Value: !GetAtt EKSStack.Outputs.ClusterEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-EKSClusterEndpoint"
 
   OIDCProviderArn:
-    Description: EKS OIDC Provider ARN — pass as ExistingOIDCProviderArn to product stacks
+    Description: EKS OIDC Provider ARN
     Value: !GetAtt EKSStack.Outputs.OIDCProviderArn
+    Export:
+      Name: !Sub "${AWS::StackName}-OIDCProviderArn"
 
   ClusterSecurityGroupId:
     Description: EKS Cluster Security Group ID
     Value: !GetAtt EKSStack.Outputs.ClusterSecurityGroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterSecurityGroupId"
 
   # =============================================================================
   # ROUTE53 OUTPUTS
@@ -485,24 +501,16 @@ Outputs:
 
   DeployProductCommand:
     Description: |
-      Example command to deploy a product stack using this foundation.
-      Pass UseExistingCluster=true and the foundation outputs as parameters.
-    Value: !Sub
-      - |
-        aws cloudformation deploy \
-          --stack-name <product-stack-name> \
-          --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}products/midaz/infrastructure.yaml \
-          --parameter-overrides \
-            UseExistingCluster=true \
-            ExistingVpcId=${VpcId} \
-            ExistingClusterName=${ClusterName} \
-            ExistingPrivateSubnetIds="${PrivateSubnetIds}" \
-            ExistingOIDCProviderArn=${OIDCProviderArn} \
-            VpcCIDR=${VpcCIDRValue} \
-          --capabilities CAPABILITY_IAM \
-          --region ${AWS::Region}
-      - VpcId: !GetAtt VPCStack.Outputs.VpcId
-        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
-        PrivateSubnetIds: !GetAtt VPCStack.Outputs.PrivateSubnetIds
-        OIDCProviderArn: !GetAtt EKSStack.Outputs.OIDCProviderArn
-        VpcCIDRValue: !Ref VpcCIDR
+      Example command to deploy a product infrastructure stack using this foundation.
+      The product stack auto-imports values via FoundationStackName.
+    Value: !Sub |
+      aws cloudformation deploy \
+        --stack-name midaz-infra \
+        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}products/midaz/infrastructure.yaml \
+        --parameter-overrides \
+          MPS3BucketName=${MPS3BucketName} \
+          MPS3BucketRegion=${MPS3BucketRegion} \
+          MPS3KeyPrefix=${MPS3KeyPrefix} \
+          FoundationStackName=${AWS::StackName} \
+        --capabilities CAPABILITY_IAM \
+        --region ${AWS::Region}
