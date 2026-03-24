@@ -494,9 +494,18 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
-        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
-        DatabaseSubnetIds: !If [HasExplicitDatabaseSubnets, !Ref ExistingDatabaseSubnetIds, !ImportValue !Sub "${FoundationStackName}-DatabaseSubnetIds"]
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        DatabaseSubnetIds: !If
+          - HasExplicitDatabaseSubnets
+          - !Ref ExistingDatabaseSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-DatabaseSubnetIds"
         InstanceClass: !Ref RDSInstanceClass
         AllocatedStorage: !Ref RDSAllocatedStorage
         MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
@@ -530,9 +539,18 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
-        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
-        PrivateSubnetIds: !If [HasExplicitPrivateSubnets, !Ref ExistingPrivateSubnetIds, !ImportValue !Sub "${FoundationStackName}-PrivateSubnetIds"]
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        PrivateSubnetIds: !If
+          - HasExplicitPrivateSubnets
+          - !Ref ExistingPrivateSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-PrivateSubnetIds"
         InstanceClass: !Ref DocumentDBInstanceClass
         InstanceCount: !Ref DocumentDBInstanceCount
         MasterUsername: !Ref DocumentDBMasterUsername
@@ -559,9 +577,18 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
-        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
-        CacheSubnetIds: !If [HasExplicitDatabaseSubnets, !Ref ExistingDatabaseSubnetIds, !ImportValue !Sub "${FoundationStackName}-DatabaseSubnetIds"]
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        CacheSubnetIds: !If
+          - HasExplicitDatabaseSubnets
+          - !Ref ExistingDatabaseSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-DatabaseSubnetIds"
         NodeType: !Ref ElastiCacheNodeType
         AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
         AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
@@ -584,9 +611,18 @@ Resources:
       Parameters:
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
-        VpcCIDR: !If [HasExplicitVpcCIDR, !Ref ExistingVpcCIDR, !ImportValue !Sub "${FoundationStackName}-VpcCIDR"]
-        PrivateSubnetIds: !If [HasExplicitPrivateSubnets, !Ref ExistingPrivateSubnetIds, !ImportValue !Sub "${FoundationStackName}-PrivateSubnetIds"]
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        PrivateSubnetIds: !If
+          - HasExplicitPrivateSubnets
+          - !Ref ExistingPrivateSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-PrivateSubnetIds"
         InstanceType: !Ref AmazonMQInstanceType
         DeploymentMode: !Ref AmazonMQDeploymentMode
         AdminUsername: !Ref AmazonMQAdminUsername
@@ -622,25 +658,37 @@ Outputs:
   # =============================================================================
   VpcId:
     Description: VPC ID
-    Value: !If [HasExplicitVpcId, !Ref ExistingVpcId, !ImportValue !Sub "${FoundationStackName}-VpcId"]
+    Value: !If
+      - HasExplicitVpcId
+      - !Ref ExistingVpcId
+      - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
     Export:
       Name: !Sub "${AWS::StackName}-VpcId"
 
   PrivateSubnetIds:
     Description: Private Subnet IDs
-    Value: !If [HasExplicitPrivateSubnets, !Ref ExistingPrivateSubnetIds, !ImportValue !Sub "${FoundationStackName}-PrivateSubnetIds"]
+    Value: !If
+      - HasExplicitPrivateSubnets
+      - !Ref ExistingPrivateSubnetIds
+      - Fn::ImportValue: !Sub "${FoundationStackName}-PrivateSubnetIds"
     Export:
       Name: !Sub "${AWS::StackName}-PrivateSubnetIds"
 
   EKSClusterName:
     Description: EKS Cluster Name
-    Value: !If [HasExplicitClusterName, !Ref ExistingClusterName, !ImportValue !Sub "${FoundationStackName}-EKSClusterName"]
+    Value: !If
+      - HasExplicitClusterName
+      - !Ref ExistingClusterName
+      - Fn::ImportValue: !Sub "${FoundationStackName}-EKSClusterName"
     Export:
       Name: !Sub "${AWS::StackName}-EKSClusterName"
 
   OIDCProviderArn:
     Description: EKS OIDC Provider ARN
-    Value: !If [HasExplicitOIDCArn, !Ref ExistingOIDCProviderArn, !ImportValue !Sub "${FoundationStackName}-OIDCProviderArn"]
+    Value: !If
+      - HasExplicitOIDCArn
+      - !Ref ExistingOIDCProviderArn
+      - Fn::ImportValue: !Sub "${FoundationStackName}-OIDCProviderArn"
     Export:
       Name: !Sub "${AWS::StackName}-OIDCProviderArn"
 
