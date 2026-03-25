@@ -5,7 +5,7 @@
     "eks": "0.1.6",
     "rds": "0.2.2",
     "documentdb": "0.3.3",
-    "elasticache": "0.2.4",
+    "elasticache": "0.2.5",
     "amazonmq": "0.2.4",
     "route53": "0.1.2",
     "alb-controller": "0.1.4",
@@ -14,11 +14,11 @@
   },
   "products": {
     "midaz": {
-      "infrastructure": "0.2.3",
-      "helm": "0.2.2",
-      "application": "0.1.10",
+      "infrastructure": "0.2.4",
+      "helm": "0.2.3",
+      "application": "0.1.11",
       "complete": "0.2.0",
-      "full-stack": "0.0.3"
+      "full-stack": "0.0.4"
     },
     "tracer": {
       "infrastructure": "0.1.2"
