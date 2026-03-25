@@ -743,6 +743,18 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-ElastiCacheEndpoint"
 
+  ElastiCacheSecretArn:
+    Description: ElastiCache Auth Token Secret ARN
+    Value: !GetAtt ElastiCacheStack.Outputs.AuthSecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ElastiCacheSecretArn"
+
+  ElastiCacheKMSKeyArn:
+    Description: ElastiCache KMS Key ARN
+    Value: !GetAtt ElastiCacheStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ElastiCacheKMSKeyArn"
+
   # =============================================================================
   # AMAZONMQ OUTPUTS
   # =============================================================================

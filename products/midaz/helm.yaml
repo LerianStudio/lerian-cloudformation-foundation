@@ -47,6 +47,11 @@ Parameters:
     Type: String
     Description: ElastiCache Primary Endpoint
 
+  ElastiCacheSecretArn:
+    Type: String
+    Description: ElastiCache Auth Token Secret ARN
+    Default: ""
+
   AmazonMQEndpoint:
     Type: String
     Description: AmazonMQ Broker Endpoint
@@ -65,6 +70,11 @@ Parameters:
     Default: ""
     Description: DocumentDB KMS Key ARN for secret decryption. Leave empty to allow all KMS keys via Secrets Manager.
 
+  ElastiCacheKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: ElastiCache KMS Key ARN for secret decryption. Leave empty to allow all KMS keys via Secrets Manager.
+
   AmazonMQKMSKeyArn:
     Type: String
     Default: ""
@@ -77,7 +87,7 @@ Parameters:
 
   MidazChartVersion:
     Type: String
-    Default: "5.5.1"
+    Default: "5.7.0"
     Description: Midaz Helm Chart Version
 
   MidazNamespace:
@@ -141,11 +151,13 @@ Parameters:
 
 Conditions:
   HasRDSReplica: !Not [!Equals [!Ref RDSReplicaEndpoint, ""]]
+  HasElastiCacheSecret: !Not [!Equals [!Ref ElastiCacheSecretArn, ""]]
   ShouldEnableIngress: !Equals [!Ref EnableIngress, "true"]
   HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
   HasKMSKeys: !And
     - !Not [!Equals [!Ref RDSKMSKeyArn, ""]]
     - !Not [!Equals [!Ref DocumentDBKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref ElastiCacheKMSKeyArn, ""]]
     - !Not [!Equals [!Ref AmazonMQKMSKeyArn, ""]]
 
 Resources:
@@ -186,6 +198,7 @@ Resources:
                 Resource:
                   - !Ref RDSSecretArn
                   - !Ref DocumentDBSecretArn
+                  - !If [HasElastiCacheSecret, !Ref ElastiCacheSecretArn, !Ref "AWS::NoValue"]
                   - !Ref AmazonMQSecretArn
               - Effect: Allow
                 Action:
@@ -194,6 +207,7 @@ Resources:
                   - HasKMSKeys
                   - - !Ref RDSKMSKeyArn
                     - !Ref DocumentDBKMSKeyArn
+                    - !Ref ElastiCacheKMSKeyArn
                     - !Ref AmazonMQKMSKeyArn
                   - - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
                 Condition:
@@ -259,6 +273,7 @@ Resources:
           DOCUMENTDB_ENDPOINT: !Ref DocumentDBEndpoint
           DOCUMENTDB_SECRET_ARN: !Ref DocumentDBSecretArn
           ELASTICACHE_ENDPOINT: !Ref ElastiCacheEndpoint
+          ELASTICACHE_SECRET_ARN: !If [HasElastiCacheSecret, !Ref ElastiCacheSecretArn, ""]
           AMAZONMQ_ENDPOINT: !Ref AmazonMQEndpoint
           AMAZONMQ_SECRET_ARN: !Ref AmazonMQSecretArn
           ENABLE_INGRESS: !Ref EnableIngress
@@ -454,6 +469,21 @@ Resources:
               except:
                   logger.info(f"Namespace {namespace} may already exist")
 
+          def get_elasticache_password():
+              """Fetch ElastiCache auth token from Secrets Manager if available"""
+              secret_arn = os.environ.get('ELASTICACHE_SECRET_ARN', '')
+              if not secret_arn:
+                  logger.info("No ElastiCache secret ARN provided, REDIS_PASSWORD will be empty")
+                  return ''
+              try:
+                  client = boto3.client('secretsmanager')
+                  response = client.get_secret_value(SecretId=secret_arn)
+                  # ElastiCache auth token is stored as plain string (not JSON)
+                  return response['SecretString']
+              except Exception as e:
+                  logger.warning(f"Failed to fetch ElastiCache secret: {e}")
+                  return ''
+
           def create_k8s_secrets():
               project = os.environ['PROJECT_NAME']
               namespace = os.environ['NAMESPACE']
@@ -462,6 +492,7 @@ Resources:
               rds_secret = get_secret(os.environ['RDS_SECRET_ARN'])
               docdb_secret = get_secret(os.environ['DOCUMENTDB_SECRET_ARN'])
               mq_secret = get_secret(os.environ['AMAZONMQ_SECRET_ARN'])
+              redis_password = get_elasticache_password()
 
               # Create secrets using YAML file
               secrets_yaml = f'''
@@ -517,7 +548,7 @@ Resources:
             MONGO_TRANSACTION_PASSWORD: "{docdb_secret['password']}"
             RABBITMQ_DEFAULT_PASS: "{mq_secret['password']}"
             RABBITMQ_CONSUMER_PASS: "{mq_secret['password']}"
-            REDIS_PASSWORD: ""
+            REDIS_PASSWORD: "{redis_password}"
           '''
 
               secrets_file = '/tmp/secrets.yaml'
@@ -688,12 +719,15 @@ Resources:
               MONGO_ONBOARDING_PORT: "27017"
               MONGO_ONBOARDING_USER: "{docdb_secret['username']}"
               MONGO_ONBOARDING_NAME: "onboarding"
+              MONGO_ONBOARDING_PARAMETERS: "?replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
               MONGO_TRANSACTION_URI: "mongodb"
               MONGO_TRANSACTION_HOST: "{docdb_endpoint}"
               MONGO_TRANSACTION_PORT: "27017"
               MONGO_TRANSACTION_USER: "{docdb_secret['username']}"
               MONGO_TRANSACTION_NAME: "transaction"
+              MONGO_TRANSACTION_PARAMETERS: "?replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
               REDIS_HOST: "{elasticache_endpoint}:6379"
+              REDIS_TLS: "true"
               RABBITMQ_URI: "amqps"
               RABBITMQ_HOST: "{amazonmq_host}"
               RABBITMQ_PORT_HOST: "5671"
@@ -728,7 +762,7 @@ Resources:
               MONGO_USER: "{docdb_secret['username']}"
               MONGO_NAME: "crm"
               MONGO_URI: "mongodb"
-              MONGO_PARAMETERS: ""
+              MONGO_PARAMETERS: "?replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
             secrets:
               MONGO_PASSWORD: "{docdb_secret['password']}"
             {crm_ingress_config}
@@ -854,7 +888,7 @@ Resources:
       ClusterName: !Ref ClusterName
       # Force update hash
       ConfigHash: !Base64
-        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${EnableCRM}-${EnableCRMIngress}-${CRMIngressHostname}"
+        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${ElastiCacheSecretArn}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${EnableCRM}-${EnableCRMIngress}-${CRMIngressHostname}"
 
 Outputs:
   HelmReleaseName:
