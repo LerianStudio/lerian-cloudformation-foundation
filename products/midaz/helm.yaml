@@ -143,7 +143,10 @@ Conditions:
   HasRDSReplica: !Not [!Equals [!Ref RDSReplicaEndpoint, ""]]
   ShouldEnableIngress: !Equals [!Ref EnableIngress, "true"]
   HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
-  HasKMSKeys: !Not [!Equals [!Ref RDSKMSKeyArn, ""]]
+  HasKMSKeys: !And
+    - !Not [!Equals [!Ref RDSKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref DocumentDBKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref AmazonMQKMSKeyArn, ""]]
 
 Resources:
   # =============================================================================
