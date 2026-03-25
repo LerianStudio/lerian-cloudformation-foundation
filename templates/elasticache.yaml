@@ -264,6 +264,10 @@ Outputs:
     Description: ElastiCache Auth Token Secret ARN
     Value: !Ref ElastiCacheAuthSecret
 
+  KMSKeyArn:
+    Description: ElastiCache KMS Key ARN for encryption
+    Value: !GetAtt ElastiCacheKMSKey.Arn
+
   SecurityGroupId:
     Description: ElastiCache Security Group ID
     Value: !Ref ElastiCacheSecurityGroup

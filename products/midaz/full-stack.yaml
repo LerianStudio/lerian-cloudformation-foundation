@@ -688,7 +688,7 @@ Parameters:
 
   MidazVersion:
     Type: String
-    Default: "5.5.1"
+    Default: "5.7.0"
     Description: Midaz Helm chart version to deploy
     AllowedPattern: "^[a-zA-Z0-9.-]+$"
     ConstraintDescription: "Must be a valid version string"
@@ -1040,11 +1040,13 @@ Resources:
         DocumentDBEndpoint: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
         DocumentDBSecretArn: !GetAtt DocumentDBStack.Outputs.SecretArn
         ElastiCacheEndpoint: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
+        ElastiCacheSecretArn: !GetAtt ElastiCacheStack.Outputs.AuthSecretArn
         AmazonMQEndpoint: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
         AmazonMQSecretArn: !GetAtt AmazonMQStack.Outputs.SecretArn
         # KMS keys for secret decryption
         RDSKMSKeyArn: !GetAtt RDSStack.Outputs.KMSKeyArn
         DocumentDBKMSKeyArn: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
+        ElastiCacheKMSKeyArn: !GetAtt ElastiCacheStack.Outputs.KMSKeyArn
         AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
         # Application settings
         MidazChartVersion: !Ref MidazVersion
@@ -1090,11 +1092,13 @@ Resources:
         DocumentDBEndpoint: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
         DocumentDBSecretArn: !GetAtt DocumentDBStack.Outputs.SecretArn
         ElastiCacheEndpoint: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
+        ElastiCacheSecretArn: !GetAtt ElastiCacheStack.Outputs.AuthSecretArn
         AmazonMQEndpoint: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
         AmazonMQSecretArn: !GetAtt AmazonMQStack.Outputs.SecretArn
         # KMS keys for secret decryption
         RDSKMSKeyArn: !GetAtt RDSStack.Outputs.KMSKeyArn
         DocumentDBKMSKeyArn: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
+        ElastiCacheKMSKeyArn: !GetAtt ElastiCacheStack.Outputs.KMSKeyArn
         AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
         # Application settings
         MidazChartVersion: !Ref MidazVersion
