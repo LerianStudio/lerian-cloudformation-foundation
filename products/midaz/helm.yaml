@@ -57,15 +57,18 @@ Parameters:
 
   RDSKMSKeyArn:
     Type: String
-    Description: RDS KMS Key ARN for secret decryption
+    Default: ""
+    Description: RDS KMS Key ARN for secret decryption. Leave empty to allow all KMS keys via Secrets Manager.
 
   DocumentDBKMSKeyArn:
     Type: String
-    Description: DocumentDB KMS Key ARN for secret decryption
+    Default: ""
+    Description: DocumentDB KMS Key ARN for secret decryption. Leave empty to allow all KMS keys via Secrets Manager.
 
   AmazonMQKMSKeyArn:
     Type: String
-    Description: AmazonMQ KMS Key ARN for secret decryption
+    Default: ""
+    Description: AmazonMQ KMS Key ARN for secret decryption. Leave empty to allow all KMS keys via Secrets Manager.
 
   MidazHelmRepository:
     Type: String
@@ -140,6 +143,7 @@ Conditions:
   HasRDSReplica: !Not [!Equals [!Ref RDSReplicaEndpoint, ""]]
   ShouldEnableIngress: !Equals [!Ref EnableIngress, "true"]
   HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
+  HasKMSKeys: !Not [!Equals [!Ref RDSKMSKeyArn, ""]]
 
 Resources:
   # =============================================================================
@@ -183,10 +187,17 @@ Resources:
               - Effect: Allow
                 Action:
                   - kms:Decrypt
-                Resource:
-                  - !Ref RDSKMSKeyArn
-                  - !Ref DocumentDBKMSKeyArn
-                  - !Ref AmazonMQKMSKeyArn
+                Resource: !If
+                  - HasKMSKeys
+                  - - !Ref RDSKMSKeyArn
+                    - !Ref DocumentDBKMSKeyArn
+                    - !Ref AmazonMQKMSKeyArn
+                  - - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition: !If
+                  - HasKMSKeys
+                  - !Ref AWS::NoValue
+                  - StringEquals:
+                      kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
         - PolicyName: CloudWatchLogs
           PolicyDocument:
             Version: '2012-10-17'

@@ -215,13 +215,6 @@ Resources:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQEndpoint"
         AmazonMQSecretArn:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQSecretArn"
-        # KMS keys for secret decryption
-        RDSKMSKeyArn:
-          Fn::ImportValue: !Sub "${InfrastructureStackName}-RDSKMSKeyArn"
-        DocumentDBKMSKeyArn:
-          Fn::ImportValue: !Sub "${InfrastructureStackName}-DocumentDBKMSKeyArn"
-        AmazonMQKMSKeyArn:
-          Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQKMSKeyArn"
         # Application settings
         MidazChartVersion: !Ref MidazVersion
         # Ingress settings
