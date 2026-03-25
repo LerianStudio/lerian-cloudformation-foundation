@@ -1027,7 +1027,7 @@ Resources:
       - AmazonMQStack
       - ALBControllerStack
     Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}products/midaz/helm.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
@@ -1073,7 +1073,7 @@ Resources:
       - ElastiCacheStack
       - AmazonMQStack
     Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}products/midaz/helm.yaml"
       Parameters:
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
