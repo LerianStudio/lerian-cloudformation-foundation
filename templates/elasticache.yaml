@@ -118,7 +118,7 @@ Resources:
       KmsKeyId: !GetAtt ElastiCacheKMSKey.Arn
       GenerateSecretString:
         PasswordLength: 64
-        ExcludeCharacters: '"@/\!'
+        ExcludeCharacters: '"@/\!{}'
         ExcludePunctuation: false
       Tags:
         - Key: Name
