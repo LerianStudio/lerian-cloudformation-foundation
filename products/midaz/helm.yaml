@@ -485,18 +485,33 @@ Resources:
                   return ''
 
           def get_aws_ca_cert_base64():
-              """Download Amazon regional CA bundle and return as base64-encoded string.
-              Uses region-specific bundle (~15KB) instead of global (~160KB) to avoid
-              exceeding Linux ARG_MAX when injected as env var in init containers."""
-              region = boto3.session.Session().region_name
-              ca_url = f'https://truststore.pki.rds.amazonaws.com/{region}/{region}-bundle.pem'
-              try:
-                  resp = urllib.request.urlopen(ca_url, timeout=30)
-                  ca_pem = resp.read()
-                  return base64.b64encode(ca_pem).decode('utf-8')
-              except Exception as e:
-                  logger.error(f"Failed to download AWS CA bundle from {ca_url}: {e}")
-                  raise
+              """Return Amazon Root CA 1 as pre-computed base64 string.
+              This is the root CA that signs all Amazon service certificates including
+              ElastiCache/Valkey TLS certificates. Valid until 2038-01-17.
+              Source: https://www.amazontrust.com/repository/AmazonRootCA1.pem"""
+              return (
+                  "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURRVENDQWltZ0F3SUJBZ0lUQm15Zno1bS9q"
+                  "QW81NHZCNGlrUG1salpieWpBTkJna3Foa2lHOXcwQkFRc0YKQURBNU1Rc3dDUVlEVlFRR0V3SlZV"
+                  "ekVQTUEwR0ExVUVDaE1HUVcxaGVtOXVNUmt3RndZRFZRUURFeEJCYldGNgpiMjRnVW05dmRDQkRR"
+                  "U0F4TUI0WERURTFNRFV5TmpBd01EQXdNRm9YRFRNNE1ERXhOekF3TURBd01Gb3dPVEVMCk1Ba0dB"
+                  "MVVFQmhNQ1ZWTXhEekFOQmdOVkJBb1RCa0Z0WVhwdmJqRVpNQmNHQTFVRUF4TVFRVzFoZW05dUlG"
+                  "SnYKYjNRZ1EwRWdNVENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFM"
+                  "SjRnSEhLZU5YagpjYTlIZ0ZCMGZXN1kxNGgyOUpsbzkxZ2hZUGwwaEFFdnJBSXRodE9nUTNwT3Nx"
+                  "VFFOcm9Cdm8zYlNNZ0hGelpNCjlPNklJOGMrNnpmMXRSbjRTV2l3M3RlNWRqZ2RZWjZrL29JMnBl"
+                  "VktWdVJGNGZuOXRCYjZkTnFjbXpVNUwvcXcKSUZBR2JIclFnTEttK2Evc1J4bVBVRGdIM0tLSE9W"
+                  "ajR1dFdwK1Vobk1KYnVsSGhlYjRtalVjQXdobWFoUldhNgpWT3VqdzVINVNOei8wZWd3TFgwdGRI"
+                  "QTExNGdrOTU3RVdXNjdjNGNYOGpKR0tMaEQrcmNkcXNxMDhwOGtEaTFMCjkzRmNYbW4vNnBVQ3l6"
+                  "aUtybEE0Yjl2N0xXSWJ4Y2NlVk9GMzRHZklENXlISTlZL1FDQi9JSURFZ0V3K095UW0KamdTdWJK"
+                  "cklxZzBDQXdFQUFhTkNNRUF3RHdZRFZSMFRBUUgvQkFVd0F3RUIvekFPQmdOVkhROEJBZjhFQkFN"
+                  "QwpBWVl3SFFZRFZSME9CQllFRklRWXpJVTA3THdNbEpRdUNGbWN4N0lRVGdvSU1BMEdDU3FHU0li"
+                  "M0RRRUJDd1VBCkE0SUJBUUNZOGpkYVFaQ2hHc1YyVVNnZ05pTU9ydVlvdTZyNGxLNUlwREIvRy93"
+                  "a2pVdTB5S0dYOXJieGVuREkKVTVQTUNDamptQ1hQSTZUNTNpSFRmSVVKclU2YWRUckNDMnFKZUha"
+                  "RVJ4aGxiSTFCamp0L21zdjB0YWRRMXdVcwpOK2dEUzYzcFlhQUNidlh5OE1XeTdWdTMzUHFVWEhl"
+                  "ZUU2Vi9VcTJWOHZpVE85NkxYRnZLV2xKYllLOFU5MHZ2Cm8vdWZRSlZ0TVZUOFF0UEhSaDhqcmRr"
+                  "UFNIQ2EyWFY0Y2RGeVF6UjFibGRad2dKY0ptQXB6eU1aRm82SVE2WFUKNU1zSSt5TVJRK2hES1hK"
+                  "aW9hbGRYZ2pVa0s2NDJNNFV3dEJWOG9iMnhKTkRkMlpod0xub1FkZVhlR0FEYmtweQpycVhSZmJv"
+                  "UW5vWnNHNHE1V1RQNDY4U1F2dkc1Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+              )
 
           def create_k8s_secrets():
               project = os.environ['PROJECT_NAME']
@@ -717,30 +732,34 @@ Resources:
               DB_ONBOARDING_PORT: "5432"
               DB_ONBOARDING_USER: "midaz"
               DB_ONBOARDING_NAME: "onboarding"
+              DB_ONBOARDING_SSLMODE: "require"
               DB_ONBOARDING_REPLICA_HOST: "{rds_replica}"
               DB_ONBOARDING_REPLICA_PORT: "5432"
               DB_ONBOARDING_REPLICA_USER: "midaz"
               DB_ONBOARDING_REPLICA_NAME: "onboarding"
+              DB_ONBOARDING_REPLICA_SSLMODE: "require"
               DB_TRANSACTION_HOST: "{rds_endpoint}"
               DB_TRANSACTION_PORT: "5432"
               DB_TRANSACTION_USER: "midaz"
               DB_TRANSACTION_NAME: "transaction"
+              DB_TRANSACTION_SSLMODE: "require"
               DB_TRANSACTION_REPLICA_HOST: "{rds_replica}"
               DB_TRANSACTION_REPLICA_PORT: "5432"
               DB_TRANSACTION_REPLICA_USER: "midaz"
               DB_TRANSACTION_REPLICA_NAME: "transaction"
+              DB_TRANSACTION_REPLICA_SSLMODE: "require"
               MONGO_ONBOARDING_URI: "mongodb"
               MONGO_ONBOARDING_HOST: "{docdb_endpoint}"
               MONGO_ONBOARDING_PORT: "27017"
               MONGO_ONBOARDING_USER: "{docdb_secret['username']}"
               MONGO_ONBOARDING_NAME: "onboarding"
-              MONGO_ONBOARDING_PARAMETERS: "tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_ONBOARDING_PARAMETERS: "tls=true&tlsInsecure=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&connectTimeoutMS=10000&serverSelectionTimeoutMS=10000"
               MONGO_TRANSACTION_URI: "mongodb"
               MONGO_TRANSACTION_HOST: "{docdb_endpoint}"
               MONGO_TRANSACTION_PORT: "27017"
               MONGO_TRANSACTION_USER: "{docdb_secret['username']}"
               MONGO_TRANSACTION_NAME: "transaction"
-              MONGO_TRANSACTION_PARAMETERS: "tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_TRANSACTION_PARAMETERS: "tls=true&tlsInsecure=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&connectTimeoutMS=10000&serverSelectionTimeoutMS=10000"
               REDIS_HOST: "{elasticache_endpoint}:6379"
               REDIS_TLS: "true"
               REDIS_CA_CERT: "{aws_ca_cert_b64}"
@@ -751,6 +770,7 @@ Resources:
               RABBITMQ_PROTOCOL: "https"
               RABBITMQ_DEFAULT_USER: "transaction"
               RABBITMQ_CONSUMER_USER: "consumer"
+              RABBITMQ_TRANSACTION_ASYNC: "true"
             useExistingSecret: true
             existingSecretName: "{project}-midaz-secrets"
             service:
@@ -778,7 +798,7 @@ Resources:
               MONGO_USER: "{docdb_secret['username']}"
               MONGO_NAME: "crm"
               MONGO_URI: "mongodb"
-              MONGO_PARAMETERS: "tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_PARAMETERS: "tls=true&tlsInsecure=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&connectTimeoutMS=10000&serverSelectionTimeoutMS=10000"
             secrets:
               MONGO_PASSWORD: "{docdb_secret['password']}"
             {crm_ingress_config}

@@ -85,21 +85,33 @@ Metadata:
           - AdditionalIngressCIDR2
           - AdditionalIngressCIDR3
       - Label:
-          default: "DNS and Ingress Configuration"
+          default: "DNS Configuration"
         Parameters:
-          - DomainName
           - EnableALBController
           - EnableExternalDNS
       - Label:
-          default: "Midaz Application"
+          default: "Ledger Configuration"
         Parameters:
           - DeployMidazApplication
           - MidazVersion
           - MidazReplicas
+      - Label:
+          default: "Domain Configuration"
+        Parameters:
+          - DomainName
+      - Label:
+          default: "Ledger Ingress Configuration"
+        Parameters:
           - EnableIngress
           - IngressHostname
           - IngressCertificateArn
+      - Label:
+          default: "CRM Configuration"
+        Parameters:
           - EnableCRM
+      - Label:
+          default: "CRM Ingress Configuration"
+        Parameters:
           - EnableCRMIngress
           - CRMIngressHostname
     ParameterLabels:
@@ -112,21 +124,27 @@ Metadata:
         default: "Template S3 Key Prefix"
       MarketplaceAMI:
         default: "Marketplace AMI ID"
-      # Midaz Application
+      # Ledger Configuration
       DeployMidazApplication:
         default: "Deploy Midaz Application"
       MidazVersion:
         default: "Midaz Version"
       MidazReplicas:
         default: "Number of Replicas"
+      # Domain Configuration
+      DomainName:
+        default: "Domain Name"
+      # Ledger Ingress
       EnableIngress:
-        default: "Enable Ingress (ALB)"
+        default: "Enable Ledger Ingress (ALB)"
       IngressHostname:
-        default: "Ingress Hostname"
+        default: "Ledger Ingress Hostname"
       IngressCertificateArn:
-        default: "HTTPS Certificate ARN"
+        default: "ACM Certificate ARN"
+      # CRM Configuration
       EnableCRM:
         default: "Enable CRM Service"
+      # CRM Ingress
       EnableCRMIngress:
         default: "Enable CRM Ingress (ALB)"
       CRMIngressHostname:
@@ -650,15 +668,8 @@ Parameters:
     ConstraintDescription: "Must be a valid CIDR block or empty"
 
   # =============================================================================
-  # DNS AND INGRESS CONFIGURATION
+  # DNS CONFIGURATION
   # =============================================================================
-  DomainName:
-    Type: String
-    Default: ""
-    Description: Domain name for Route53 private hosted zone (e.g., midaz.empresa.com). Leave empty to skip DNS setup.
-    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
-    ConstraintDescription: "Must be a valid domain name (e.g., example.com or sub.example.com) or empty"
-
   EnableALBController:
     Type: String
     Default: "true"
@@ -676,7 +687,7 @@ Parameters:
     Description: Enable ExternalDNS for automatic DNS management (requires DomainName)
 
   # =============================================================================
-  # MIDAZ APPLICATION CONFIGURATION
+  # LEDGER CONFIGURATION
   # =============================================================================
   DeployMidazApplication:
     Type: String
@@ -700,18 +711,31 @@ Parameters:
     MaxValue: 10
     Description: Number of Midaz application replicas
 
+  # =============================================================================
+  # DOMAIN CONFIGURATION
+  # =============================================================================
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Domain name for Route53 private hosted zone (e.g., midaz.empresa.com). Leave empty to skip DNS setup.
+    AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
+    ConstraintDescription: "Must be a valid domain name (e.g., example.com or sub.example.com) or empty"
+
+  # =============================================================================
+  # LEDGER INGRESS CONFIGURATION
+  # =============================================================================
   EnableIngress:
     Type: String
     Default: "false"
     AllowedValues:
       - "true"
       - "false"
-    Description: Enable ALB Ingress for external access to Midaz API
+    Description: Enable ALB Ingress for Ledger external access
 
   IngressHostname:
     Type: String
     Default: ""
-    Description: Full hostname for Ingress (e.g., ledger.midaz.net). Required if EnableIngress=true.
+    Description: Full hostname for Ledger Ingress (e.g., ledger.midaz.net). Required if EnableIngress=true.
     AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
     ConstraintDescription: "Must be a valid hostname or empty"
 
@@ -722,6 +746,9 @@ Parameters:
     AllowedPattern: "^$|^arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+$"
     ConstraintDescription: "Must be a valid ACM certificate ARN or empty"
 
+  # =============================================================================
+  # CRM CONFIGURATION
+  # =============================================================================
   EnableCRM:
     Type: String
     Default: "false"
@@ -730,6 +757,9 @@ Parameters:
       - "false"
     Description: Enable CRM service (optional, uses same DocumentDB as Midaz)
 
+  # =============================================================================
+  # CRM INGRESS CONFIGURATION
+  # =============================================================================
   EnableCRMIngress:
     Type: String
     Default: "false"
@@ -1048,14 +1078,18 @@ Resources:
         DocumentDBKMSKeyArn: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
         ElastiCacheKMSKeyArn: !GetAtt ElastiCacheStack.Outputs.KMSKeyArn
         AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
-        # Application settings
+        # Ledger configuration
         MidazChartVersion: !Ref MidazVersion
-        EnableIngress: !Ref EnableIngress
+        # Domain (host principal)
         DomainName: !Ref DomainName
+        # Ledger Ingress
+        EnableIngress: !Ref EnableIngress
         IngressHostname: !Ref IngressHostname
         IngressScheme: "internal"
         IngressCertificateArn: !Ref IngressCertificateArn
+        # CRM configuration
         EnableCRM: !Ref EnableCRM
+        # CRM Ingress
         EnableCRMIngress: !Ref EnableCRMIngress
         CRMIngressHostname: !Ref CRMIngressHostname
       Tags:
@@ -1100,14 +1134,18 @@ Resources:
         DocumentDBKMSKeyArn: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
         ElastiCacheKMSKeyArn: !GetAtt ElastiCacheStack.Outputs.KMSKeyArn
         AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
-        # Application settings
+        # Ledger configuration
         MidazChartVersion: !Ref MidazVersion
-        EnableIngress: !Ref EnableIngress
+        # Domain (host principal)
         DomainName: !Ref DomainName
+        # Ledger Ingress
+        EnableIngress: !Ref EnableIngress
         IngressHostname: !Ref IngressHostname
         IngressScheme: "internal"
         IngressCertificateArn: !Ref IngressCertificateArn
+        # CRM configuration
         EnableCRM: !Ref EnableCRM
+        # CRM Ingress
         EnableCRMIngress: !Ref EnableCRMIngress
         CRMIngressHostname: !Ref CRMIngressHostname
       Tags:
