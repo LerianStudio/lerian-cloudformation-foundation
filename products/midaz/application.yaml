@@ -188,7 +188,7 @@ Resources:
   MidazHelmStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}midaz-helm.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}products/midaz/helm.yaml"
       Parameters:
         ProjectName:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-ProjectName"
