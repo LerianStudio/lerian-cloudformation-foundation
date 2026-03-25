@@ -485,15 +485,17 @@ Resources:
                   return ''
 
           def get_aws_ca_cert_base64():
-              """Download Amazon root CA bundle and return as base64-encoded string.
-              Required for ElastiCache TLS connections (REDIS_CA_CERT expects base64-encoded PEM)."""
-              ca_url = 'https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem'
+              """Download Amazon regional CA bundle and return as base64-encoded string.
+              Uses region-specific bundle (~15KB) instead of global (~160KB) to avoid
+              exceeding Linux ARG_MAX when injected as env var in init containers."""
+              region = boto3.session.Session().region_name
+              ca_url = f'https://truststore.pki.rds.amazonaws.com/{region}/{region}-bundle.pem'
               try:
                   resp = urllib.request.urlopen(ca_url, timeout=30)
                   ca_pem = resp.read()
                   return base64.b64encode(ca_pem).decode('utf-8')
               except Exception as e:
-                  logger.error(f"Failed to download AWS CA bundle: {e}")
+                  logger.error(f"Failed to download AWS CA bundle from {ca_url}: {e}")
                   raise
 
           def create_k8s_secrets():
@@ -732,13 +734,13 @@ Resources:
               MONGO_ONBOARDING_PORT: "27017"
               MONGO_ONBOARDING_USER: "{docdb_secret['username']}"
               MONGO_ONBOARDING_NAME: "onboarding"
-              MONGO_ONBOARDING_PARAMETERS: "replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_ONBOARDING_PARAMETERS: "tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
               MONGO_TRANSACTION_URI: "mongodb"
               MONGO_TRANSACTION_HOST: "{docdb_endpoint}"
               MONGO_TRANSACTION_PORT: "27017"
               MONGO_TRANSACTION_USER: "{docdb_secret['username']}"
               MONGO_TRANSACTION_NAME: "transaction"
-              MONGO_TRANSACTION_PARAMETERS: "replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_TRANSACTION_PARAMETERS: "tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
               REDIS_HOST: "{elasticache_endpoint}:6379"
               REDIS_TLS: "true"
               REDIS_CA_CERT: "{aws_ca_cert_b64}"
@@ -776,7 +778,7 @@ Resources:
               MONGO_USER: "{docdb_secret['username']}"
               MONGO_NAME: "crm"
               MONGO_URI: "mongodb"
-              MONGO_PARAMETERS: "replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_PARAMETERS: "tls=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
             secrets:
               MONGO_PASSWORD: "{docdb_secret['password']}"
             {crm_ingress_config}
