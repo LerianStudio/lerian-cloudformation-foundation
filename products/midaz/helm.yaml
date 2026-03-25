@@ -187,6 +187,9 @@ Resources:
                   - !Ref RDSKMSKeyArn
                   - !Ref DocumentDBKMSKeyArn
                   - !Ref AmazonMQKMSKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
         - PolicyName: CloudWatchLogs
           PolicyDocument:
             Version: '2012-10-17'
