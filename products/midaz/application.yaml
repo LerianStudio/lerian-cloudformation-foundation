@@ -246,6 +246,7 @@ Resources:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQKMSKeyArn"
         # Ledger configuration
         MidazChartVersion: !Ref MidazVersion
+        MidazReplicas: !Ref MidazReplicas
         # Domain (host principal)
         DomainName: !Ref DomainName
         # Ledger Ingress

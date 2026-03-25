@@ -1064,6 +1064,7 @@ Resources:
         PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
         # Database connections
         RDSEndpoint: !GetAtt RDSStack.Outputs.Endpoint
+        RDSReplicaEndpoint: !If [CreateRDSReplica, !GetAtt RDSStack.Outputs.ReplicaEndpoint, ""]
         RDSSecretArn: !GetAtt RDSStack.Outputs.SecretArn
         DocumentDBEndpoint: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
         DocumentDBSecretArn: !GetAtt DocumentDBStack.Outputs.SecretArn
@@ -1078,6 +1079,7 @@ Resources:
         AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
         # Ledger configuration
         MidazChartVersion: !Ref MidazVersion
+        MidazReplicas: !Ref MidazReplicas
         # Domain (host principal)
         DomainName: !Ref DomainName
         # Ledger Ingress
@@ -1120,6 +1122,7 @@ Resources:
         PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
         # Database connections
         RDSEndpoint: !GetAtt RDSStack.Outputs.Endpoint
+        RDSReplicaEndpoint: !If [CreateRDSReplica, !GetAtt RDSStack.Outputs.ReplicaEndpoint, ""]
         RDSSecretArn: !GetAtt RDSStack.Outputs.SecretArn
         DocumentDBEndpoint: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
         DocumentDBSecretArn: !GetAtt DocumentDBStack.Outputs.SecretArn
@@ -1134,6 +1137,7 @@ Resources:
         AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
         # Ledger configuration
         MidazChartVersion: !Ref MidazVersion
+        MidazReplicas: !Ref MidazReplicas
         # Domain (host principal)
         DomainName: !Ref DomainName
         # Ledger Ingress

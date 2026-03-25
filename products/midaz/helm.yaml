@@ -90,6 +90,13 @@ Parameters:
     Default: "5.7.0"
     Description: Midaz Helm Chart Version
 
+  MidazReplicas:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Number of Midaz application replicas
+
   MidazNamespace:
     Type: String
     Default: midaz
@@ -266,6 +273,7 @@ Resources:
           NAMESPACE: !Ref MidazNamespace
           HELM_REPOSITORY: !Ref MidazHelmRepository
           CHART_VERSION: !Ref MidazChartVersion
+          MIDAZ_REPLICAS: !Ref MidazReplicas
           PROJECT_NAME: !Ref ProjectName
           RDS_ENDPOINT: !Ref RDSEndpoint
           RDS_REPLICA_ENDPOINT: !If [HasRDSReplica, !Ref RDSReplicaEndpoint, !Ref RDSEndpoint]
@@ -700,6 +708,7 @@ Resources:
 
           def create_values_file():
               project = os.environ['PROJECT_NAME']
+              replicas = os.environ.get('MIDAZ_REPLICAS', '2')
               rds_endpoint = os.environ['RDS_ENDPOINT']
               rds_replica = os.environ['RDS_REPLICA_ENDPOINT']
               docdb_endpoint = os.environ['DOCUMENTDB_ENDPOINT']
@@ -727,6 +736,7 @@ Resources:
           # Enable ledger service (unified mode)
           ledger:
             enabled: true
+            replicaCount: {replicas}
             configmap:
               DB_ONBOARDING_HOST: "{rds_endpoint}"
               DB_ONBOARDING_PORT: "5432"
@@ -924,7 +934,7 @@ Resources:
       ClusterName: !Ref ClusterName
       # Force update hash
       ConfigHash: !Base64
-        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${ElastiCacheSecretArn}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${EnableCRM}-${EnableCRMIngress}-${CRMIngressHostname}-helm-values-v2"
+        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${ElastiCacheSecretArn}-${AmazonMQEndpoint}-${MidazChartVersion}-${MidazReplicas}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${EnableCRM}-${EnableCRMIngress}-${CRMIngressHostname}-helm-values-v2"
 
 Outputs:
   HelmReleaseName:
