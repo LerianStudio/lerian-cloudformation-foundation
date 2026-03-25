@@ -233,7 +233,7 @@ Resources:
         DesiredSize: !Ref NodeGroupDesiredSize
       InstanceTypes:
         - !Ref NodeInstanceType
-      AmiType: AL2_ARM_64
+      AmiType: AL2023_ARM_64_STANDARD
       CapacityType: ON_DEMAND
       Labels:
         Environment: !Ref EnvironmentName
