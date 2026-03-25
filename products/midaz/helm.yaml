@@ -489,14 +489,12 @@ Resources:
               Required for ElastiCache TLS connections (REDIS_CA_CERT expects base64-encoded PEM)."""
               ca_url = 'https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem'
               try:
-                  ca_path = '/tmp/aws-ca-bundle.pem'
-                  urllib.request.urlretrieve(ca_url, ca_path)
-                  with open(ca_path, 'rb') as f:
-                      ca_pem = f.read()
+                  resp = urllib.request.urlopen(ca_url, timeout=30)
+                  ca_pem = resp.read()
                   return base64.b64encode(ca_pem).decode('utf-8')
               except Exception as e:
-                  logger.warning(f"Failed to download AWS CA bundle: {e}")
-                  return ''
+                  logger.error(f"Failed to download AWS CA bundle: {e}")
+                  raise
 
           def create_k8s_secrets():
               project = os.environ['PROJECT_NAME']
