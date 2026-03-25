@@ -484,6 +484,20 @@ Resources:
                   logger.warning(f"Failed to fetch ElastiCache secret: {e}")
                   return ''
 
+          def get_aws_ca_cert_base64():
+              """Download Amazon root CA bundle and return as base64-encoded string.
+              Required for ElastiCache TLS connections (REDIS_CA_CERT expects base64-encoded PEM)."""
+              ca_url = 'https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem'
+              try:
+                  ca_path = '/tmp/aws-ca-bundle.pem'
+                  urllib.request.urlretrieve(ca_url, ca_path)
+                  with open(ca_path, 'rb') as f:
+                      ca_pem = f.read()
+                  return base64.b64encode(ca_pem).decode('utf-8')
+              except Exception as e:
+                  logger.warning(f"Failed to download AWS CA bundle: {e}")
+                  return ''
+
           def create_k8s_secrets():
               project = os.environ['PROJECT_NAME']
               namespace = os.environ['NAMESPACE']
@@ -679,6 +693,7 @@ Resources:
 
               docdb_secret = get_secret(os.environ['DOCUMENTDB_SECRET_ARN'])
               amazonmq_host = extract_host_from_endpoint(amazonmq_endpoint)
+              aws_ca_cert_b64 = get_aws_ca_cert_base64()
 
               # Get ingress configuration
               ingress_config = get_ingress_config()
@@ -719,15 +734,16 @@ Resources:
               MONGO_ONBOARDING_PORT: "27017"
               MONGO_ONBOARDING_USER: "{docdb_secret['username']}"
               MONGO_ONBOARDING_NAME: "onboarding"
-              MONGO_ONBOARDING_PARAMETERS: "?replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_ONBOARDING_PARAMETERS: "replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
               MONGO_TRANSACTION_URI: "mongodb"
               MONGO_TRANSACTION_HOST: "{docdb_endpoint}"
               MONGO_TRANSACTION_PORT: "27017"
               MONGO_TRANSACTION_USER: "{docdb_secret['username']}"
               MONGO_TRANSACTION_NAME: "transaction"
-              MONGO_TRANSACTION_PARAMETERS: "?replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_TRANSACTION_PARAMETERS: "replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
               REDIS_HOST: "{elasticache_endpoint}:6379"
               REDIS_TLS: "true"
+              REDIS_CA_CERT: "{aws_ca_cert_b64}"
               RABBITMQ_URI: "amqps"
               RABBITMQ_HOST: "{amazonmq_host}"
               RABBITMQ_PORT_HOST: "5671"
@@ -762,7 +778,7 @@ Resources:
               MONGO_USER: "{docdb_secret['username']}"
               MONGO_NAME: "crm"
               MONGO_URI: "mongodb"
-              MONGO_PARAMETERS: "?replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+              MONGO_PARAMETERS: "replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
             secrets:
               MONGO_PASSWORD: "{docdb_secret['password']}"
             {crm_ingress_config}
