@@ -243,8 +243,6 @@ Metadata:
       AdditionalIngressCIDR3:
         default: "Additional CIDR 3"
       # DNS
-      DomainName:
-        default: "Domain Name (Optional)"
       EnableALBController:
         default: "Enable ALB Controller"
       EnableExternalDNS:
