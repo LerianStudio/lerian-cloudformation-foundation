@@ -268,7 +268,7 @@ Add these parameters to enable external access:
 | `ProjectName` | `midaz` | Resource naming prefix |
 | `EnvironmentName` | `production` | Environment tag |
 | `FoundationStackName` | `lerian-foundation` | Foundation stack to import VPC/EKS from (infrastructure stack) |
-| `KubernetesVersion` | `1.32` | EKS version (foundation/full-stack) |
+| `KubernetesVersion` | `1.35` | EKS version (foundation/full-stack) |
 | `NodeInstanceType` | `c7g.large` | EC2 instance type (foundation/full-stack) |
 | `RDSInstanceClass` | `db.t3.medium` | Database instance |
 
