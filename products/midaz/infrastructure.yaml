@@ -701,6 +701,13 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-RDSEndpoint"
 
+  RDSReplicaEndpoint:
+    Condition: CreateRDSReplica
+    Description: RDS Read Replica Endpoint
+    Value: !GetAtt RDSStack.Outputs.ReplicaEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSReplicaEndpoint"
+
   RDSSecretArn:
     Description: RDS Password Secret ARN
     Value: !GetAtt RDSStack.Outputs.SecretArn
