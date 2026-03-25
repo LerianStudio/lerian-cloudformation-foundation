@@ -24,7 +24,7 @@ This directory contains example configurations for deploying Midaz on AWS.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `KubernetesVersion` | 1.32 | Kubernetes version |
+| `KubernetesVersion` | 1.35 | Kubernetes version |
 | `NodeInstanceType` | c7g.large | Worker node instance type (ARM64 Graviton) |
 | `NodeGroupMinSize` | 3 | Minimum nodes |
 | `NodeGroupMaxSize` | 15 | Maximum nodes |
