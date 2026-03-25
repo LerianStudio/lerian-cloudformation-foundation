@@ -1042,6 +1042,10 @@ Resources:
         ElastiCacheEndpoint: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
         AmazonMQEndpoint: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
         AmazonMQSecretArn: !GetAtt AmazonMQStack.Outputs.SecretArn
+        # KMS keys for secret decryption
+        RDSKMSKeyArn: !GetAtt RDSStack.Outputs.KMSKeyArn
+        DocumentDBKMSKeyArn: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
+        AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
         # Application settings
         MidazChartVersion: !Ref MidazVersion
         EnableIngress: !Ref EnableIngress
@@ -1088,6 +1092,10 @@ Resources:
         ElastiCacheEndpoint: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
         AmazonMQEndpoint: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
         AmazonMQSecretArn: !GetAtt AmazonMQStack.Outputs.SecretArn
+        # KMS keys for secret decryption
+        RDSKMSKeyArn: !GetAtt RDSStack.Outputs.KMSKeyArn
+        DocumentDBKMSKeyArn: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
+        AmazonMQKMSKeyArn: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
         # Application settings
         MidazChartVersion: !Ref MidazVersion
         EnableIngress: !Ref EnableIngress

@@ -364,3 +364,7 @@ Outputs:
     Description: AmazonMQ Security Group ID
     Value: !Ref AmazonMQSecurityGroup
 
+  KMSKeyArn:
+    Description: AmazonMQ KMS Key ARN for encryption
+    Value: !GetAtt AmazonMQKMSKey.Arn
+

@@ -707,6 +707,12 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-RDSSecretArn"
 
+  RDSKMSKeyArn:
+    Description: RDS KMS Key ARN
+    Value: !GetAtt RDSStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSKMSKeyArn"
+
   # =============================================================================
   # DOCUMENTDB OUTPUTS
   # =============================================================================
@@ -721,6 +727,12 @@ Outputs:
     Value: !GetAtt DocumentDBStack.Outputs.SecretArn
     Export:
       Name: !Sub "${AWS::StackName}-DocumentDBSecretArn"
+
+  DocumentDBKMSKeyArn:
+    Description: DocumentDB KMS Key ARN
+    Value: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-DocumentDBKMSKeyArn"
 
   # =============================================================================
   # ELASTICACHE OUTPUTS
@@ -739,6 +751,12 @@ Outputs:
     Value: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-AmazonMQEndpoint"
+
+  AmazonMQKMSKeyArn:
+    Description: AmazonMQ KMS Key ARN
+    Value: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-AmazonMQKMSKeyArn"
 
   AmazonMQSecretArn:
     Description: AmazonMQ Password Secret ARN
