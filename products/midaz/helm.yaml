@@ -168,6 +168,13 @@ Resources:
                   - !Ref RDSSecretArn
                   - !Ref DocumentDBSecretArn
                   - !Ref AmazonMQSecretArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
         - PolicyName: CloudWatchLogs
           PolicyDocument:
             Version: '2012-10-17'
