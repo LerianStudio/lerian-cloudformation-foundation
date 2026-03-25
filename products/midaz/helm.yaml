@@ -924,7 +924,7 @@ Resources:
       ClusterName: !Ref ClusterName
       # Force update hash
       ConfigHash: !Base64
-        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${ElastiCacheSecretArn}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${EnableCRM}-${EnableCRMIngress}-${CRMIngressHostname}"
+        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${ElastiCacheSecretArn}-${AmazonMQEndpoint}-${MidazChartVersion}-${EnableIngress}-${DomainName}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${EnableCRM}-${EnableCRMIngress}-${CRMIngressHostname}-helm-values-v2"
 
 Outputs:
   HelmReleaseName:
