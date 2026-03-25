@@ -55,6 +55,18 @@ Parameters:
     Type: String
     Description: AmazonMQ Password Secret ARN
 
+  RDSKMSKeyArn:
+    Type: String
+    Description: RDS KMS Key ARN for secret decryption
+
+  DocumentDBKMSKeyArn:
+    Type: String
+    Description: DocumentDB KMS Key ARN for secret decryption
+
+  AmazonMQKMSKeyArn:
+    Type: String
+    Description: AmazonMQ KMS Key ARN for secret decryption
+
   MidazHelmRepository:
     Type: String
     Default: "oci://registry-1.docker.io/lerianstudio/midaz-helm"
@@ -171,10 +183,10 @@ Resources:
               - Effect: Allow
                 Action:
                   - kms:Decrypt
-                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
-                Condition:
-                  StringEquals:
-                    kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                Resource:
+                  - !Ref RDSKMSKeyArn
+                  - !Ref DocumentDBKMSKeyArn
+                  - !Ref AmazonMQKMSKeyArn
         - PolicyName: CloudWatchLogs
           PolicyDocument:
             Version: '2012-10-17'

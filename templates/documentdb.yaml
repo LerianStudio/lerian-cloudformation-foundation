@@ -491,4 +491,8 @@ Outputs:
     Description: DocumentDB Security Group ID
     Value: !Ref DocumentDBSecurityGroup
 
+  KMSKeyArn:
+    Description: DocumentDB KMS Key ARN for encryption
+    Value: !GetAtt DocumentDBKMSKey.Arn
+
 
