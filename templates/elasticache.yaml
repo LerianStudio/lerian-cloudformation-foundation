@@ -118,8 +118,7 @@ Resources:
       KmsKeyId: !GetAtt ElastiCacheKMSKey.Arn
       GenerateSecretString:
         PasswordLength: 64
-        ExcludeCharacters: '"@/\!{}'
-        ExcludePunctuation: false
+        ExcludePunctuation: true
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-elasticache-auth-secret"
