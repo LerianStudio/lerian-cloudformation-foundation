@@ -2,7 +2,7 @@
   "description": "Current versions of each template. Updated automatically by CI/CD.",
   "templates": {
     "vpc": "0.1.3",
-    "eks": "0.1.5",
+    "eks": "0.1.6",
     "rds": "0.2.2",
     "documentdb": "0.3.2",
     "elasticache": "0.2.2",
