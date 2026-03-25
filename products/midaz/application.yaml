@@ -213,8 +213,6 @@ Resources:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheEndpoint"
         ElastiCacheSecretArn:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheSecretArn"
-        ElastiCacheKMSKeyArn:
-          Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheKMSKeyArn"
         AmazonMQEndpoint:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQEndpoint"
         AmazonMQSecretArn:
@@ -224,6 +222,8 @@ Resources:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-RDSKMSKeyArn"
         DocumentDBKMSKeyArn:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-DocumentDBKMSKeyArn"
+        ElastiCacheKMSKeyArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheKMSKeyArn"
         AmazonMQKMSKeyArn:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQKMSKeyArn"
         # Application settings
