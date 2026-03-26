@@ -18,7 +18,7 @@
       "helm": "0.2.7",
       "application": "0.1.14",
       "complete": "0.2.0",
-      "full-stack": "0.0.6"
+      "full-stack": "0.0.7"
     },
     "tracer": {
       "infrastructure": "0.1.2"
