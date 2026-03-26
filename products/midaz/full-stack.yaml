@@ -715,9 +715,9 @@ Parameters:
   DomainName:
     Type: String
     Default: ""
-    Description: Domain name for Route53 private hosted zone (e.g., midaz.empresa.com). Leave empty to skip DNS setup.
+    Description: "Base domain name of the hosted zone (e.g., midaz.net). Leave empty to skip DNS setup."
     AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
-    ConstraintDescription: "Must be a valid domain name (e.g., example.com or sub.example.com) or empty"
+    ConstraintDescription: "Must be a valid domain name or empty"
 
   # =============================================================================
   # LEDGER INGRESS CONFIGURATION
@@ -733,14 +733,14 @@ Parameters:
   IngressHostname:
     Type: String
     Default: ""
-    Description: Full hostname for Ledger Ingress (e.g., ledger.midaz.net). Required if EnableIngress=true.
+    Description: "Full hostname for Ledger Ingress (e.g., ledger.midaz.net)"
     AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
     ConstraintDescription: "Must be a valid hostname or empty"
 
   IngressCertificateArn:
     Type: String
     Default: ""
-    Description: ACM Certificate ARN for HTTPS (optional, requires EnableIngress=true)
+    Description: "ACM Certificate ARN for HTTPS (optional)"
     AllowedPattern: "^$|^arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[a-f0-9-]+$"
     ConstraintDescription: "Must be a valid ACM certificate ARN or empty"
 
@@ -769,7 +769,7 @@ Parameters:
   CRMIngressHostname:
     Type: String
     Default: ""
-    Description: Full hostname for CRM Ingress (e.g., crm.midaz.net). Required if EnableCRMIngress=true.
+    Description: "Full hostname for CRM Ingress (e.g., crm.midaz.net)"
     AllowedPattern: "^$|^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?)*$"
     ConstraintDescription: "Must be a valid hostname or empty"
 
