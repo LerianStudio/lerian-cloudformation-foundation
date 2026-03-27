@@ -20,6 +20,7 @@ Metadata:
         Parameters:
           - EnvironmentName
           - ProjectName
+          - PermissionsBoundaryArn
       - Label:
           default: "Cluster Configuration"
         Parameters:
@@ -154,6 +155,8 @@ Metadata:
         default: "Environment"
       ProjectName:
         default: "Project Name"
+      PermissionsBoundaryArn:
+        default: "IAM Permissions Boundary ARN"
       # Cluster
       UseExistingCluster:
         default: "Use Existing Cluster"
@@ -255,7 +258,7 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
-    Default: "midaz-cloudformation-foundation"
+    Default: "lerian-cloudformation-templates"
 
   MPS3BucketRegion:
     Type: String
@@ -313,6 +316,11 @@ Parameters:
   # =============================================================================
   # GENERAL CONFIGURATION
   # =============================================================================
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Applied to all IAM roles created by this stack. Leave empty to skip."
+
   EnvironmentName:
     Type: String
     Default: production
@@ -810,6 +818,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcCIDR: !Ref VpcCIDR
@@ -834,6 +843,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
@@ -957,6 +967,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
@@ -1004,6 +1015,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
@@ -1027,6 +1039,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
@@ -1057,6 +1070,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}products/midaz/helm.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
@@ -1115,6 +1129,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}products/midaz/helm.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]

@@ -11,7 +11,7 @@ STACK_NAME="midaz-cfn-templates-bucket"
 BUCKET_NAME="${BUCKET_NAME:-midaz-cloudformation-templates}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 GITHUB_ORG="${GITHUB_ORG:-LerianStudio}"
-GITHUB_REPO="${GITHUB_REPO:-midaz-cloudformation-foundation}"
+GITHUB_REPO="${GITHUB_REPO:-lerian-cloudformation-foundation}"
 
 echo "=========================================="
 echo "Midaz CloudFormation Release Infrastructure Setup"
@@ -63,7 +63,7 @@ sed_inplace() {
 }
 
 echo "Updating infrastructure template..."
-sed_inplace "s|repo:LerianStudio/midaz-cloudformation-foundation:|repo:${GITHUB_ORG}/${GITHUB_REPO}:|g" "$INFRA_DIR/s3-templates-bucket.yaml"
+sed_inplace "s|repo:LerianStudio/lerian-cloudformation-foundation:|repo:${GITHUB_ORG}/${GITHUB_REPO}:|g" "$INFRA_DIR/s3-templates-bucket.yaml"
 echo "✓ Template updated for $GITHUB_ORG/$GITHUB_REPO"
 echo ""
 

@@ -17,8 +17,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="${PROJECT_DIR}/templates"
 
 # Default values
-S3_BUCKET="${1:-midaz-dev-cfn-templates-us-east-2}"
-AWS_REGION="${2:-us-east-2}"
+S3_BUCKET="${1:?Usage: $0 <s3-bucket> [region] [prefix]}"
+AWS_REGION="${2:-us-east-1}"
 S3_PREFIX="${3:-templates/}"
 
 echo -e "${BLUE}==========================================${NC}"

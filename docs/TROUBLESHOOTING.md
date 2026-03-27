@@ -530,7 +530,7 @@ If you're still experiencing issues:
    ```
 
 3. **Open an Issue**
-   - [GitHub Issues](https://github.com/LerianStudio/midaz-cloudformation-foundation/issues)
+   - [GitHub Issues](https://github.com/LerianStudio/lerian-cloudformation-foundation/issues)
    - Include: Stack events, CloudFormation template version, Region
 
 ---

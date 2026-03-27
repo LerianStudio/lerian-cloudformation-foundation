@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: ExternalDNS for EKS - Automatic DNS management for Route53 Private Hosted Zone
 
 Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
   ProjectName:
     Type: String
     Description: Project name for resource naming
@@ -47,6 +52,9 @@ Parameters:
     AllowedPattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     ConstraintDescription: "Must be a valid semantic version (e.g., 1.17.0)"
 
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
 Resources:
   # =============================================================================
   # EXTERNAL DNS IAM ROLE (IRSA)
@@ -55,7 +63,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-external-dns-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -107,7 +115,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-external-dns-deployer-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

@@ -13,8 +13,8 @@ NC='\033[0m'
 
 # Parameters
 INFRA_STACK="${1:-midaz-infra}"
-AWS_REGION="${2:-us-east-2}"
-S3_BUCKET="${3:-midaz-dev-cfn-templates-us-east-2}"
+AWS_REGION="${2:-us-east-1}"
+S3_BUCKET="${3:?Usage: $0 [infra-stack] [region] <s3-bucket> [helm-stack] [product]}"
 HELM_STACK="${4:-${INFRA_STACK}-helm}"
 PRODUCT="${5:-midaz}"
 
