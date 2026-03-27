@@ -115,4 +115,4 @@ Each template is versioned independently. Current versions:
 
 ---
 
-[0.1.0]: https://github.com/LerianStudio/midaz-cloudformation-foundation/releases/tag/release-v0.1.0
+[0.1.0]: https://github.com/LerianStudio/lerian-cloudformation-foundation/releases/tag/release-v0.1.0

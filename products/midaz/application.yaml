@@ -9,6 +9,10 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
+          default: "General Configuration"
+        Parameters:
+          - PermissionsBoundaryArn
+      - Label:
           default: "Infrastructure Reference"
         Parameters:
           - InfrastructureStackName
@@ -18,6 +22,7 @@ Metadata:
           - MPS3BucketName
           - MPS3BucketRegion
           - MPS3KeyPrefix
+          - MarketplaceAMI
       - Label:
           default: "Ledger Configuration"
         Parameters:
@@ -44,6 +49,8 @@ Metadata:
           - EnableCRMIngress
           - CRMIngressHostname
     ParameterLabels:
+      PermissionsBoundaryArn:
+        default: "IAM Permissions Boundary ARN"
       InfrastructureStackName:
         default: "Infrastructure Stack Name"
       MPS3BucketName:
@@ -52,6 +59,8 @@ Metadata:
         default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
+      MarketplaceAMI:
+        default: "Marketplace AMI ID"
       MidazVersion:
         default: "Midaz Version"
       MidazReplicas:
@@ -75,6 +84,14 @@ Metadata:
 
 Parameters:
   # =============================================================================
+  # GENERAL CONFIGURATION
+  # =============================================================================
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Applied to all IAM roles created by this stack. Leave empty to skip."
+
+  # =============================================================================
   # INFRASTRUCTURE REFERENCE
   # =============================================================================
   InfrastructureStackName:
@@ -89,7 +106,7 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates"
-    Default: "midaz-cloudformation-foundation"
+    Default: "lerian-cloudformation-templates"
 
   MPS3BucketRegion:
     Type: String
@@ -104,6 +121,11 @@ Parameters:
     Default: "releases/latest/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
+
+  MarketplaceAMI:
+    Type: String
+    Description: "AWS Marketplace AMI ID (required by Marketplace form only, EKS uses managed AMIs)"
+    Default: "ami-placeholder"
 
   # =============================================================================
   # LEDGER CONFIGURATION
@@ -208,6 +230,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}products/midaz/helm.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName:
           Fn::ImportValue: !Sub "${InfrastructureStackName}-ProjectName"
         EnvironmentName:

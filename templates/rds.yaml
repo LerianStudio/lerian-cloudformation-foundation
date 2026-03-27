@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: RDS PostgreSQL Stack for Midaz Platform
 
 Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
   ProjectName:
     Type: String
     Description: Project name for resource naming
@@ -157,6 +162,7 @@ Parameters:
     ConstraintDescription: "Must be a valid CIDR block or empty"
 
 Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   CreateReplica: !Equals [!Ref CreateReadReplica, "true"]
   UseProvisionedIops: !Or
     - !Equals [!Ref StorageType, "io1"]
@@ -256,7 +262,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-rds-monitoring-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

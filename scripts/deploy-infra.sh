@@ -14,9 +14,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Defaults
-STACK_NAME="${1:-midaz-infra}"
-AWS_REGION="${2:-us-east-2}"
-S3_BUCKET="${3:-midaz-dev-cfn-templates-us-east-2}"
+S3_BUCKET="${1:?Usage: $0 <s3-bucket> [stack-name] [region] [project-name] [product]}"
+STACK_NAME="${2:-midaz-infra}"
+AWS_REGION="${3:-us-east-1}"
 PROJECT_NAME="${4:-$STACK_NAME}"
 PRODUCT="${5:-midaz}"
 
@@ -76,4 +76,4 @@ aws cloudformation describe-stacks \
 
 echo ""
 echo -e "${BLUE}Next: Deploy Helm stack${NC}"
-echo "./scripts/deploy-helm-stack.sh $STACK_NAME $AWS_REGION $S3_BUCKET"
+echo "./scripts/deploy-helm-stack.sh $S3_BUCKET $STACK_NAME $AWS_REGION"

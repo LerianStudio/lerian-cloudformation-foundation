@@ -1,0 +1,14 @@
+title = "Gitleaks config for lerian-cloudformation-foundation"
+
+[allowlist]
+  description = "Known safe patterns"
+  paths = [
+    '''\.gitleaks\.toml$''',
+    '''CHANGELOG\.md$''',
+  ]
+  regexTarget = "match"
+  regexes = [
+    '''ami-placeholder''',
+    '''ACCOUNT_ID''',
+    '''example\.com''',
+  ]

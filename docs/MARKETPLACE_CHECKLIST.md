@@ -9,7 +9,7 @@
 export BUCKET_NAME="midaz-cloudformation-templates"
 export AWS_REGION="us-east-1"
 export GITHUB_ORG="LerianStudio"
-export GITHUB_REPO="midaz-cloudformation-foundation"
+export GITHUB_REPO="lerian-cloudformation-foundation"
 
 # Executar setup
 ./scripts/setup-release-infrastructure.sh
@@ -39,7 +39,7 @@ Após o setup, adicionar o secret no repositório:
 git init
 git add .
 git commit -m "feat: initial release of Midaz CloudFormation templates"
-git remote add origin git@github.com:LerianStudio/midaz-cloudformation-foundation.git
+git remote add origin git@github.com:LerianStudio/lerian-cloudformation-foundation.git
 git push -u origin main
 ```
 

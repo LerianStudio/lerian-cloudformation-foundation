@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: VPC Stack for Midaz Platform - Network infrastructure with public, private, and database subnets
 
 Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
   ProjectName:
     Type: String
     Description: Project name for resource naming
@@ -67,6 +72,7 @@ Parameters:
     Description: Number of days to retain VPC Flow Logs in CloudWatch.
 
 Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   EnableFlowLogsCondition: !Equals [!Ref EnableFlowLogs, "true"]
 
 Resources:
@@ -431,7 +437,7 @@ Resources:
     Condition: EnableFlowLogsCondition
     Properties:
       RoleName: !Sub "${ProjectName}-flow-logs-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

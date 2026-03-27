@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: EKS Cluster Stack for Midaz Platform
 
 Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
   ProjectName:
     Type: String
     Description: Project name for resource naming
@@ -84,6 +89,9 @@ Parameters:
     Default: 3
     ConstraintDescription: "Must be between 1 and 100"
 
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
 Resources:
   # =============================================================================
   # KMS KEY FOR SECRETS ENCRYPTION
@@ -121,7 +129,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-eks-cluster-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -140,7 +148,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-eks-node-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -278,7 +286,7 @@ Resources:
     DependsOn: OIDCProvider
     Properties:
       RoleName: !Sub "${ProjectName}-ebs-csi-driver-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |

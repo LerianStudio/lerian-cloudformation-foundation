@@ -19,6 +19,7 @@ Metadata:
         Parameters:
           - EnvironmentName
           - ProjectName
+          - PermissionsBoundaryArn
       - Label:
           default: "Network Configuration"
         Parameters:
@@ -55,6 +56,8 @@ Metadata:
         default: "Environment"
       ProjectName:
         default: "Project Name"
+      PermissionsBoundaryArn:
+        default: "IAM Permissions Boundary ARN"
       # Network
       VpcCIDR:
         default: "VPC CIDR Block"
@@ -113,6 +116,11 @@ Parameters:
   # =============================================================================
   # GENERAL CONFIGURATION
   # =============================================================================
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Applied to all IAM roles created by this stack. Leave empty to skip."
+
   EnvironmentName:
     Type: String
     Default: production
@@ -284,6 +292,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}vpc.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcCIDR: !Ref VpcCIDR
@@ -309,6 +318,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
@@ -358,6 +368,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}alb-controller.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !GetAtt VPCStack.Outputs.VpcId
@@ -383,6 +394,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}external-dns.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !GetAtt EKSStack.Outputs.ClusterName

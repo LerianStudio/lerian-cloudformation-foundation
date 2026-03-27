@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: AWS Load Balancer Controller for EKS - Deployed via Lambda Custom Resource
 
 Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
   ProjectName:
     Type: String
     Description: Project name for resource naming
@@ -39,6 +44,9 @@ Parameters:
     AllowedPattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     ConstraintDescription: "Must be a valid semantic version (e.g., 1.13.3)"
 
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
 Resources:
   # =============================================================================
   # ALB CONTROLLER IAM ROLE (IRSA)
@@ -48,7 +56,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-alb-controller-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Fn::Sub:
           - |
@@ -275,7 +283,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-alb-controller-deployer-role"
-      PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/default_boundary"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
