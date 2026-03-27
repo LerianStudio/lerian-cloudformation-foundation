@@ -57,7 +57,7 @@ aws marketplace-catalog start-change-set \
     "DetailsDocument": {
       "Version": {
         "VersionTitle": "v0.2.0",
-        "ReleaseNotes": "Added modular deployment options: Full Stack, Infrastructure Only, and Application Only. Templates now support optional PermissionsBoundary parameter."
+        "ReleaseNotes": "Added modular deployment options: Full Stack, Infrastructure Only, and Application Only. Templates now support optional PermissionsBoundaryArn parameter."
       },
       "DeliveryOptions": [
         {

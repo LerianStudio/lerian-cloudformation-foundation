@@ -12,9 +12,9 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Parameters
-INFRA_STACK="${1:-midaz-infra}"
-AWS_REGION="${2:-us-east-1}"
-S3_BUCKET="${3:?Usage: $0 [infra-stack] [region] <s3-bucket> [helm-stack] [product]}"
+S3_BUCKET="${1:?Usage: $0 <s3-bucket> [infra-stack] [region] [helm-stack] [product]}"
+INFRA_STACK="${2:-midaz-infra}"
+AWS_REGION="${3:-us-east-1}"
 HELM_STACK="${4:-${INFRA_STACK}-helm}"
 PRODUCT="${5:-midaz}"
 

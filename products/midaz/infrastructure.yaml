@@ -813,5 +813,6 @@ Outputs:
           InfrastructureStackName=${AWS::StackName} \
           MPS3BucketName=${MPS3BucketName} \
           MPS3KeyPrefix=${MPS3KeyPrefix} \
+          PermissionsBoundaryArn=${PermissionsBoundaryArn} \
         --capabilities CAPABILITY_IAM \
         --region ${AWS::Region}

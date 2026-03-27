@@ -8,7 +8,7 @@ set -e
 
 # Configuration
 STACK_NAME="midaz-cfn-templates-bucket"
-BUCKET_NAME="${BUCKET_NAME:-midaz-cloudformation-templates}"
+BUCKET_NAME="${BUCKET_NAME:-lerian-cloudformation-templates}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 GITHUB_ORG="${GITHUB_ORG:-LerianStudio}"
 GITHUB_REPO="${GITHUB_REPO:-lerian-cloudformation-foundation}"

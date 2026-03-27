@@ -47,6 +47,7 @@ After stack creation completes (~45 minutes):
 Required parameters: RDSMasterUsername, DocumentDBMasterUsername, AmazonMQAdminUsername.
 
 Optional: Set EnableIngress=true with DomainName and IngressHostname for external access via ALB.
+Optional: Set PermissionsBoundaryArn to an IAM permissions boundary ARN (e.g., arn:aws:iam::ACCOUNT:policy/boundary) to constrain all IAM roles created by this stack.
 
 ---
 
@@ -81,8 +82,9 @@ Prerequisites: Deploy the Foundation stack first (provides VPC + EKS).
 
 1. Set FoundationStackName to your Foundation stack name (default: lerian-foundation).
 2. Provide RDSMasterUsername, DocumentDBMasterUsername, and AmazonMQAdminUsername.
-3. After stack creation completes (~30 minutes), deploy the Midaz Application stack.
-4. Use the ExistingVpcId, ExistingClusterName parameters to override Foundation values if needed.
+3. Optional: Set PermissionsBoundaryArn to apply an IAM permissions boundary to all created roles.
+4. After stack creation completes (~30 minutes), deploy the Midaz Application stack.
+5. Use the ExistingVpcId, ExistingClusterName parameters to override Foundation values if needed.
 
 ---
 
@@ -117,7 +119,8 @@ Best for: Teams using the modular deployment approach, environments where infras
 Prerequisites: Deploy the Midaz Infrastructure stack first.
 
 1. Set InfrastructureStackName to your Infrastructure stack name (default: midaz-infra).
-2. After stack creation completes (~15 minutes), configure kubectl:
+2. Optional: Set PermissionsBoundaryArn to apply an IAM permissions boundary to all created roles.
+3. After stack creation completes (~15 minutes), configure kubectl:
    aws eks update-kubeconfig --name <cluster-name> --region <region>
-3. Verify pods: kubectl get pods -n midaz
-4. Optional: Enable ingress by setting EnableIngress=true, DomainName, and IngressHostname.
+4. Verify pods: kubectl get pods -n midaz
+5. Optional: Enable ingress by setting EnableIngress=true, DomainName, and IngressHostname.
