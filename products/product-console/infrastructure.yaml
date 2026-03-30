@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Product Console Infrastructure Stack
-  Deploys VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and supporting services.
+  Deploys VPC, EKS, DocumentDB, and supporting services.
   Use midaz-application.yaml to deploy the Midaz application after this stack completes.
   (c) Lerian Studio - https://lerian.studio
 
@@ -676,12 +676,6 @@ Outputs:
       Name: !Sub "${AWS::StackName}-ClusterSecurityGroupId"
 
 
-  RDSSecretArn:
-    Description: RDS Password Secret ARN
-    Value: !GetAtt RDSStack.Outputs.SecretArn
-    Export:
-      Name: !Sub "${AWS::StackName}-RDSSecretArn"
-
   # =============================================================================
   # DOCUMENTDB OUTPUTS
   # =============================================================================
@@ -697,13 +691,6 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-DocumentDBSecretArn"
 
-
-
-  AmazonMQSecretArn:
-    Description: AmazonMQ Password Secret ARN
-    Value: !GetAtt AmazonMQStack.Outputs.SecretArn
-    Export:
-      Name: !Sub "${AWS::StackName}-AmazonMQSecretArn"
 
   # =============================================================================
   # ROUTE53 OUTPUTS

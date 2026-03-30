@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Plugin Access Manager Infrastructure Stack
-  Deploys VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and supporting services.
+  Deploys VPC, EKS, RDS, ElastiCache, and supporting services.
   Use midaz-application.yaml to deploy the Midaz application after this stack completes.
   (c) Lerian Studio - https://lerian.studio
 
@@ -810,12 +810,6 @@ Outputs:
       Name: !Sub "${AWS::StackName}-RDSSecretArn"
 
 
-  DocumentDBSecretArn:
-    Description: DocumentDB Password Secret ARN
-    Value: !GetAtt DocumentDBStack.Outputs.SecretArn
-    Export:
-      Name: !Sub "${AWS::StackName}-DocumentDBSecretArn"
-
   # =============================================================================
   # ELASTICACHE OUTPUTS
   # =============================================================================
@@ -825,12 +819,6 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-ElastiCacheEndpoint"
 
-
-  AmazonMQSecretArn:
-    Description: AmazonMQ Password Secret ARN
-    Value: !GetAtt AmazonMQStack.Outputs.SecretArn
-    Export:
-      Name: !Sub "${AWS::StackName}-AmazonMQSecretArn"
 
   # =============================================================================
   # ROUTE53 OUTPUTS
