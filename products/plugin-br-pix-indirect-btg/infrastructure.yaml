@@ -436,7 +436,7 @@ Parameters:
 
   RDSDatabaseName:
     Type: String
-    Default: plugin-br-pix-indirect-btg
+    Default: plugin_br_pix_indirect_btg
     Description: Name of the initial database
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
     MinLength: 1
