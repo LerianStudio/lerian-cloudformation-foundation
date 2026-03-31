@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Underwriter Infrastructure Stack
-  Deploys VPC, EKS, RDS, ElastiCache, and supporting services.
-  Use midaz-application.yaml to deploy the Midaz application after this stack completes.
+  Deploys RDS, ElastiCache, and supporting services for the Underwriter product.
+  Can deploy standalone (creates VPC + EKS) or into an existing cluster (UseExistingCluster=true).
   (c) Lerian Studio - https://lerian.studio
 
 Metadata:
@@ -63,12 +63,6 @@ Metadata:
           default: "ElastiCache (Valkey/Redis) Configuration"
         Parameters:
           - ElastiCacheNodeType
-      - Label:
-          default: "AmazonMQ (RabbitMQ) Configuration"
-        Parameters:
-          - AmazonMQInstanceType
-          - AmazonMQDeploymentMode
-          - AmazonMQAdminUsername
       - Label:
           default: "Additional Network Access"
         Parameters:
@@ -154,11 +148,9 @@ Metadata:
         default: "Deletion Protection"
       RDSBackupRetentionPeriod:
         default: "Backup Retention (Days)"
-      # DocumentDB
       # ElastiCache
       ElastiCacheNodeType:
         default: "Cache Node Type"
-      # AmazonMQ
       # Additional Network Access
       AdditionalIngressCIDR1:
         default: "Additional CIDR 1"
@@ -181,7 +173,7 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
-    Default: "midaz-cloudformation-foundation"
+    Default: "lerian-cloudformation-foundation"
 
   MPS3BucketRegion:
     Type: String
@@ -305,11 +297,11 @@ Parameters:
   # EKS
   KubernetesVersion:
     Type: String
-    Default: "1.32"
+    Default: "1.35"
     AllowedValues:
-      - "1.32"
-      - "1.31"
-      - "1.30"
+      - "1.35"
+      - "1.34"
+      - "1.33"
     Description: Kubernetes version for EKS cluster
 
   NodeInstanceType:
@@ -467,12 +459,6 @@ Parameters:
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
 
-  # DocumentDB
-
-
-
-
-
   # ElastiCache
   ElastiCacheNodeType:
     Type: String
@@ -486,9 +472,6 @@ Parameters:
       - cache.r7g.large
       - cache.r7g.xlarge
     Description: ElastiCache node type
-
-
-
 
   # =============================================================================
   # ADDITIONAL NETWORK ACCESS
@@ -611,7 +594,6 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-
   # =============================================================================
   # ELASTICACHE STACK
   # =============================================================================
@@ -636,7 +618,6 @@ Resources:
           Value: !Ref EnvironmentName
         - Key: ManagedBy
           Value: CloudFormation
-
 
   # =============================================================================
   # EKS STACK
@@ -809,7 +790,6 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-RDSSecretArn"
 
-
   # =============================================================================
   # ELASTICACHE OUTPUTS
   # =============================================================================
@@ -818,7 +798,6 @@ Outputs:
     Value: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-ElastiCacheEndpoint"
-
 
   # =============================================================================
   # ROUTE53 OUTPUTS
@@ -865,16 +844,3 @@ Outputs:
     Value: !Sub
       - "aws eks update-kubeconfig --name ${ClusterName} --region ${AWS::Region}"
       - ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
-
-  DeployApplicationCommand:
-    Description: Command to deploy the Midaz application
-    Value: !Sub |
-      aws cloudformation deploy \
-        --stack-name ${AWS::StackName}-app \
-        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}midaz-application.yaml \
-        --parameter-overrides \
-          InfrastructureStackName=${AWS::StackName} \
-          MPS3BucketName=${MPS3BucketName} \
-          MPS3KeyPrefix=${MPS3KeyPrefix} \
-        --capabilities CAPABILITY_IAM \
-        --region ${AWS::Region}

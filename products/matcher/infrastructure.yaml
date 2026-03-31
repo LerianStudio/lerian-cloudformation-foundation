@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Matcher Infrastructure Stack
-  Deploys VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and supporting services.
-  Use midaz-application.yaml to deploy the Midaz application after this stack completes.
+  Deploys RDS, DocumentDB, ElastiCache, AmazonMQ, and supporting services for the Matcher product.
+  Can deploy standalone (creates VPC + EKS) or into an existing cluster (UseExistingCluster=true).
   (c) Lerian Studio - https://lerian.studio
 
 Metadata:
@@ -205,7 +205,7 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
-    Default: "midaz-cloudformation-foundation"
+    Default: "lerian-cloudformation-foundation"
 
   MPS3BucketRegion:
     Type: String
@@ -329,11 +329,11 @@ Parameters:
   # EKS
   KubernetesVersion:
     Type: String
-    Default: "1.32"
+    Default: "1.35"
     AllowedValues:
-      - "1.32"
-      - "1.31"
-      - "1.30"
+      - "1.35"
+      - "1.34"
+      - "1.33"
     Description: Kubernetes version for EKS cluster
 
   NodeInstanceType:
@@ -1045,16 +1045,3 @@ Outputs:
     Value: !Sub
       - "aws eks update-kubeconfig --name ${ClusterName} --region ${AWS::Region}"
       - ClusterName: !If [CreateNewCluster, !GetAtt EKSStack.Outputs.ClusterName, !Ref ExistingClusterName]
-
-  DeployApplicationCommand:
-    Description: Command to deploy the Midaz application
-    Value: !Sub |
-      aws cloudformation deploy \
-        --stack-name ${AWS::StackName}-app \
-        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}midaz-application.yaml \
-        --parameter-overrides \
-          InfrastructureStackName=${AWS::StackName} \
-          MPS3BucketName=${MPS3BucketName} \
-          MPS3KeyPrefix=${MPS3KeyPrefix} \
-        --capabilities CAPABILITY_IAM \
-        --region ${AWS::Region}
