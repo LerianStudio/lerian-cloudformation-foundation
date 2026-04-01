@@ -14,7 +14,7 @@
   },
   "products": {
     "midaz": {
-      "infrastructure": "0.2.5",
+      "infrastructure": "0.2.6",
       "helm": "0.2.7",
       "application": "0.1.14",
       "complete": "0.2.0",
