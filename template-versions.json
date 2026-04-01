@@ -22,6 +22,45 @@
     },
     "tracer": {
       "infrastructure": "0.1.2"
+    },
+    "fetcher": {
+      "infrastructure": "0.1.0"
+    },
+    "flowker": {
+      "infrastructure": "0.1.0"
+    },
+    "ledger": {
+      "infrastructure": "0.1.0"
+    },
+    "matcher": {
+      "infrastructure": "0.1.0"
+    },
+    "plugin-access-manager": {
+      "infrastructure": "0.1.0"
+    },
+    "plugin-br-bank-transfer-jd": {
+      "infrastructure": "0.1.0"
+    },
+    "plugin-br-pix-direct-jd": {
+      "infrastructure": "0.1.0"
+    },
+    "plugin-br-pix-indirect-btg": {
+      "infrastructure": "0.1.0"
+    },
+    "plugin-crm": {
+      "infrastructure": "0.1.0"
+    },
+    "plugin-fees": {
+      "infrastructure": "0.1.0"
+    },
+    "product-console": {
+      "infrastructure": "0.1.0"
+    },
+    "reporter": {
+      "infrastructure": "0.1.0"
+    },
+    "underwriter": {
+      "infrastructure": "0.1.0"
     }
   }
 }
