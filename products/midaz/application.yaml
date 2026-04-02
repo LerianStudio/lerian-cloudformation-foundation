@@ -318,7 +318,7 @@ Outputs:
     Value: !Sub |
       aws cloudformation update-stack \
         --stack-name ${AWS::StackName} \
-        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}midaz-application.yaml \
+        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}application.yaml \
         --parameters ParameterKey=InfrastructureStackName,ParameterValue=${InfrastructureStackName} \
                      ParameterKey=MidazVersion,ParameterValue=NEW_VERSION \
         --capabilities CAPABILITY_IAM
