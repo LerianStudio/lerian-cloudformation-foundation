@@ -118,7 +118,7 @@ Parameters:
   MPS3KeyPrefix:
     Type: String
     Description: "S3 key prefix for the CloudFormation templates"
-    Default: "releases/latest/"
+    Default: "releases/latest/products/midaz/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
 
@@ -228,7 +228,7 @@ Resources:
   MidazHelmStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}products/midaz/helm.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}helm.yaml"
       Parameters:
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName:
