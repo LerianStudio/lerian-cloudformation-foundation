@@ -14,7 +14,6 @@ Metadata:
           - MPS3BucketName
           - MPS3BucketRegion
           - MPS3KeyPrefix
-          - MPS3ProductKeyPrefix
           - MarketplaceAMI
       - Label:
           default: "General Configuration"
@@ -124,8 +123,6 @@ Metadata:
         default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
-      MPS3ProductKeyPrefix:
-        default: "Product Templates S3 Key Prefix"
       MarketplaceAMI:
         default: "Marketplace AMI ID"
       # Ledger Configuration
@@ -272,14 +269,7 @@ Parameters:
 
   MPS3KeyPrefix:
     Type: String
-    Description: "S3 key prefix for the shared CloudFormation templates"
-    Default: "releases/latest/"
-    AllowedPattern: "^[a-zA-Z0-9-_./]*$"
-    ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
-
-  MPS3ProductKeyPrefix:
-    Type: String
-    Description: "S3 key prefix for the product-specific CloudFormation templates (helm.yaml)"
+    Description: "S3 key prefix for the CloudFormation templates"
     Default: "releases/latest/products/midaz/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
@@ -1078,7 +1068,7 @@ Resources:
       - AmazonMQStack
       - ALBControllerStack
     Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3ProductKeyPrefix}helm.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}helm.yaml"
       Parameters:
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName
@@ -1137,7 +1127,7 @@ Resources:
       - ElastiCacheStack
       - AmazonMQStack
     Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3ProductKeyPrefix}helm.yaml"
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}helm.yaml"
       Parameters:
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref AWS::StackName

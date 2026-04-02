@@ -388,6 +388,20 @@ jobs:
                 --cache-control "max-age=86400" \
                 --content-type "application/x-yaml"
             done
+            # Also copy shared templates into each product folder (required by AWS Marketplace
+            # nested template URL validation: all nested templates must share the same MPS3KeyPrefix)
+            echo "  -> Copying shared templates into ${PRODUCT}/ for Marketplace compatibility"
+            for TEMPLATE_FILE in templates/*.yaml; do
+              TEMPLATE=$(basename "$TEMPLATE_FILE" .yaml)
+              if [ -f "${PRODUCT_DIR}${TEMPLATE}.yaml" ]; then
+                echo "    - skipping shared ${TEMPLATE}.yaml (product-specific file exists)"
+                continue
+              fi
+              aws s3 cp "$TEMPLATE_FILE" \
+                "s3://${{ env.S3_BUCKET }}/releases/v${BUNDLE_VERSION}/products/${PRODUCT}/${TEMPLATE}.yaml" \
+                --cache-control "max-age=86400" \
+                --content-type "application/x-yaml"
+            done
           done
 
           # Upload to latest
@@ -402,6 +416,19 @@ jobs:
               --exclude "*.md" --exclude ".*" \
               --cache-control "max-age=300" \
               --content-type "application/x-yaml"
+            # Also copy shared templates into each product folder (required by AWS Marketplace
+            # nested template URL validation: all nested templates must share the same MPS3KeyPrefix)
+            for TEMPLATE_FILE in templates/*.yaml; do
+              TEMPLATE=$(basename "$TEMPLATE_FILE" .yaml)
+              if [ -f "${PRODUCT_DIR}${TEMPLATE}.yaml" ]; then
+                echo "    - skipping shared ${TEMPLATE}.yaml in latest (product-specific file exists)"
+                continue
+              fi
+              aws s3 cp "$TEMPLATE_FILE" \
+                "s3://${{ env.S3_BUCKET }}/releases/latest/products/${PRODUCT}/${TEMPLATE}.yaml" \
+                --cache-control "max-age=300" \
+                --content-type "application/x-yaml"
+            done
           done
 
           # Create bundle manifest
