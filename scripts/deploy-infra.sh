@@ -49,7 +49,7 @@ echo ""
 echo -e "${BLUE}Deploying infrastructure...${NC}"
 aws cloudformation deploy \
     --stack-name "$STACK_NAME" \
-    --template-url "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/products/${PRODUCT}/infrastructure.yaml" \
+    --template-url "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/releases/latest/products/${PRODUCT}/infrastructure.yaml" \
     --parameter-overrides \
         ProjectName="$PROJECT_NAME" \
         EnvironmentName="production" \
@@ -58,7 +58,8 @@ aws cloudformation deploy \
         AvailabilityZone3="${AZS[2]}" \
         MPS3BucketName="$S3_BUCKET" \
         MPS3BucketRegion="$AWS_REGION" \
-        MPS3KeyPrefix="templates/" \
+        MPS3KeyPrefix="releases/latest/" \
+        MPS3ProductKeyPrefix="releases/latest/products/${PRODUCT}/" \
     --capabilities CAPABILITY_NAMED_IAM \
     --region "$AWS_REGION" \
     --disable-rollback
