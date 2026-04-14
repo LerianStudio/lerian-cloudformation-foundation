@@ -33,7 +33,7 @@
       "infrastructure": "0.1.0"
     },
     "matcher": {
-      "infrastructure": "0.1.0"
+      "infrastructure": "0.1.1"
     },
     "plugin-access-manager": {
       "infrastructure": "0.1.0"
@@ -45,7 +45,7 @@
       "infrastructure": "0.1.0"
     },
     "plugin-br-pix-indirect-btg": {
-      "infrastructure": "0.1.0"
+      "infrastructure": "0.1.1"
     },
     "plugin-crm": {
       "infrastructure": "0.1.0"
