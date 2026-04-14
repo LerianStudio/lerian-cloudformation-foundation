@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Matcher Infrastructure Stack
-  Deploys RDS, DocumentDB, ElastiCache, AmazonMQ, and supporting services for the Matcher product.
+  Deploys RDS, ElastiCache, AmazonMQ, and supporting services for the Matcher product.
   Can deploy standalone (creates VPC + EKS) or into an existing cluster (UseExistingCluster=true).
   (c) Lerian Studio - https://lerian.studio
 
@@ -59,14 +59,6 @@ Metadata:
           - RDSMultiAZ
           - RDSDeletionProtection
           - RDSBackupRetentionPeriod
-      - Label:
-          default: "DocumentDB Configuration"
-        Parameters:
-          - DocumentDBInstanceClass
-          - DocumentDBInstanceCount
-          - DocumentDBMasterUsername
-          - DocumentDBDeletionProtection
-          - DocumentDBBackupRetentionPeriod
       - Label:
           default: "ElastiCache (Valkey/Redis) Configuration"
         Parameters:
@@ -161,17 +153,6 @@ Metadata:
       RDSDeletionProtection:
         default: "Deletion Protection"
       RDSBackupRetentionPeriod:
-        default: "Backup Retention (Days)"
-      # DocumentDB
-      DocumentDBInstanceClass:
-        default: "DocumentDB Instance Class"
-      DocumentDBInstanceCount:
-        default: "Number of Instances"
-      DocumentDBMasterUsername:
-        default: "Master Username"
-      DocumentDBDeletionProtection:
-        default: "Deletion Protection"
-      DocumentDBBackupRetentionPeriod:
         default: "Backup Retention (Days)"
       # ElastiCache
       ElastiCacheNodeType:
@@ -491,51 +472,6 @@ Parameters:
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
 
-  # DocumentDB
-  DocumentDBInstanceClass:
-    Type: String
-    Default: db.t3.medium
-    AllowedValues:
-      - db.t3.medium
-      - db.r6g.large
-      - db.r6g.xlarge
-      - db.r6g.2xlarge
-      - db.r6g.4xlarge
-      - db.r6g.8xlarge
-      - db.r6g.12xlarge
-    Description: DocumentDB instance class
-
-  DocumentDBInstanceCount:
-    Type: Number
-    Default: 2
-    MinValue: 1
-    MaxValue: 10
-    Description: Number of DocumentDB instances
-
-  DocumentDBMasterUsername:
-    Type: String
-    NoEcho: true
-    Description: Master username for DocumentDB (required, no default for security)
-    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
-    MinLength: 1
-    MaxLength: 63
-    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
-
-  DocumentDBDeletionProtection:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable deletion protection to prevent accidental cluster deletion.
-
-  DocumentDBBackupRetentionPeriod:
-    Type: Number
-    Default: 7
-    MinValue: 1
-    MaxValue: 35
-    Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
-
   # ElastiCache
   ElastiCacheNodeType:
     Type: String
@@ -708,35 +644,6 @@ Resources:
           Value: CloudFormation
 
   # =============================================================================
-  # DOCUMENTDB STACK
-  # =============================================================================
-  DocumentDBStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
-      Parameters:
-        ProjectName: !Ref ProjectName
-        EnvironmentName: !Ref EnvironmentName
-        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
-        VpcCIDR: !Ref VpcCIDR
-        PrivateSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.PrivateSubnetIds, !Ref ExistingPrivateSubnetIds]
-        InstanceClass: !Ref DocumentDBInstanceClass
-        InstanceCount: !Ref DocumentDBInstanceCount
-        MasterUsername: !Ref DocumentDBMasterUsername
-        DeletionProtection: !Ref DocumentDBDeletionProtection
-        BackupRetentionPeriod: !Ref DocumentDBBackupRetentionPeriod
-        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
-        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
-        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-documentdb-stack"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # =============================================================================
   # ELASTICACHE STACK
   # =============================================================================
   ElastiCacheStack:
@@ -796,7 +703,6 @@ Resources:
     Condition: CreateNewCluster
     DependsOn:
       - RDSStack
-      - DocumentDBStack
       - ElastiCacheStack
       - AmazonMQStack
     Properties:
@@ -960,21 +866,6 @@ Outputs:
     Value: !GetAtt RDSStack.Outputs.SecretArn
     Export:
       Name: !Sub "${AWS::StackName}-RDSSecretArn"
-
-  # =============================================================================
-  # DOCUMENTDB OUTPUTS
-  # =============================================================================
-  DocumentDBEndpoint:
-    Description: DocumentDB Cluster Endpoint
-    Value: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
-    Export:
-      Name: !Sub "${AWS::StackName}-DocumentDBEndpoint"
-
-  DocumentDBSecretArn:
-    Description: DocumentDB Password Secret ARN
-    Value: !GetAtt DocumentDBStack.Outputs.SecretArn
-    Export:
-      Name: !Sub "${AWS::StackName}-DocumentDBSecretArn"
 
   # =============================================================================
   # ELASTICACHE OUTPUTS
