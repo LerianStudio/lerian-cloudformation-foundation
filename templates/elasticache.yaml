@@ -4,9 +4,13 @@ Description: ElastiCache (Valkey/Redis) Stack for Midaz Platform
 Parameters:
   ProjectName:
     Type: String
-    Description: Project name for resource naming
+    Description: >-
+      Project name for resource naming. Used directly as ElastiCache
+      ReplicationGroupId (max 40 chars). Changing this value will REPLACE
+      the ElastiCache cluster (data loss) — treat as immutable after creation.
+    MaxLength: 40
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
-    ConstraintDescription: "Must begin with a letter and contain only letters, numbers, and hyphens"
+    ConstraintDescription: "Must begin with a letter, contain only letters/numbers/hyphens, and be at most 40 characters"
 
   EnvironmentName:
     Type: String
