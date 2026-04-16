@@ -9,8 +9,8 @@ Parameters:
       ReplicationGroupId (max 40 chars). Changing this value will REPLACE
       the ElastiCache cluster (data loss) — treat as immutable after creation.
     MaxLength: 40
-    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
-    ConstraintDescription: "Must begin with a letter, contain only letters/numbers/hyphens, and be at most 40 characters"
+    AllowedPattern: "^[a-zA-Z]([a-zA-Z0-9]|-(?!-))*[a-zA-Z0-9]$"
+    ConstraintDescription: "Must begin with a letter, end with a letter or number, contain only letters/numbers/hyphens, no consecutive hyphens, max 40 characters"
 
   EnvironmentName:
     Type: String
@@ -222,6 +222,8 @@ Resources:
   # =============================================================================
   ElastiCacheReplicationGroup:
     Type: AWS::ElastiCache::ReplicationGroup
+    UpdateReplacePolicy: Snapshot
+    DeletionPolicy: Snapshot
     Properties:
       # ElastiCache ReplicationGroupId has a 40-character limit.
       # ProjectName alone can be up to 39 chars (e.g., sst-midaz-57b5a-0dd35615-underwriter),
