@@ -5,7 +5,7 @@
     "eks": "0.1.6",
     "rds": "0.2.2",
     "documentdb": "0.3.3",
-    "elasticache": "0.2.6",
+    "elasticache": "0.2.7",
     "amazonmq": "0.2.4",
     "route53": "0.1.2",
     "alb-controller": "0.1.4",
