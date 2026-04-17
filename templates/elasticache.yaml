@@ -5,6 +5,8 @@ Parameters:
   ProjectName:
     Type: String
     Description: Project name for resource naming and tagging
+    MinLength: 3
+    MaxLength: 128
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
     ConstraintDescription: "Must begin with a letter and contain only letters, numbers, and hyphens"
 
