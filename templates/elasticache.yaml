@@ -4,13 +4,11 @@ Description: ElastiCache (Valkey/Redis) Stack for Midaz Platform
 Parameters:
   ProjectName:
     Type: String
-    Description: >-
-      Project name for resource naming. Used directly as ElastiCache
-      ReplicationGroupId (max 40 chars). Changing this value will REPLACE
-      the ElastiCache cluster (data loss) — treat as immutable after creation.
-    MaxLength: 40
-    AllowedPattern: "^[a-zA-Z]([a-zA-Z0-9]|-(?!-))*[a-zA-Z0-9]$"
-    ConstraintDescription: "Must begin with a letter, end with a letter or number, contain only letters/numbers/hyphens, no consecutive hyphens, max 40 characters"
+    Description: Project name for resource naming and tagging
+    MinLength: 3
+    MaxLength: 128
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    ConstraintDescription: "Must begin with a letter and contain only letters, numbers, and hyphens"
 
   EnvironmentName:
     Type: String
@@ -225,10 +223,11 @@ Resources:
     UpdateReplacePolicy: Snapshot
     DeletionPolicy: Snapshot
     Properties:
-      # ElastiCache ReplicationGroupId has a 40-character limit.
-      # ProjectName alone can be up to 39 chars (e.g., sst-midaz-57b5a-0dd35615-underwriter),
-      # so we use it directly without any suffix to stay within the limit.
-      ReplicationGroupId: !Ref ProjectName
+      # ReplicationGroupId is intentionally NOT specified so CFN auto-generates
+      # a unique ID per stack. This ensures the auto-created snapshot name
+      # (snapshot-{ReplicationGroupId}) is also unique, preventing conflicts
+      # when stacks are deleted and recreated (e.g., test environment re-deploys).
+      # Endpoints are resolved via !GetAtt, not by ID.
       ReplicationGroupDescription: Valkey cluster for Midaz
       Engine: valkey
       EngineVersion: "7.2"
