@@ -231,7 +231,6 @@ Resources:
     Type: AWS::EKS::Nodegroup
     DependsOn: EKSCluster
     Properties:
-      NodegroupName: !Sub "${ProjectName}-default-nodepool"
       ClusterName: !Sub "${ProjectName}-eks"
       NodeRole: !GetAtt EKSNodeRole.Arn
       Subnets: !Ref PrivateSubnetIds
