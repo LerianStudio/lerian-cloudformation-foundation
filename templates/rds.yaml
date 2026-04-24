@@ -194,7 +194,7 @@ Resources:
         SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
         GenerateStringKey: password
         PasswordLength: 16
-        ExcludeCharacters: '"@/\'
+        ExcludeCharacters: "'\"@/\\#$%&*(){}[]|;:<>?!`~"
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-rds-secret"
