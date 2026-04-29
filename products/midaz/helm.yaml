@@ -92,7 +92,7 @@ Parameters:
 
   MidazChartVersion:
     Type: String
-    Default: "5.7.0"
+    Default: "6.3.0"
     Description: Midaz Helm Chart Version
 
   MidazReplicas:
