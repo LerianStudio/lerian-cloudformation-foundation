@@ -42,10 +42,14 @@ Parameters:
       in the deploy region — run `aws rds describe-db-engine-versions
       --engine postgres --query 'DBEngineVersions[].EngineVersion'` to list
       what is supported. AWS deprecates patch versions ~quarterly; the
-      default here may need to be bumped over time. 16.8 (the previous
-      hardcoded value) was deprecated and caused "Cannot find version 16.8
-      for postgres" CREATE_FAILED on 2026-06-30 in us-east-2.
-    Default: "16.14"
+      default here intentionally preserves the previous hardcoded value
+      (`16.8`) so that existing parent stacks calling this template without
+      passing `EngineVersion` don't get an unintended in-place upgrade on
+      their next `update-stack`. New parent stacks (e.g. product
+      infrastructure templates) should expose their own `RDSEngineVersion`
+      parameter with a current default and pass it explicitly — see
+      `products/*/infrastructure.yaml`.
+    Default: "16.8"
 
   InstanceClass:
     Type: String
