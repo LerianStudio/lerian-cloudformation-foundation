@@ -35,6 +35,22 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Database subnet IDs
 
+  EngineVersion:
+    Type: String
+    Description: |
+      PostgreSQL engine version. Must be a version currently available on RDS
+      in the deploy region — run `aws rds describe-db-engine-versions
+      --engine postgres --query 'DBEngineVersions[].EngineVersion'` to list
+      what is supported. AWS deprecates patch versions ~quarterly; the
+      default here intentionally preserves the previous hardcoded value
+      (`16.8`) so that existing parent stacks calling this template without
+      passing `EngineVersion` don't get an unintended in-place upgrade on
+      their next `update-stack`. New parent stacks (e.g. product
+      infrastructure templates) should expose their own `RDSEngineVersion`
+      parameter with a current default and pass it explicitly — see
+      `products/*/infrastructure.yaml`.
+    Default: "16.8"
+
   InstanceClass:
     Type: String
     Description: RDS instance class
@@ -324,7 +340,7 @@ Resources:
       DBInstanceIdentifier: !Sub "${ProjectName}-rds"
       DBInstanceClass: !Ref InstanceClass
       Engine: postgres
-      EngineVersion: "16.8"
+      EngineVersion: !Ref EngineVersion
       AllocatedStorage: !Ref AllocatedStorage
       MaxAllocatedStorage: !Ref MaxAllocatedStorage
       StorageType: !Ref StorageType

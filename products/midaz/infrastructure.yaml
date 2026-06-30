@@ -269,6 +269,17 @@ Parameters:
   # =============================================================================
   # RDS POSTGRESQL CONFIGURATION
   # =============================================================================
+  RDSEngineVersion:
+    Type: String
+    Default: "16.14"
+    Description: |
+      PostgreSQL major.minor.patch — must be available on RDS in the
+      deploy region. AWS deprecates patch versions periodically;
+      verify with `aws rds describe-db-engine-versions --engine
+      postgres` before bumping. Pinned default here keeps new stacks
+      on a known-good version rather than inheriting whatever
+      templates/rds.yaml carries.
+
   RDSInstanceClass:
     Type: String
     Default: db.t3.medium
@@ -533,6 +544,7 @@ Resources:
           - HasExplicitDatabaseSubnets
           - !Ref ExistingDatabaseSubnetIds
           - Fn::ImportValue: !Sub "${FoundationStackName}-DatabaseSubnetIds"
+        EngineVersion: !Ref RDSEngineVersion
         InstanceClass: !Ref RDSInstanceClass
         AllocatedStorage: !Ref RDSAllocatedStorage
         MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
