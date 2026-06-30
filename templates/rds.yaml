@@ -35,6 +35,18 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Database subnet IDs
 
+  EngineVersion:
+    Type: String
+    Description: |
+      PostgreSQL engine version. Must be a version currently available on RDS
+      in the deploy region — run `aws rds describe-db-engine-versions
+      --engine postgres --query 'DBEngineVersions[].EngineVersion'` to list
+      what is supported. AWS deprecates patch versions ~quarterly; the
+      default here may need to be bumped over time. 16.8 (the previous
+      hardcoded value) was deprecated and caused "Cannot find version 16.8
+      for postgres" CREATE_FAILED on 2026-06-30 in us-east-2.
+    Default: "16.14"
+
   InstanceClass:
     Type: String
     Description: RDS instance class
@@ -324,7 +336,7 @@ Resources:
       DBInstanceIdentifier: !Sub "${ProjectName}-rds"
       DBInstanceClass: !Ref InstanceClass
       Engine: postgres
-      EngineVersion: "16.8"
+      EngineVersion: !Ref EngineVersion
       AllocatedStorage: !Ref AllocatedStorage
       MaxAllocatedStorage: !Ref MaxAllocatedStorage
       StorageType: !Ref StorageType
