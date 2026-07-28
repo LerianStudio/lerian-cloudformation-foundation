@@ -397,11 +397,19 @@ Resources:
 
   BootstrapBrokersFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "Synchronous CloudFormation custom resource (invoked by CFN, never asynchronously); a Dead Letter Queue does not apply."
+          - id: CKV_AWS_117
+            comment: "Control-plane helper that only calls kafka:GetBootstrapBrokers; it needs no VPC/broker network access, and placing it in private subnets would break egress to the AWS API."
     Properties:
       FunctionName: !Sub "${ProjectName}-msk-bootstrap"
       Runtime: python3.12
       Handler: index.handler
       Timeout: 60
+      ReservedConcurrentExecutions: 1
       Role: !GetAtt BootstrapBrokersRole.Arn
       Code:
         ZipFile: |
