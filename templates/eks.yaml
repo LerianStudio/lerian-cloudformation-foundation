@@ -128,7 +128,8 @@ Resources:
   EKSClusterRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${ProjectName}-eks-cluster-role"
+      # RoleName omitted — explicit name overflows IAM's 64-char limit for
+      # long ProjectNames; CFN auto-generates it. Consumers use !GetAtt .Arn.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -147,7 +148,8 @@ Resources:
   EKSNodeRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${ProjectName}-eks-node-role"
+      # RoleName omitted — explicit name overflows IAM's 64-char limit for
+      # long ProjectNames; CFN auto-generates it. Consumers use !GetAtt .Arn.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -284,7 +286,8 @@ Resources:
     Type: AWS::IAM::Role
     DependsOn: OIDCProvider
     Properties:
-      RoleName: !Sub "${ProjectName}-ebs-csi-driver-role"
+      # RoleName omitted — explicit name overflows IAM's 64-char limit for
+      # long ProjectNames; CFN auto-generates it. Consumers use !GetAtt .Arn.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Fn::Sub:
