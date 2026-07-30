@@ -436,7 +436,8 @@ Resources:
     Type: AWS::IAM::Role
     Condition: EnableFlowLogsCondition
     Properties:
-      RoleName: !Sub "${ProjectName}-flow-logs-role"
+      # RoleName omitted — explicit name overflows IAM's 64-char limit for
+      # long ProjectNames; CFN auto-generates it. Consumers use !GetAtt .Arn.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'

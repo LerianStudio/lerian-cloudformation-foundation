@@ -277,7 +277,13 @@ Resources:
   RDSMonitoringRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${ProjectName}-rds-monitoring-role"
+      # RoleName intentionally omitted: an explicit name derived from
+      # ${ProjectName} overflows IAM's hard 64-char limit for long product
+      # ProjectNames (e.g. plugin-access-manager), causing CREATE/DELETE to
+      # fail with "roleName ... length less than or equal to 64". Letting
+      # CloudFormation auto-generate the physical name keeps it within bounds.
+      # All consumers reference this role via !GetAtt RDSMonitoringRole.Arn,
+      # so no explicit name is required.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
