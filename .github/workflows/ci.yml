@@ -55,6 +55,7 @@ jobs:
         route53
         alb-controller
         external-dns
+        msk
         midaz
         midaz-helm
         midaz-infrastructure

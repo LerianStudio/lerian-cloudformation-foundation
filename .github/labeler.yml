@@ -25,6 +25,9 @@ template:elasticache:
 template:amazonmq:
   - changed-files:
       - any-glob-to-any-file: 'templates/amazonmq.yaml'
+template:msk:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/msk.yaml'
 
 template:route53:
   - changed-files:

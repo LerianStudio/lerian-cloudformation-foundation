@@ -32,6 +32,7 @@ module.exports = {
         'route53',
         'alb-controller',
         'external-dns',
+        'msk',
         // Product: midaz
         'midaz',
         'midaz-helm',
