@@ -67,6 +67,14 @@ Parameters:
     MinValue: 1
     MaxValue: 16384
 
+  BrokerServerProperties:
+    Type: String
+    Description: >-
+      MSK broker configuration (server.properties, one directive per line).
+      Default mirrors shared-stg-msk. Override to disable auto topic creation or
+      add directives (e.g. default.replication.factor, min.insync.replicas).
+    Default: "auto.create.topics.enable = true"
+
   AdminUsername:
     Type: String
     Description: SASL/SCRAM admin username (sensitive). Ignored when EnableScram=false.
@@ -385,8 +393,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-msk-config"
       Description: !Sub "Broker configuration for ${ProjectName} MSK"
-      ServerProperties: |
-        auto.create.topics.enable = true
+      ServerProperties: !Ref BrokerServerProperties
 
   # =============================================================================
   # MSK CLUSTER
@@ -495,12 +502,33 @@ Resources:
       ReservedConcurrentExecutions: 1
       Role: !GetAtt BootstrapBrokersRole.Arn
       Code:
+        # Self-contained CloudFormation response helper (urllib, stdlib) instead of
+        # the injected `cfnresponse` module — that module is not reliably bundled in
+        # the python3.12 inline (ZipFile) runtime, and a missing import would fail the
+        # custom resource on every stack deploy. urllib.request is always available.
         ZipFile: |
-          import boto3, cfnresponse
+          import json, urllib.request, boto3
+
+          def send(event, context, status, data, physical_id=None):
+              pid = physical_id or event.get('PhysicalResourceId') or context.log_stream_name
+              body = json.dumps({
+                  'Status': status,
+                  'Reason': f"See CloudWatch Log Stream: {context.log_stream_name}",
+                  'PhysicalResourceId': pid,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data,
+              }).encode('utf-8')
+              req = urllib.request.Request(
+                  event['ResponseURL'], data=body, method='PUT',
+                  headers={'content-type': '', 'content-length': str(len(body))})
+              urllib.request.urlopen(req)
+
           def handler(event, context):
               try:
                   if event['RequestType'] == 'Delete':
-                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      send(event, context, 'SUCCESS', {})
                       return
                   arn = event['ResourceProperties']['ClusterArn']
                   r = boto3.client('kafka').get_bootstrap_brokers(ClusterArn=arn)
@@ -509,9 +537,9 @@ Resources:
                       'BootstrapBrokerStringSaslScram': r.get('BootstrapBrokerStringSaslScram', ''),
                       'BootstrapBrokerStringSaslIam': r.get('BootstrapBrokerStringSaslIam', ''),
                   }
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, data, arn)
+                  send(event, context, 'SUCCESS', data, arn)
               except Exception as e:
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+                  send(event, context, 'FAILED', {'Error': str(e)})
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-msk-bootstrap"
