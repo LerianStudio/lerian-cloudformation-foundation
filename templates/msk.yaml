@@ -126,6 +126,17 @@ Conditions:
     - !Not [!Equals [!Ref AdditionalIngressCIDR3, !Ref AdditionalIngressCIDR1]]
     - !Not [!Equals [!Ref AdditionalIngressCIDR3, !Ref AdditionalIngressCIDR2]]
 
+Rules:
+  # MSK requires at least one authentication method: with both SASL mechanisms
+  # off and Unauthenticated disabled, the cluster config is invalid and CREATE
+  # fails. Reject the combination at template-validation time with a clear message.
+  AtLeastOneAuthMethod:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref EnableScram, "true"]
+          - !Equals [!Ref EnableIam, "true"]
+        AssertDescription: "At least one of EnableScram or EnableIam must be 'true' (Unauthenticated access is disabled)."
+
 Resources:
   # =============================================================================
   # KMS KEY (encryption at rest + SCRAM secret encryption)
@@ -169,6 +180,9 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: '*'
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-msk-kms"
@@ -251,38 +265,107 @@ Resources:
   # =============================================================================
   # ADDITIONAL NETWORK ACCESS (Conditional — broker ports 9094-9098)
   # =============================================================================
-  AdditionalIngressBroker1:
+  # Discrete broker ports (9094 TLS / 9096 SASL-SCRAM / 9098 IAM) — same three
+  # ports the VPC-CIDR rules open, rather than the 9094-9098 range (which also
+  # exposed the unused 9095/9097).
+  AdditionalIngressBroker1Tls:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasAdditionalCIDR1
     Properties:
       GroupId: !Ref MSKSecurityGroup
       IpProtocol: tcp
       FromPort: 9094
+      ToPort: 9094
+      CidrIp: !Ref AdditionalIngressCIDR1
+      Description: "Additional broker access 1 — Kafka TLS"
+
+  AdditionalIngressBroker1Scram:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasAdditionalCIDR1
+    Properties:
+      GroupId: !Ref MSKSecurityGroup
+      IpProtocol: tcp
+      FromPort: 9096
+      ToPort: 9096
+      CidrIp: !Ref AdditionalIngressCIDR1
+      Description: "Additional broker access 1 — Kafka SASL/SCRAM"
+
+  AdditionalIngressBroker1Iam:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasAdditionalCIDR1
+    Properties:
+      GroupId: !Ref MSKSecurityGroup
+      IpProtocol: tcp
+      FromPort: 9098
       ToPort: 9098
       CidrIp: !Ref AdditionalIngressCIDR1
-      Description: "Additional broker access 1 (TLS/SCRAM/IAM)"
+      Description: "Additional broker access 1 — Kafka IAM"
 
-  AdditionalIngressBroker2:
+  AdditionalIngressBroker2Tls:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasAdditionalCIDR2
     Properties:
       GroupId: !Ref MSKSecurityGroup
       IpProtocol: tcp
       FromPort: 9094
+      ToPort: 9094
+      CidrIp: !Ref AdditionalIngressCIDR2
+      Description: "Additional broker access 2 — Kafka TLS"
+
+  AdditionalIngressBroker2Scram:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasAdditionalCIDR2
+    Properties:
+      GroupId: !Ref MSKSecurityGroup
+      IpProtocol: tcp
+      FromPort: 9096
+      ToPort: 9096
+      CidrIp: !Ref AdditionalIngressCIDR2
+      Description: "Additional broker access 2 — Kafka SASL/SCRAM"
+
+  AdditionalIngressBroker2Iam:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasAdditionalCIDR2
+    Properties:
+      GroupId: !Ref MSKSecurityGroup
+      IpProtocol: tcp
+      FromPort: 9098
       ToPort: 9098
       CidrIp: !Ref AdditionalIngressCIDR2
-      Description: "Additional broker access 2 (TLS/SCRAM/IAM)"
+      Description: "Additional broker access 2 — Kafka IAM"
 
-  AdditionalIngressBroker3:
+  AdditionalIngressBroker3Tls:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasAdditionalCIDR3
     Properties:
       GroupId: !Ref MSKSecurityGroup
       IpProtocol: tcp
       FromPort: 9094
+      ToPort: 9094
+      CidrIp: !Ref AdditionalIngressCIDR3
+      Description: "Additional broker access 3 — Kafka TLS"
+
+  AdditionalIngressBroker3Scram:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasAdditionalCIDR3
+    Properties:
+      GroupId: !Ref MSKSecurityGroup
+      IpProtocol: tcp
+      FromPort: 9096
+      ToPort: 9096
+      CidrIp: !Ref AdditionalIngressCIDR3
+      Description: "Additional broker access 3 — Kafka SASL/SCRAM"
+
+  AdditionalIngressBroker3Iam:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasAdditionalCIDR3
+    Properties:
+      GroupId: !Ref MSKSecurityGroup
+      IpProtocol: tcp
+      FromPort: 9098
       ToPort: 9098
       CidrIp: !Ref AdditionalIngressCIDR3
-      Description: "Additional broker access 3 (TLS/SCRAM/IAM)"
+      Description: "Additional broker access 3 — Kafka IAM"
 
   # =============================================================================
   # CLOUDWATCH LOG GROUP
@@ -440,6 +523,14 @@ Resources:
     Properties:
       ServiceToken: !GetAtt BootstrapBrokersFunction.Arn
       ClusterArn: !Ref MSKCluster
+      # ClusterArn is immutable and MSK::Cluster exposes only Arn via GetAtt, so the
+      # custom resource would never re-run and the bootstrap-broker outputs would go
+      # stale after a cluster change. Pass the inputs that actually change the broker
+      # connection strings — node count and the auth mechanisms (which add/remove the
+      # SASL_SCRAM / SASL_IAM endpoints) — so any change re-invokes the Lambda.
+      NumberOfBrokerNodes: !Ref NumberOfBrokerNodes
+      EnableScram: !Ref EnableScram
+      EnableIam: !Ref EnableIam
 
 Outputs:
   ClusterArn:
