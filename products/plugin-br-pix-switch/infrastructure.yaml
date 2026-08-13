@@ -262,10 +262,14 @@ Parameters:
       "-rds-replica": the longest resulting identifier is
       "<ProjectName>-dict-rds-replica" (17 extra characters), and RDS caps
       DBInstanceIdentifier at 63.
-    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    # Hyphens must separate alphanumeric groups: RDS rejects a
+    # DBInstanceIdentifier with consecutive or trailing hyphens, and this value
+    # is the prefix of one. The looser "^[a-zA-Z][a-zA-Z0-9-]*$" used elsewhere
+    # would accept "my-name-" or "my--name" and only fail at deploy time.
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$"
     MinLength: 3
     MaxLength: 46
-    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-46 characters long"
+    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and single separating hyphens (no consecutive or trailing hyphens), and be 3-46 characters long"
 
   # =============================================================================
   # CLUSTER CONFIGURATION
