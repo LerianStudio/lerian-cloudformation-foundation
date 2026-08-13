@@ -5,6 +5,11 @@ Description: |
   Provisions one dedicated RDS instance per service (SPI, DICT, COB) so each service owns its own
   database, plus a single ElastiCache cluster shared by all services.
   Can deploy standalone (creates VPC + EKS) or into an existing cluster (UseExistingCluster=true).
+
+  PRODUCTION: resilience parameters default to low-cost values for evaluation, so
+  a production stack must set RDSMultiAZ, RDSDeletionProtection and
+  DocumentDBDeletionProtection to "true", AmazonMQDeploymentMode to
+  CLUSTER_MULTI_AZ, and both backup retention periods to 30+ days.
   (c) Lerian Studio - https://lerian.studio
 
 Metadata:
@@ -250,11 +255,17 @@ Parameters:
   ProjectName:
     Type: String
     Default: plugin-br-pix-switch
-    Description: Project name used for resource naming
+    Description: |
+      Project name used for resource naming.
+      Capped at 46 characters (not the usual 128) because the three RDS stacks
+      append a per-service suffix and the optional read replica appends
+      "-rds-replica": the longest resulting identifier is
+      "<ProjectName>-dict-rds-replica" (17 extra characters), and RDS caps
+      DBInstanceIdentifier at 63.
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
     MinLength: 3
-    MaxLength: 128
-    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-128 characters long"
+    MaxLength: 46
+    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-46 characters long"
 
   # =============================================================================
   # CLUSTER CONFIGURATION
@@ -511,11 +522,18 @@ Parameters:
 
   RDSForceSSL:
     Type: String
-    Default: "0"
+    Default: "1"
     AllowedValues:
       - "0"
       - "1"
-    Description: Force SSL/TLS connections to RDS (1 = enabled, 0 = disabled). Recommended for production with sensitive data.
+    Description: |
+      Force SSL/TLS connections to RDS (1 = enabled, 0 = disabled), applied as
+      rds.force_ssl on all three instances.
+      Defaults to "1" here — these databases hold PIX payment data, so cleartext
+      connections should be an explicit opt-out rather than the default. This
+      matches the default of templates/rds.yaml itself; other products override
+      it to "0". Clients must connect with sslmode=require or higher (the Helm
+      DATABASE_URL values already use sslmode=require for managed Postgres).
 
   RDSMultiAZ:
     Type: String
@@ -686,6 +704,43 @@ Parameters:
       - "true"
       - "false"
     Description: Enable ExternalDNS for automatic DNS management (requires DomainName)
+
+Rules:
+  # The parameter descriptions state which values UseExistingCluster=true
+  # requires, but nothing enforced them: leaving one empty still started the
+  # deployment and then failed inside a nested stack with an error that never
+  # named the missing parameter. These assertions reject the request at
+  # template-validation time instead.
+  ExistingClusterRequiresClusterName:
+    RuleCondition: !Equals [!Ref UseExistingCluster, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingClusterName, ""]]
+        AssertDescription: "ExistingClusterName is required when UseExistingCluster is 'true'."
+
+  ExistingClusterRequiresVpcId:
+    RuleCondition: !Equals [!Ref UseExistingCluster, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingVpcId, ""]]
+        AssertDescription: "ExistingVpcId is required when UseExistingCluster is 'true'."
+
+  ExistingClusterRequiresPrivateSubnetIds:
+    RuleCondition: !Equals [!Ref UseExistingCluster, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingPrivateSubnetIds, ""]]
+        AssertDescription: "ExistingPrivateSubnetIds is required when UseExistingCluster is 'true'."
+
+  # ALB controller and ExternalDNS both create IRSA roles, which need the OIDC
+  # provider of the target cluster. In standalone mode it comes from EKSStack;
+  # against an existing cluster the operator must supply it.
+  ExistingClusterRequiresOIDCForIRSA:
+    RuleCondition: !And
+      - !Equals [!Ref UseExistingCluster, "true"]
+      - !Or
+        - !Equals [!Ref EnableALBController, "true"]
+        - !Equals [!Ref EnableExternalDNS, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingOIDCProviderArn, ""]]
+        AssertDescription: "ExistingOIDCProviderArn is required when UseExistingCluster is 'true' and EnableALBController or EnableExternalDNS is 'true'."
 
 Conditions:
   CreateNewCluster: !Equals [!Ref UseExistingCluster, "false"]
@@ -1134,6 +1189,26 @@ Outputs:
     Value: !GetAtt CobRDSStack.Outputs.SecretArn
     Export:
       Name: !Sub "${AWS::StackName}-CobRDSSecretArn"
+
+  # Database names are exported so consumers (the Helm values, or an application
+  # stack) can build DATABASE_URL without hard-coding them.
+  SpiRDSDatabaseName:
+    Description: SPI database name
+    Value: !Ref SpiRDSDatabaseName
+    Export:
+      Name: !Sub "${AWS::StackName}-SpiRDSDatabaseName"
+
+  DictRDSDatabaseName:
+    Description: DICT database name
+    Value: !Ref DictRDSDatabaseName
+    Export:
+      Name: !Sub "${AWS::StackName}-DictRDSDatabaseName"
+
+  CobRDSDatabaseName:
+    Description: COB database name
+    Value: !Ref CobRDSDatabaseName
+    Export:
+      Name: !Sub "${AWS::StackName}-CobRDSDatabaseName"
 
   # =============================================================================
   # DOCUMENTDB OUTPUTS
