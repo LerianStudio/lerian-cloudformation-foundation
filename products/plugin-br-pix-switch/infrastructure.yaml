@@ -263,19 +263,26 @@ Parameters:
     Default: plugin-br-pix-switch
     Description: |
       Project name used for resource naming.
-      Capped at 46 characters (not the usual 128) because the three RDS stacks
-      append a per-service suffix and the optional read replica appends
-      "-rds-replica": the longest resulting identifier is
-      "<ProjectName>-dict-rds-replica" (17 extra characters), and RDS caps
-      DBInstanceIdentifier at 63.
+      Capped at 40 characters (not the usual 128) because nested stacks append
+      suffixes to this value and several AWS identifiers are short. The binding
+      limits, measured across every physical name this stack generates:
+        40  alb-controller.yaml  FunctionName "<name>-alb-controller-deployer" (max 64)
+        40  documentdb.yaml      DBInstanceIdentifier "<name>-documentdb-instance-10" (max 63)
+        41  amazonmq.yaml        BrokerName "<name>-rabbitmq" (max 50)
+        42  external-dns.yaml    FunctionName "<name>-external-dns-deployer" (max 64)
+        46  rds.yaml             DBInstanceIdentifier "<name>-dict-rds-replica" (max 63)
+      Exceeding 40 passes template validation and then fails mid-deploy inside
+      the nested stack, so the cap is enforced here instead. Note that a
+      deployment platform may prefix this value with its own environment id,
+      which counts against the 40.
     # Hyphens must separate alphanumeric groups: RDS rejects a
     # DBInstanceIdentifier with consecutive or trailing hyphens, and this value
     # is the prefix of one. The looser "^[a-zA-Z][a-zA-Z0-9-]*$" used elsewhere
     # would accept "my-name-" or "my--name" and only fail at deploy time.
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$"
     MinLength: 3
-    MaxLength: 46
-    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and single separating hyphens (no consecutive or trailing hyphens), and be 3-46 characters long"
+    MaxLength: 40
+    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and single separating hyphens (no consecutive or trailing hyphens), and be 3-40 characters long (40 is the limit imposed by AmazonMQ broker and DocumentDB instance identifiers built from this name)"
 
   # =============================================================================
   # CLUSTER CONFIGURATION
@@ -478,7 +485,13 @@ Parameters:
     Default: 3000
     MinValue: 3000
     MaxValue: 64000
-    Description: Provisioned IOPS for RDS storage. For gp3 max is 16000, for io1/io2 max is 64000.
+    Description: |
+      Provisioned IOPS for RDS storage, applied to all three instances.
+      ONLY TAKES EFFECT WHEN RDSStorageType IS io1 OR io2. templates/rds.yaml
+      passes Iops through AWS::NoValue for gp3, so with the default gp3 storage
+      this value is ignored and the volume uses the gp3 baseline (3000 IOPS).
+      Set RDSStorageType to io1/io2 first if you need provisioned IOPS.
+      Range: io1/io2 accept up to 64000; gp3 (when supported) tops out at 16000.
 
   # Each service gets its own RDS instance, so each carries its own initial
   # database name. Underscores only — RDS DBName rejects hyphens, which is why
@@ -651,7 +664,13 @@ Parameters:
       - cache.m7g.xlarge
       - cache.r7g.large
       - cache.r7g.xlarge
-    Description: ElastiCache node type
+    Description: |
+      ElastiCache node type for the shared Valkey cluster.
+      COST NOTE: templates/elasticache.yaml hardcodes NumCacheClusters=2 with
+      AutomaticFailover and MultiAZ enabled, so this cluster is always TWO nodes
+      of the chosen type — there is no single-node option. Billing is 2x the
+      node price. cache.t3.micro is the cheapest option and still supports the
+      in-transit/at-rest encryption the template requires.
 
   # AmazonMQ
   AmazonMQInstanceType:
