@@ -60,18 +60,20 @@ Metadata:
           - RDSMaxAllocatedStorage
           - RDSStorageType
           - RDSIops
-          - RDSMasterUsername
           - CreateReadReplica
           - RDSForceSSL
           - RDSMultiAZ
           - RDSDeletionProtection
           - RDSBackupRetentionPeriod
       - Label:
-          default: "RDS Database Names (one instance per service)"
+          default: "RDS Per-Service Settings (one instance per service)"
         Parameters:
           - SpiRDSDatabaseName
+          - SpiRDSMasterUsername
           - DictRDSDatabaseName
+          - DictRDSMasterUsername
           - CobRDSDatabaseName
+          - CobRDSMasterUsername
       - Label:
           default: "DocumentDB Configuration"
         Parameters:
@@ -165,12 +167,16 @@ Metadata:
         default: "Provisioned IOPS"
       SpiRDSDatabaseName:
         default: "SPI Database Name"
+      SpiRDSMasterUsername:
+        default: "SPI Master Username"
       DictRDSDatabaseName:
         default: "DICT Database Name"
+      DictRDSMasterUsername:
+        default: "DICT Master Username"
       CobRDSDatabaseName:
         default: "COB Database Name"
-      RDSMasterUsername:
-        default: "Master Username"
+      CobRDSMasterUsername:
+        default: "COB Master Username"
       CreateReadReplica:
         default: "Create Read Replica"
       RDSForceSSL:
@@ -507,10 +513,34 @@ Parameters:
     MaxLength: 64
     ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
 
-  RDSMasterUsername:
+  # One master username per RDS instance, so a credential leaked from one
+  # service does not authenticate against the other two. Each instance already
+  # gets its own generated password in its own Secrets Manager entry
+  # (<ProjectName>-{spi,dict,cob}/rds-master-password); these parameters extend
+  # that isolation to the username. The three values may be identical if an
+  # operator prefers, but distinct usernames are recommended.
+  SpiRDSMasterUsername:
     Type: String
     NoEcho: true
-    Description: Master username for RDS (required, no default for security)
+    Description: Master username for the SPI RDS instance (required, no default for security)
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 63
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  DictRDSMasterUsername:
+    Type: String
+    NoEcho: true
+    Description: Master username for the DICT RDS instance (required, no default for security)
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 63
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  CobRDSMasterUsername:
+    Type: String
+    NoEcho: true
+    Description: Master username for the COB RDS instance (required, no default for security)
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
     MinLength: 1
     MaxLength: 63
@@ -812,7 +842,7 @@ Resources:
         StorageType: !Ref RDSStorageType
         Iops: !Ref RDSIops
         DatabaseName: !Ref SpiRDSDatabaseName
-        MasterUsername: !Ref RDSMasterUsername
+        MasterUsername: !Ref SpiRDSMasterUsername
         CreateReadReplica: !Ref CreateReadReplica
         ForceSSL: !Ref RDSForceSSL
         MultiAZ: !Ref RDSMultiAZ
@@ -848,7 +878,7 @@ Resources:
         StorageType: !Ref RDSStorageType
         Iops: !Ref RDSIops
         DatabaseName: !Ref DictRDSDatabaseName
-        MasterUsername: !Ref RDSMasterUsername
+        MasterUsername: !Ref DictRDSMasterUsername
         CreateReadReplica: !Ref CreateReadReplica
         ForceSSL: !Ref RDSForceSSL
         MultiAZ: !Ref RDSMultiAZ
@@ -884,7 +914,7 @@ Resources:
         StorageType: !Ref RDSStorageType
         Iops: !Ref RDSIops
         DatabaseName: !Ref CobRDSDatabaseName
-        MasterUsername: !Ref RDSMasterUsername
+        MasterUsername: !Ref CobRDSMasterUsername
         CreateReadReplica: !Ref CreateReadReplica
         ForceSSL: !Ref RDSForceSSL
         MultiAZ: !Ref RDSMultiAZ
