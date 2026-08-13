@@ -2,6 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Plugin BR Pix Switch Infrastructure Stack
   Deploys RDS, DocumentDB, ElastiCache, AmazonMQ (RabbitMQ), and supporting services for the Plugin BR Pix Switch product.
+  Provisions one dedicated RDS instance and one dedicated ElastiCache cluster per service (SPI, DICT, COB)
+  so each service owns its own database and cache, isolating capacity and blast radius.
   Can deploy standalone (creates VPC + EKS) or into an existing cluster (UseExistingCluster=true).
   (c) Lerian Studio - https://lerian.studio
 
@@ -45,7 +47,7 @@ Metadata:
           - NodeGroupMaxSize
           - NodeGroupDesiredSize
       - Label:
-          default: "RDS PostgreSQL Configuration"
+          default: "RDS PostgreSQL Configuration (shared by all three instances)"
         Parameters:
           - RDSEngineVersion
           - RDSInstanceClass
@@ -53,13 +55,18 @@ Metadata:
           - RDSMaxAllocatedStorage
           - RDSStorageType
           - RDSIops
-          - RDSDatabaseName
           - RDSMasterUsername
           - CreateReadReplica
           - RDSForceSSL
           - RDSMultiAZ
           - RDSDeletionProtection
           - RDSBackupRetentionPeriod
+      - Label:
+          default: "RDS Database Names (one instance per service)"
+        Parameters:
+          - SpiRDSDatabaseName
+          - DictRDSDatabaseName
+          - CobRDSDatabaseName
       - Label:
           default: "DocumentDB Configuration"
         Parameters:
@@ -69,9 +76,11 @@ Metadata:
           - DocumentDBDeletionProtection
           - DocumentDBBackupRetentionPeriod
       - Label:
-          default: "ElastiCache (Valkey/Redis) Configuration"
+          default: "ElastiCache (Valkey/Redis) Configuration (one cluster per service)"
         Parameters:
-          - ElastiCacheNodeType
+          - SpiElastiCacheNodeType
+          - DictElastiCacheNodeType
+          - CobElastiCacheNodeType
       - Label:
           default: "AmazonMQ (RabbitMQ) Configuration"
         Parameters:
@@ -151,8 +160,12 @@ Metadata:
         default: "Storage Type"
       RDSIops:
         default: "Provisioned IOPS"
-      RDSDatabaseName:
-        default: "Database RDS Name"
+      SpiRDSDatabaseName:
+        default: "SPI Database Name"
+      DictRDSDatabaseName:
+        default: "DICT Database Name"
+      CobRDSDatabaseName:
+        default: "COB Database Name"
       RDSMasterUsername:
         default: "Master Username"
       CreateReadReplica:
@@ -177,8 +190,12 @@ Metadata:
       DocumentDBBackupRetentionPeriod:
         default: "Backup Retention (Days)"
       # ElastiCache
-      ElastiCacheNodeType:
-        default: "Cache Node Type"
+      SpiElastiCacheNodeType:
+        default: "SPI Cache Node Type"
+      DictElastiCacheNodeType:
+        default: "DICT Cache Node Type"
+      CobElastiCacheNodeType:
+        default: "COB Cache Node Type"
       # AmazonMQ
       AmazonMQInstanceType:
         default: "Broker Instance Type"
@@ -282,7 +299,7 @@ Parameters:
   # Network
   VpcCIDR:
     Type: String
-    Default: 10.60.0.0/16
+    Default: 10.50.0.0/16
     Description: CIDR block for the VPC
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
 
@@ -448,16 +465,34 @@ Parameters:
     MaxValue: 64000
     Description: Provisioned IOPS for RDS storage. For gp3 max is 16000, for io1/io2 max is 64000.
 
-  RDSDatabaseName:
+  # Each service gets its own RDS instance, so each carries its own initial
+  # database name. Underscores only — RDS DBName rejects hyphens, which is why
+  # these are pix_spi/pix_dict/pix_cob rather than the chart's pix-spi style
+  # names. Set global.externalPostgresDefinitions.enabled=false in the Helm
+  # values when using these instances: the databases already exist here, so the
+  # chart's bootstrap Jobs have nothing to create.
+  SpiRDSDatabaseName:
     Type: String
-    Default: plugin_br_pix_switch
-    Description: |
-      Name of the initial database created on the RDS instance.
-      NOTE: pix-switch needs three application databases (pix-spi, pix-dict,
-      pix-cob) on this same instance. RDS creates only this initial database;
-      the remaining ones are provisioned by the Helm chart bootstrap Jobs
-      (global.externalPostgresDefinitions.databases), which create the role,
-      databases and grants idempotently against this endpoint.
+    Default: pix_spi
+    Description: Name of the initial database on the SPI RDS instance (used by spi and spi-systemplane)
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 64
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  DictRDSDatabaseName:
+    Type: String
+    Default: pix_dict
+    Description: Name of the initial database on the DICT RDS instance (used by dict-hub, dict-hub-vsync and dict-systemplane)
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 64
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  CobRDSDatabaseName:
+    Type: String
+    Default: pix_cob
+    Description: Name of the initial database on the COB RDS instance (used by cob-hub and cob-systemplane)
     AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
     MinLength: 1
     MaxLength: 64
@@ -556,8 +591,10 @@ Parameters:
     MaxValue: 35
     Description: Number of days to retain automated backups (1-35). Recommended 30+ for production.
 
-  # ElastiCache
-  ElastiCacheNodeType:
+  # ElastiCache — one cluster per service, sized independently. Only spi,
+  # dict-hub and dict-hub-vsync consume Valkey today; the COB cluster is
+  # provisioned for symmetry and future use by cob-hub.
+  SpiElastiCacheNodeType:
     Type: String
     Default: cache.m7g.large
     AllowedValues:
@@ -568,7 +605,33 @@ Parameters:
       - cache.m7g.xlarge
       - cache.r7g.large
       - cache.r7g.xlarge
-    Description: ElastiCache node type
+    Description: ElastiCache node type for the SPI cache cluster
+
+  DictElastiCacheNodeType:
+    Type: String
+    Default: cache.m7g.large
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+      - cache.m7g.large
+      - cache.m7g.xlarge
+      - cache.r7g.large
+      - cache.r7g.xlarge
+    Description: ElastiCache node type for the DICT cache cluster
+
+  CobElastiCacheNodeType:
+    Type: String
+    Default: cache.m7g.large
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+      - cache.m7g.large
+      - cache.m7g.xlarge
+      - cache.r7g.large
+      - cache.r7g.xlarge
+    Description: ElastiCache node type for the COB cache cluster
 
   # AmazonMQ
   AmazonMQInstanceType:
@@ -692,16 +755,25 @@ Resources:
           Value: CloudFormation
 
   # =============================================================================
-  # RDS STACK
-  # Used by 7 components: spi, spi-systemplane, dict-hub, dict-hub-vsync,
-  # dict-systemplane, cob-hub, cob-systemplane
+  # RDS STACKS — one dedicated PostgreSQL instance per service
+  #
+  # Postgres is consumed by 7 of the 9 chart components, grouped by service:
+  #   SPI    spi, spi-systemplane
+  #   DICT   dict-hub, dict-hub-vsync, dict-systemplane
+  #   COB    cob-hub, cob-systemplane
+  #
+  # Every named resource inside templates/rds.yaml is derived from ProjectName
+  # (DB identifier, security group, subnet group, parameter group, KMS alias and
+  # the Secrets Manager secret path). Each stack therefore receives a distinct
+  # per-service ProjectName so the three instances coexist in the same VPC
+  # without name collisions. Sizing parameters are shared across the three.
   # =============================================================================
-  RDSStack:
+  SpiRDSStack:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Sub "${ProjectName}-spi"
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
@@ -712,7 +784,7 @@ Resources:
         MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
         StorageType: !Ref RDSStorageType
         Iops: !Ref RDSIops
-        DatabaseName: !Ref RDSDatabaseName
+        DatabaseName: !Ref SpiRDSDatabaseName
         MasterUsername: !Ref RDSMasterUsername
         CreateReadReplica: !Ref CreateReadReplica
         ForceSSL: !Ref RDSForceSSL
@@ -724,9 +796,83 @@ Resources:
         AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-rds-stack"
+          Value: !Sub "${ProjectName}-spi-rds-stack"
         - Key: Environment
           Value: !Ref EnvironmentName
+        - Key: Service
+          Value: spi
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  DictRDSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
+      Parameters:
+        ProjectName: !Sub "${ProjectName}-dict"
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
+        VpcCIDR: !Ref VpcCIDR
+        DatabaseSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
+        EngineVersion: !Ref RDSEngineVersion
+        InstanceClass: !Ref RDSInstanceClass
+        AllocatedStorage: !Ref RDSAllocatedStorage
+        MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
+        StorageType: !Ref RDSStorageType
+        Iops: !Ref RDSIops
+        DatabaseName: !Ref DictRDSDatabaseName
+        MasterUsername: !Ref RDSMasterUsername
+        CreateReadReplica: !Ref CreateReadReplica
+        ForceSSL: !Ref RDSForceSSL
+        MultiAZ: !Ref RDSMultiAZ
+        DeletionProtection: !Ref RDSDeletionProtection
+        BackupRetentionPeriod: !Ref RDSBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-dict-rds-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: dict
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  CobRDSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
+      Parameters:
+        ProjectName: !Sub "${ProjectName}-cob"
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
+        VpcCIDR: !Ref VpcCIDR
+        DatabaseSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
+        EngineVersion: !Ref RDSEngineVersion
+        InstanceClass: !Ref RDSInstanceClass
+        AllocatedStorage: !Ref RDSAllocatedStorage
+        MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
+        StorageType: !Ref RDSStorageType
+        Iops: !Ref RDSIops
+        DatabaseName: !Ref CobRDSDatabaseName
+        MasterUsername: !Ref RDSMasterUsername
+        CreateReadReplica: !Ref CreateReadReplica
+        ForceSSL: !Ref RDSForceSSL
+        MultiAZ: !Ref RDSMultiAZ
+        DeletionProtection: !Ref RDSDeletionProtection
+        BackupRetentionPeriod: !Ref RDSBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-cob-rds-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: cob
         - Key: ManagedBy
           Value: CloudFormation
 
@@ -761,28 +907,86 @@ Resources:
           Value: CloudFormation
 
   # =============================================================================
-  # ELASTICACHE STACK
-  # Used by spi, dict-hub, dict-hub-vsync for VALKEY_URL (caching)
+  # ELASTICACHE STACKS — one dedicated Valkey cluster per service
+  #
+  # Valkey is consumed by spi (VALKEY_URL), dict-hub and dict-hub-vsync. The COB
+  # cluster is provisioned for symmetry so cob-hub can adopt caching without a
+  # template change.
+  #
+  # As with RDS, templates/elasticache.yaml derives its security group, subnet
+  # group, KMS alias and auth-token secret path from ProjectName, so each stack
+  # gets a distinct per-service ProjectName. ReplicationGroupId is intentionally
+  # auto-generated by the child template and needs no discriminator.
   # =============================================================================
-  ElastiCacheStack:
+  SpiElastiCacheStack:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
       Parameters:
-        ProjectName: !Ref ProjectName
+        ProjectName: !Sub "${ProjectName}-spi"
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
         VpcCIDR: !Ref VpcCIDR
         CacheSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
-        NodeType: !Ref ElastiCacheNodeType
+        NodeType: !Ref SpiElastiCacheNodeType
         AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
         AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
         AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-elasticache-stack"
+          Value: !Sub "${ProjectName}-spi-elasticache-stack"
         - Key: Environment
           Value: !Ref EnvironmentName
+        - Key: Service
+          Value: spi
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  DictElastiCacheStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
+      Parameters:
+        ProjectName: !Sub "${ProjectName}-dict"
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
+        VpcCIDR: !Ref VpcCIDR
+        CacheSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
+        NodeType: !Ref DictElastiCacheNodeType
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-dict-elasticache-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: dict
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  CobElastiCacheStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
+      Parameters:
+        ProjectName: !Sub "${ProjectName}-cob"
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
+        VpcCIDR: !Ref VpcCIDR
+        CacheSubnetIds: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.DatabaseSubnetIds, !Ref ExistingPrivateSubnetIds]
+        NodeType: !Ref CobElastiCacheNodeType
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-cob-elasticache-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: cob
         - Key: ManagedBy
           Value: CloudFormation
 
@@ -822,9 +1026,13 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Condition: CreateNewCluster
     DependsOn:
-      - RDSStack
+      - SpiRDSStack
+      - DictRDSStack
+      - CobRDSStack
       - DocumentDBStack
-      - ElastiCacheStack
+      - SpiElastiCacheStack
+      - DictElastiCacheStack
+      - CobElastiCacheStack
       - AmazonMQStack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}eks.yaml"
@@ -974,19 +1182,43 @@ Outputs:
       Name: !Sub "${AWS::StackName}-ClusterSecurityGroupId"
 
   # =============================================================================
-  # RDS OUTPUTS
+  # RDS OUTPUTS (one instance per service)
   # =============================================================================
-  RDSEndpoint:
-    Description: RDS Primary Endpoint
-    Value: !GetAtt RDSStack.Outputs.Endpoint
+  SpiRDSEndpoint:
+    Description: SPI RDS Primary Endpoint (spi, spi-systemplane)
+    Value: !GetAtt SpiRDSStack.Outputs.Endpoint
     Export:
-      Name: !Sub "${AWS::StackName}-RDSEndpoint"
+      Name: !Sub "${AWS::StackName}-SpiRDSEndpoint"
 
-  RDSSecretArn:
-    Description: RDS Password Secret ARN
-    Value: !GetAtt RDSStack.Outputs.SecretArn
+  SpiRDSSecretArn:
+    Description: SPI RDS Password Secret ARN
+    Value: !GetAtt SpiRDSStack.Outputs.SecretArn
     Export:
-      Name: !Sub "${AWS::StackName}-RDSSecretArn"
+      Name: !Sub "${AWS::StackName}-SpiRDSSecretArn"
+
+  DictRDSEndpoint:
+    Description: DICT RDS Primary Endpoint (dict-hub, dict-hub-vsync, dict-systemplane)
+    Value: !GetAtt DictRDSStack.Outputs.Endpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-DictRDSEndpoint"
+
+  DictRDSSecretArn:
+    Description: DICT RDS Password Secret ARN
+    Value: !GetAtt DictRDSStack.Outputs.SecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-DictRDSSecretArn"
+
+  CobRDSEndpoint:
+    Description: COB RDS Primary Endpoint (cob-hub, cob-systemplane)
+    Value: !GetAtt CobRDSStack.Outputs.Endpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-CobRDSEndpoint"
+
+  CobRDSSecretArn:
+    Description: COB RDS Password Secret ARN
+    Value: !GetAtt CobRDSStack.Outputs.SecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-CobRDSSecretArn"
 
   # =============================================================================
   # DOCUMENTDB OUTPUTS
@@ -1004,13 +1236,43 @@ Outputs:
       Name: !Sub "${AWS::StackName}-DocumentDBSecretArn"
 
   # =============================================================================
-  # ELASTICACHE OUTPUTS
+  # ELASTICACHE OUTPUTS (one cluster per service)
   # =============================================================================
-  ElastiCacheEndpoint:
-    Description: ElastiCache Primary Endpoint
-    Value: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
+  SpiElastiCacheEndpoint:
+    Description: SPI ElastiCache Primary Endpoint
+    Value: !GetAtt SpiElastiCacheStack.Outputs.PrimaryEndpoint
     Export:
-      Name: !Sub "${AWS::StackName}-ElastiCacheEndpoint"
+      Name: !Sub "${AWS::StackName}-SpiElastiCacheEndpoint"
+
+  SpiElastiCacheAuthSecretArn:
+    Description: SPI ElastiCache Auth Token Secret ARN
+    Value: !GetAtt SpiElastiCacheStack.Outputs.AuthSecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-SpiElastiCacheAuthSecretArn"
+
+  DictElastiCacheEndpoint:
+    Description: DICT ElastiCache Primary Endpoint
+    Value: !GetAtt DictElastiCacheStack.Outputs.PrimaryEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-DictElastiCacheEndpoint"
+
+  DictElastiCacheAuthSecretArn:
+    Description: DICT ElastiCache Auth Token Secret ARN
+    Value: !GetAtt DictElastiCacheStack.Outputs.AuthSecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-DictElastiCacheAuthSecretArn"
+
+  CobElastiCacheEndpoint:
+    Description: COB ElastiCache Primary Endpoint
+    Value: !GetAtt CobElastiCacheStack.Outputs.PrimaryEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-CobElastiCacheEndpoint"
+
+  CobElastiCacheAuthSecretArn:
+    Description: COB ElastiCache Auth Token Secret ARN
+    Value: !GetAtt CobElastiCacheStack.Outputs.AuthSecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-CobElastiCacheAuthSecretArn"
 
   # =============================================================================
   # AMAZONMQ OUTPUTS
