@@ -454,13 +454,9 @@ Parameters:
   # =============================================================================
   AmazonMQInstanceType:
     Type: String
-    Default: mq.t3.micro
+    Default: mq.m7g.medium
     AllowedValues:
-      - mq.t3.micro
-      - mq.m5.large
-      - mq.m5.xlarge
-      - mq.m5.2xlarge
-      - mq.m5.4xlarge
+      - mq.m7g.medium
       - mq.m7g.large
       - mq.m7g.xlarge
       - mq.m7g.2xlarge
@@ -468,6 +464,10 @@ Parameters:
       - mq.m7g.8xlarge
       - mq.m7g.12xlarge
       - mq.m7g.16xlarge
+      - mq.m5.large
+      - mq.m5.xlarge
+      - mq.m5.2xlarge
+      - mq.m5.4xlarge
     Description: AmazonMQ broker instance type
 
   AmazonMQDeploymentMode:

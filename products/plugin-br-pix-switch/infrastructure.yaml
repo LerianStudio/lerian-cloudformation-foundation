@@ -680,13 +680,9 @@ Parameters:
   # AmazonMQ
   AmazonMQInstanceType:
     Type: String
-    Default: mq.t3.micro
+    Default: mq.m7g.medium
     AllowedValues:
-      - mq.t3.micro
-      - mq.m5.large
-      - mq.m5.xlarge
-      - mq.m5.2xlarge
-      - mq.m5.4xlarge
+      - mq.m7g.medium
       - mq.m7g.large
       - mq.m7g.xlarge
       - mq.m7g.2xlarge
@@ -694,7 +690,31 @@ Parameters:
       - mq.m7g.8xlarge
       - mq.m7g.12xlarge
       - mq.m7g.16xlarge
-    Description: AmazonMQ broker instance type
+      - mq.m5.large
+      - mq.m5.xlarge
+      - mq.m5.2xlarge
+      - mq.m5.4xlarge
+    Description: |
+      AmazonMQ broker instance type. Only types supported by the RABBITMQ engine
+      are listed: templates/amazonmq.yaml always creates the broker with
+      EngineType RABBITMQ, and mq.t3.micro — the previous default — is
+      ActiveMQ-only. It failed at create time with "Broker engine type
+      [RabbitMQ] does not support host instance type [mq.t3.micro]", so the
+      default could never work for this product.
+      mq.m7g.medium is the smallest/cheapest type RabbitMQ accepts (verified
+      available in us-east-2, sa-east-1 and us-east-1 via
+      `aws mq describe-broker-instance-options --engine-type RABBITMQ`).
+      Note there is no "micro" tier for RabbitMQ, so this is the cost floor.
+      SIZING: mq.m7g.medium with the default SINGLE_INSTANCE mode is an
+      evaluation-sized broker. For production, size from your own load testing
+      (mq.m7g.large or larger) and set AmazonMQDeploymentMode to
+      CLUSTER_MULTI_AZ — see the PRODUCTION checklist in the stack Description.
+      UPGRADES: a stack created while mq.t3.micro was still allowed must be
+      updated with an explicit supported value; the stored parameter is not
+      converted automatically. Changing the type resizes the broker in place
+      ("Some interruptions" via UpdateBroker) rather than replacing it: with the
+      default SINGLE_INSTANCE mode the broker is offline during the reboot, so
+      schedule it; CLUSTER_MULTI_AZ reboots one node at a time.
 
   AmazonMQDeploymentMode:
     Type: String

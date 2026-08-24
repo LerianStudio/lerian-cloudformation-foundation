@@ -32,13 +32,28 @@ Parameters:
 
   InstanceType:
     Type: String
-    Description: AmazonMQ broker instance type
+    Description: |
+      AmazonMQ broker instance type. This template always creates the broker with
+      EngineType RABBITMQ, so only RabbitMQ-supported types are listed.
+      mq.t3.micro was removed: it is ActiveMQ-only (it is still offered for
+      ACTIVEMQ but absent for RABBITMQ in describe-broker-instance-options) and
+      failed at create time with "Broker engine type [RabbitMQ] does not support
+      host instance type [mq.t3.micro]". mq.m7g.medium is the smallest type
+      RabbitMQ accepts.
+      Sizing: mq.m7g.medium is evaluation-sized. Production brokers should be
+      sized from load testing (mq.m7g.large or larger) with DeploymentMode
+      CLUSTER_MULTI_AZ.
+      Existing stacks: removing mq.t3.micro from AllowedValues does NOT rewrite
+      a stored parameter value. A stack created while it was still allowed must
+      be updated with an explicit supported InstanceType — the parent stack has
+      to pass the new value down, since reusing the previous one now fails
+      parameter validation.
+      Changing this type on an existing broker is an in-place resize
+      (CloudFormation: "Some interruptions", applied via UpdateBroker), not a
+      replacement: a SINGLE_INSTANCE broker is offline while it reboots, a
+      CLUSTER_MULTI_AZ broker reboots one node at a time.
     AllowedValues:
-      - mq.t3.micro
-      - mq.m5.large
-      - mq.m5.xlarge
-      - mq.m5.2xlarge
-      - mq.m5.4xlarge
+      - mq.m7g.medium
       - mq.m7g.large
       - mq.m7g.xlarge
       - mq.m7g.2xlarge
@@ -46,6 +61,10 @@ Parameters:
       - mq.m7g.8xlarge
       - mq.m7g.12xlarge
       - mq.m7g.16xlarge
+      - mq.m5.large
+      - mq.m5.xlarge
+      - mq.m5.2xlarge
+      - mq.m5.4xlarge
 
   DeploymentMode:
     Type: String

@@ -65,8 +65,23 @@ This directory contains example configurations for deploying Midaz on AWS.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `AmazonMQInstanceType` | mq.t3.micro | Broker instance type |
+| `AmazonMQInstanceType` | mq.m7g.medium | Broker instance type. Brokers are created with the RabbitMQ engine, which does not offer `mq.t3.micro` (that type is ActiveMQ-only), so `mq.m7g.medium` is the smallest option. It is sized for evaluation — see the sizing note below. |
 | `AmazonMQAdminUsername` | mqadmin | Admin username |
+
+> **Sizing:** `mq.m7g.medium` with the default `SINGLE_INSTANCE` deployment mode
+> is intended for evaluation and testing. For production, pick an instance type
+> based on your own load testing (`mq.m7g.large` or larger) and set
+> `AmazonMQDeploymentMode` to `CLUSTER_MULTI_AZ`, per the
+> [AWS RabbitMQ sizing guidelines](https://docs.aws.amazon.com/amazon-mq/latest/developer-guide/rabbitmq-sizing-guidelines.html).
+
+> **Upgrading an existing stack:** if a stack was created before `mq.t3.micro`
+> was removed from `AllowedValues`, a parent-stack update must pass an explicit
+> supported value (e.g. `mq.m7g.medium`). Changing the allowed values does not
+> convert a stored parameter, and reusing the previous value now fails validation.
+> Changing the instance type resizes the broker in place (CloudFormation reports
+> `Some interruptions`; Amazon MQ applies it via `UpdateBroker`) — it is not a
+> replacement. A `SINGLE_INSTANCE` broker is offline while it reboots; a
+> `CLUSTER_MULTI_AZ` broker reboots one node at a time.
 
 ### DNS and Ingress Parameters
 
@@ -141,10 +156,18 @@ aws cloudformation create-stack \
     ParameterKey=DocumentDBBackupRetentionPeriod,ParameterValue=30 \
     ParameterKey=ElastiCacheNodeType,ParameterValue=cache.r7g.large \
     ParameterKey=AmazonMQInstanceType,ParameterValue=mq.m5.large \
+    ParameterKey=AmazonMQDeploymentMode,ParameterValue=CLUSTER_MULTI_AZ \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
 ### One-Click Deployment (with Midaz Application)
+
+> **Not production-sized.** This example only shows the parameters relevant to
+> the feature it demonstrates; everything else inherits the evaluation defaults
+> (`SINGLE_INSTANCE` broker, `RDSMultiAZ=false`, no deletion protection). Despite
+> `EnvironmentName=production` — which only affects resource tagging — combine it
+> with the overrides from [Production Environment](#production-environment) for a
+> real deployment.
 
 ```bash
 aws cloudformation create-stack \
@@ -164,6 +187,13 @@ aws cloudformation create-stack \
 
 ### Custom Helm Repository
 
+> **Not production-sized.** This example only shows the parameters relevant to
+> the feature it demonstrates; everything else inherits the evaluation defaults
+> (`SINGLE_INSTANCE` broker, `RDSMultiAZ=false`, no deletion protection). Despite
+> `EnvironmentName=production` — which only affects resource tagging — combine it
+> with the overrides from [Production Environment](#production-environment) for a
+> real deployment.
+
 ```bash
 aws cloudformation create-stack \
   --stack-name midaz-custom \
@@ -180,6 +210,13 @@ aws cloudformation create-stack \
 ```
 
 ### Infrastructure Only (Manual Helm Deployment)
+
+> **Not production-sized.** This example only shows the parameters relevant to
+> the feature it demonstrates; everything else inherits the evaluation defaults
+> (`SINGLE_INSTANCE` broker, `RDSMultiAZ=false`, no deletion protection). Despite
+> `EnvironmentName=production` — which only affects resource tagging — combine it
+> with the overrides from [Production Environment](#production-environment) for a
+> real deployment.
 
 ```bash
 aws cloudformation create-stack \
