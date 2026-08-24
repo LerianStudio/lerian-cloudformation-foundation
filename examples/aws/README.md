@@ -78,7 +78,10 @@ This directory contains example configurations for deploying Midaz on AWS.
 > was removed from `AllowedValues`, a parent-stack update must pass an explicit
 > supported value (e.g. `mq.m7g.medium`). Changing the allowed values does not
 > convert a stored parameter, and reusing the previous value now fails validation.
-> Note that changing the broker instance type replaces the broker.
+> Changing the instance type resizes the broker in place (CloudFormation reports
+> `Some interruptions`; Amazon MQ applies it via `UpdateBroker`) — it is not a
+> replacement. A `SINGLE_INSTANCE` broker is offline while it reboots; a
+> `CLUSTER_MULTI_AZ` broker reboots one node at a time.
 
 ### DNS and Ingress Parameters
 
@@ -153,6 +156,7 @@ aws cloudformation create-stack \
     ParameterKey=DocumentDBBackupRetentionPeriod,ParameterValue=30 \
     ParameterKey=ElastiCacheNodeType,ParameterValue=cache.r7g.large \
     ParameterKey=AmazonMQInstanceType,ParameterValue=mq.m5.large \
+    ParameterKey=AmazonMQDeploymentMode,ParameterValue=CLUSTER_MULTI_AZ \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 

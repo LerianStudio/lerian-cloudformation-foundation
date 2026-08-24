@@ -711,7 +711,10 @@ Parameters:
       CLUSTER_MULTI_AZ — see the PRODUCTION checklist in the stack Description.
       UPGRADES: a stack created while mq.t3.micro was still allowed must be
       updated with an explicit supported value; the stored parameter is not
-      converted automatically, and changing this type replaces the broker.
+      converted automatically. Changing the type resizes the broker in place
+      ("Some interruptions" via UpdateBroker) rather than replacing it: with the
+      default SINGLE_INSTANCE mode the broker is offline during the reboot, so
+      schedule it; CLUSTER_MULTI_AZ reboots one node at a time.
 
   AmazonMQDeploymentMode:
     Type: String

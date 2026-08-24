@@ -42,7 +42,16 @@ Parameters:
       RabbitMQ accepts.
       Sizing: mq.m7g.medium is evaluation-sized. Production brokers should be
       sized from load testing (mq.m7g.large or larger) with DeploymentMode
-      CLUSTER_MULTI_AZ. Changing this type on an existing broker replaces it.
+      CLUSTER_MULTI_AZ.
+      Existing stacks: removing mq.t3.micro from AllowedValues does NOT rewrite
+      a stored parameter value. A stack created while it was still allowed must
+      be updated with an explicit supported InstanceType — the parent stack has
+      to pass the new value down, since reusing the previous one now fails
+      parameter validation.
+      Changing this type on an existing broker is an in-place resize
+      (CloudFormation: "Some interruptions", applied via UpdateBroker), not a
+      replacement: a SINGLE_INSTANCE broker is offline while it reboots, a
+      CLUSTER_MULTI_AZ broker reboots one node at a time.
     AllowedValues:
       - mq.m7g.medium
       - mq.m7g.large
