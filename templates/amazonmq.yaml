@@ -32,13 +32,14 @@ Parameters:
 
   InstanceType:
     Type: String
-    Description: AmazonMQ broker instance type
+    Description: |
+      AmazonMQ broker instance type. This template always creates the broker with
+      EngineType RABBITMQ, so only RabbitMQ-supported types are listed.
+      mq.t3.micro was removed: it is ActiveMQ-only and failed at create time with
+      "Broker engine type [RabbitMQ] does not support host instance type
+      [mq.t3.micro]". mq.m7g.medium is the smallest type RabbitMQ accepts.
     AllowedValues:
-      - mq.t3.micro
-      - mq.m5.large
-      - mq.m5.xlarge
-      - mq.m5.2xlarge
-      - mq.m5.4xlarge
+      - mq.m7g.medium
       - mq.m7g.large
       - mq.m7g.xlarge
       - mq.m7g.2xlarge
@@ -46,6 +47,10 @@ Parameters:
       - mq.m7g.8xlarge
       - mq.m7g.12xlarge
       - mq.m7g.16xlarge
+      - mq.m5.large
+      - mq.m5.xlarge
+      - mq.m5.2xlarge
+      - mq.m5.4xlarge
 
   DeploymentMode:
     Type: String

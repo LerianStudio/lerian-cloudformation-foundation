@@ -618,7 +618,7 @@ Parameters:
     Type: String
     Default: mq.m5.large
     AllowedValues:
-      - mq.t3.micro
+      - mq.m7g.medium
       - mq.m5.large
       - mq.m5.xlarge
       - mq.m5.2xlarge
