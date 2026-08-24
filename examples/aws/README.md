@@ -162,6 +162,13 @@ aws cloudformation create-stack \
 
 ### One-Click Deployment (with Midaz Application)
 
+> **Not production-sized.** This example only shows the parameters relevant to
+> the feature it demonstrates; everything else inherits the evaluation defaults
+> (`SINGLE_INSTANCE` broker, `RDSMultiAZ=false`, no deletion protection). Despite
+> `EnvironmentName=production` — which only affects resource tagging — combine it
+> with the overrides from [Production Environment](#production-environment) for a
+> real deployment.
+
 ```bash
 aws cloudformation create-stack \
   --stack-name midaz-complete \
@@ -180,6 +187,13 @@ aws cloudformation create-stack \
 
 ### Custom Helm Repository
 
+> **Not production-sized.** This example only shows the parameters relevant to
+> the feature it demonstrates; everything else inherits the evaluation defaults
+> (`SINGLE_INSTANCE` broker, `RDSMultiAZ=false`, no deletion protection). Despite
+> `EnvironmentName=production` — which only affects resource tagging — combine it
+> with the overrides from [Production Environment](#production-environment) for a
+> real deployment.
+
 ```bash
 aws cloudformation create-stack \
   --stack-name midaz-custom \
@@ -196,6 +210,13 @@ aws cloudformation create-stack \
 ```
 
 ### Infrastructure Only (Manual Helm Deployment)
+
+> **Not production-sized.** This example only shows the parameters relevant to
+> the feature it demonstrates; everything else inherits the evaluation defaults
+> (`SINGLE_INSTANCE` broker, `RDSMultiAZ=false`, no deletion protection). Despite
+> `EnvironmentName=production` — which only affects resource tagging — combine it
+> with the overrides from [Production Environment](#production-environment) for a
+> real deployment.
 
 ```bash
 aws cloudformation create-stack \
