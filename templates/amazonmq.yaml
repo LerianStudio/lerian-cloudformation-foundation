@@ -35,9 +35,14 @@ Parameters:
     Description: |
       AmazonMQ broker instance type. This template always creates the broker with
       EngineType RABBITMQ, so only RabbitMQ-supported types are listed.
-      mq.t3.micro was removed: it is ActiveMQ-only and failed at create time with
-      "Broker engine type [RabbitMQ] does not support host instance type
-      [mq.t3.micro]". mq.m7g.medium is the smallest type RabbitMQ accepts.
+      mq.t3.micro was removed: it is ActiveMQ-only (it is still offered for
+      ACTIVEMQ but absent for RABBITMQ in describe-broker-instance-options) and
+      failed at create time with "Broker engine type [RabbitMQ] does not support
+      host instance type [mq.t3.micro]". mq.m7g.medium is the smallest type
+      RabbitMQ accepts.
+      Sizing: mq.m7g.medium is evaluation-sized. Production brokers should be
+      sized from load testing (mq.m7g.large or larger) with DeploymentMode
+      CLUSTER_MULTI_AZ. Changing this type on an existing broker replaces it.
     AllowedValues:
       - mq.m7g.medium
       - mq.m7g.large

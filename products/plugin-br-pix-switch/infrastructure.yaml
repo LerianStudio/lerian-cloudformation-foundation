@@ -705,6 +705,13 @@ Parameters:
       available in us-east-2, sa-east-1 and us-east-1 via
       `aws mq describe-broker-instance-options --engine-type RABBITMQ`).
       Note there is no "micro" tier for RabbitMQ, so this is the cost floor.
+      SIZING: mq.m7g.medium with the default SINGLE_INSTANCE mode is an
+      evaluation-sized broker. For production, size from your own load testing
+      (mq.m7g.large or larger) and set AmazonMQDeploymentMode to
+      CLUSTER_MULTI_AZ — see the PRODUCTION checklist in the stack Description.
+      UPGRADES: a stack created while mq.t3.micro was still allowed must be
+      updated with an explicit supported value; the stored parameter is not
+      converted automatically, and changing this type replaces the broker.
 
   AmazonMQDeploymentMode:
     Type: String

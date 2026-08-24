@@ -65,8 +65,20 @@ This directory contains example configurations for deploying Midaz on AWS.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `AmazonMQInstanceType` | mq.t3.micro | Broker instance type |
+| `AmazonMQInstanceType` | mq.m7g.medium | Broker instance type. Brokers are created with the RabbitMQ engine, which does not offer `mq.t3.micro` (that type is ActiveMQ-only), so `mq.m7g.medium` is the smallest option. It is sized for evaluation — see the sizing note below. |
 | `AmazonMQAdminUsername` | mqadmin | Admin username |
+
+> **Sizing:** `mq.m7g.medium` with the default `SINGLE_INSTANCE` deployment mode
+> is intended for evaluation and testing. For production, pick an instance type
+> based on your own load testing (`mq.m7g.large` or larger) and set
+> `AmazonMQDeploymentMode` to `CLUSTER_MULTI_AZ`, per the
+> [AWS RabbitMQ sizing guidelines](https://docs.aws.amazon.com/amazon-mq/latest/developer-guide/rabbitmq-sizing-guidelines.html).
+
+> **Upgrading an existing stack:** if a stack was created before `mq.t3.micro`
+> was removed from `AllowedValues`, a parent-stack update must pass an explicit
+> supported value (e.g. `mq.m7g.medium`). Changing the allowed values does not
+> convert a stored parameter, and reusing the previous value now fails validation.
+> Note that changing the broker instance type replaces the broker.
 
 ### DNS and Ingress Parameters
 
