@@ -6,7 +6,7 @@
     "rds": "0.2.4",
     "documentdb": "0.3.3",
     "elasticache": "0.2.7",
-    "amazonmq": "0.2.4",
+    "amazonmq": "0.2.5",
     "route53": "0.1.2",
     "alb-controller": "0.1.5",
     "external-dns": "0.1.5",
@@ -15,32 +15,32 @@
   },
   "products": {
     "midaz": {
-      "infrastructure": "0.2.8",
+      "infrastructure": "0.2.9",
       "helm": "0.2.9",
       "application": "0.1.16",
       "complete": "0.2.0",
-      "full-stack": "0.1.1"
+      "full-stack": "0.1.2"
     },
     "tracer": {
       "infrastructure": "0.1.3"
     },
     "fetcher": {
-      "infrastructure": "0.1.0"
+      "infrastructure": "0.1.1"
     },
     "flowker": {
       "infrastructure": "0.1.0"
     },
     "ledger": {
-      "infrastructure": "0.1.1"
+      "infrastructure": "0.1.2"
     },
     "matcher": {
-      "infrastructure": "0.1.2"
+      "infrastructure": "0.1.3"
     },
     "plugin-access-manager": {
       "infrastructure": "0.1.1"
     },
     "plugin-br-bank-transfer-jd": {
-      "infrastructure": "0.1.1"
+      "infrastructure": "0.1.2"
     },
     "plugin-br-pix-direct-jd": {
       "infrastructure": "0.1.1"
@@ -49,7 +49,7 @@
       "infrastructure": "0.1.2"
     },
     "plugin-br-pix-switch": {
-      "infrastructure": "0.3.1"
+      "infrastructure": "0.3.2"
     },
     "plugin-crm": {
       "infrastructure": "0.1.0"
@@ -61,7 +61,7 @@
       "infrastructure": "0.1.0"
     },
     "reporter": {
-      "infrastructure": "0.1.0"
+      "infrastructure": "0.1.1"
     },
     "underwriter": {
       "infrastructure": "0.1.1"
