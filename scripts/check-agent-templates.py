@@ -196,6 +196,19 @@ def check_every_agent_parameter_arms_the_rule():
     gate = refs(doc["Conditions"]["ShouldDeployAgent"], known)
     assert gate <= armed, f"ShouldDeployAgent rests on unguarded parameters: {sorted(gate - armed)}"
 
+    # Arming the rule is only half the guard. The RuleCondition decides when the
+    # assertions run; the assertions are what actually reject the half-filled
+    # set. Drop the Assert for a parameter the gate reads - during a refactor,
+    # say - and CreateStack accepts the stack, ShouldDeployAgent stays false,
+    # and the deploy ends in a cluster with no agent and no error: the same
+    # silent failure, reached from the other side of the rule.
+    asserted = refs(
+        [a["Assert"] for a in doc["Rules"]["AgentParametersComplete"]["Assertions"]],
+        known,
+    )
+    unasserted = gate - asserted
+    assert not unasserted, f"ShouldDeployAgent rests on unasserted parameters: {sorted(unasserted)}"
+
 
 HANDLER_CHECKS = (
     check_token_never_logged,
