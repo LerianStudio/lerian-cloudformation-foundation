@@ -37,7 +37,7 @@ Security included:
 - The agent holds an outbound-only connection to the control plane: nothing needs to reach into your VPC, and no Lerian credential is stored in your account
 - Optional PermissionsBoundaryArn constrains every IAM role the stack creates
 
-What is deliberately not here: no product application is installed by this stack, and no Lambda in your account holds cluster-admin after it completes. Product installs, upgrades, rollbacks and values changes are performed by the agent from inside the cluster, driven by the control plane.
+What is deliberately not here: no product application is installed by this stack. The deployer Lambdas it creates — for the agent, and for the AWS Load Balancer Controller and ExternalDNS when you enable them — keep cluster access for the lifetime of the stack, because CloudFormation needs them to update and delete what they installed; none of them installs, upgrades or configures a Lerian product. Product installs, upgrades, rollbacks and values changes are performed by the agent from inside the cluster, driven by the control plane.
 
 Best for: every customer. This is the entry point for Midaz and for any other Lerian product on the same cluster.
 
