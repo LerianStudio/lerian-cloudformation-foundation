@@ -380,12 +380,17 @@ jobs:
               for name, resource in resources.items():
                   if resource.get('Type') == 'AWS::CloudFormation::Stack':
                       props = resource.get('Properties', {})
-                      template_url = props.get('TemplateURL', '')
-                      if isinstance(template_url, str):
-                          if template_url.startswith('./') or template_url.startswith('../'):
-                              errors.append(f'{entry_file}/{name}: TemplateURL uses relative path. Must use S3 URL.')
-                          elif 'Sub' not in str(props.get('TemplateURL', {})):
-                              warnings.append(f'{entry_file}/{name}: TemplateURL should use !Sub for dynamic S3 paths')
+                      raw_url = props.get('TemplateURL', '')
+                      template_url = raw_url
+                      if isinstance(raw_url, dict):
+                          # CFNLoader wraps an intrinsic as a single-entry dict;
+                          # !Sub's payload is the string, or [string, {vars}].
+                          payload = next(iter(raw_url.values()), '')
+                          template_url = payload[0] if isinstance(payload, list) and payload else payload
+                      if isinstance(template_url, str) and (template_url.startswith('./') or template_url.startswith('../')):
+                          errors.append(f'{entry_file}/{name}: TemplateURL uses relative path. Must use S3 URL.')
+                      elif not isinstance(raw_url, dict):
+                          warnings.append(f'{entry_file}/{name}: TemplateURL should use !Sub for dynamic S3 paths')
                       else:
                           print(f'  [PASS] Nested stack {name} uses S3 TemplateURL')
 
