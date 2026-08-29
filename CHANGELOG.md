@@ -134,6 +134,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/check-docs-links.py` now reads each documented command's template and
   fails the pull request when a region-scoped default is left unset, so the same
   omission cannot return through another command or another parameter.
+- The same check now covers launch buttons, which is the surface the omission
+  actually shipped on: a quick-create URL carries its values as `param_<Name>`,
+  and one it does not prefill leaves the customer a console form CloudFormation
+  rejects after they press Create. Every button in the READMEs and in the
+  generated release notes is now read back against its template, so a new one
+  added without the availability zones fails the pull request instead of the
+  customer's first launch.
+- `scripts/check-docs-links.py` no longer skips a `.yml` template silently. It
+  accepted `.yml` arguments while only ever searching for `.yaml` files, so a
+  command or button naming one would resolve to nothing and pass every check
+  unread - the failure mode the script exists to remove, reproduced inside it.
+- `scripts/validate.sh` runs to completion again on a machine without pyyaml.
+  The link check acquired a YAML dependency and was invoked unguarded, so under
+  `set -e` it aborted the whole run before cfn-lint - on exactly the machines the
+  script's own Ruby fallback exists to support. It now skips, like the agent
+  check beside it, and the remaining steps still run.
 - `scripts/check-docs-links.py` no longer skips two kinds of link it claimed to
   cover: an inline link carrying the optional title markdown allows after the
   target matched nothing at all and went unchecked, and a relative

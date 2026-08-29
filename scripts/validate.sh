@@ -134,7 +134,11 @@ fi
 echo ""
 echo "7. Checking documented template links..."
 echo "-------------------------------------------"
-python3 "$SCRIPT_DIR/check-docs-links.py"
+if python3 -c "import yaml" 2>/dev/null; then
+    python3 "$SCRIPT_DIR/check-docs-links.py"
+else
+    echo "  [SKIP] pyyaml not available"
+fi
 
 if [ "$CFN_LINT_AVAILABLE" = true ]; then
     echo ""

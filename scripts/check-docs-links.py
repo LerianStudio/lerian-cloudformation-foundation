@@ -37,6 +37,12 @@ it was written for: foundation.yaml defaults to us-east-2a/b/c. A command that
 does not override those defaults is rejected at CreateStack in every other
 region - including us-east-1 - before a single resource is created.
 
+The fifth check is that same failure on the surface it actually shipped on: a
+quick-create launch button, whose parameters ride in the URL as `param_<Name>`.
+A button that leaves a region-scoped default unprefilled hands the customer a
+console form CloudFormation rejects after they press Create - which is exactly
+what the release notes' own button did.
+
 Run: python3 scripts/check-docs-links.py
 """
 
@@ -80,10 +86,18 @@ TEMPLATE_OPTION = {
 CFN_COMMAND = re.compile(r"aws\s+cloudformation\s+(deploy|create-stack|update-stack)\b")
 TEMPLATE_ARGUMENT = re.compile(r"--template-(?:url|file)[=\s]+(\S+)")
 
+# The console's quick-create form, carrying its template and its prefilled
+# parameter values in the query string.
+QUICKCREATE = re.compile(r"#/stacks/quickcreate\?(\S*)")
+QUICKCREATE_TEMPLATE = re.compile(r"templateURL=([^&\s)]+)")
+QUICKCREATE_PARAM = re.compile(r"param_(\w+)")
+
 # A shell variable in a template argument is expanded by the reader's shell, not
-# here. Dropping it leaves the literal path around it, which is what identifies
-# the template.
-SHELL_VARIABLE = re.compile(r"\$\{?\w+\}?")
+# here, and a ${{ }} expression by the Actions runner. Dropping either leaves the
+# literal path around it, which is what identifies the template. The ${{ }} form
+# is matched first because it holds spaces: left in, it would cut a URL short at
+# the first one and silently skip the button CI itself publishes.
+SHELL_VARIABLE = re.compile(r"\$\{\{[^}]*\}\}|\$\{?\w+\}?")
 
 
 class CFNLoader(yaml.SafeLoader):
@@ -232,7 +246,12 @@ def template_behind(argument):
     parts = [p for p in SHELL_VARIABLE.sub("", argument.strip("\"'")).split("/") if p]
     if not parts or not parts[-1].endswith((".yaml", ".yml")):
         return None
-    candidates = [p for p in ROOT.rglob("*.yaml") if ".git" not in p.parts]
+    # Both extensions, or a .yml argument would be accepted above and then always
+    # resolve to None - skipped in silence, which is the failure this file exists
+    # to stop rather than to reproduce.
+    candidates = [
+        p for p in ROOT.rglob("*") if p.suffix in {".yaml", ".yml"} and ".git" not in p.parts
+    ]
     for depth in range(1, len(parts) + 1):
         tail = parts[-depth:]
         matches = [p for p in candidates if list(p.relative_to(ROOT).parts)[-depth:] == tail]
@@ -284,6 +303,53 @@ def check_commands_override_region_scoped_defaults():
     return checked
 
 
+def quickcreate_links(text):
+    """Yield (lineno, query) for each console quick-create URL.
+
+    Variables are dropped before the URL is read: the release notes assemble
+    their button from `${{ env.* }}`, whose spaces would otherwise end the URL
+    early and leave the one button CI publishes unchecked.
+    """
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for query in QUICKCREATE.findall(SHELL_VARIABLE.sub("", line)):
+            yield lineno, query
+
+
+def check_quickcreate_links_prefill_region_scoped_defaults():
+    """A launch button fails the same way a create-stack command does.
+
+    Its parameters ride in the URL as `param_<Name>`, and one the button omits is
+    left at the template's default - which for a region-scoped type names the
+    region the author stood in. CloudFormation rejects it at CreateStack, in the
+    console, after the customer has already clicked. Resolving the templateURL
+    back to the template is what makes the required set readable rather than
+    listed here, so a fourth region-scoped parameter is covered on arrival.
+    """
+    failures = []
+    checked = 0
+    for path in command_sources():
+        for lineno, query in quickcreate_links(path.read_text()):
+            argument = QUICKCREATE_TEMPLATE.search(query)
+            template = template_behind(argument.group(1)) if argument else None
+            if template is None:
+                continue
+            checked += 1
+            supplied = set(QUICKCREATE_PARAM.findall(query))
+            missing = [name for name in region_scoped_defaults(template) if name not in supplied]
+            if missing:
+                failures.append(
+                    f"{path.relative_to(ROOT)}:{lineno}: launches "
+                    f"{template.relative_to(ROOT)} without "
+                    f"{', '.join('param_' + name for name in missing)}; "
+                    f"the template's defaults name another region and CreateStack "
+                    f"rejects the button here"
+                )
+    assert not failures, "launch buttons AWS would reject at CreateStack:\n  " + "\n  ".join(
+        failures
+    )
+    return checked
+
+
 def check_link_patterns_match_what_they_claim():
     """No document in the tree carries a titled or relative reference link today,
     so the patterns covering them are asserted directly. Otherwise the coverage is
@@ -325,6 +391,18 @@ def check_link_patterns_match_what_they_claim():
     )
     assert template_behind("infrastructure.yaml") is None
     assert template_behind("https://...") is None
+    # A .yml argument is accepted, so it has to be resolvable too. This tree has
+    # no .yml template, so the workflow files stand in as the proof.
+    assert template_behind(".github/workflows/release.yml") == (
+        ROOT / ".github" / "workflows" / "release.yml"
+    )
+    # An Actions expression holds spaces; left in, it would truncate the URL.
+    assert (
+        template_behind(
+            '"https://${{ env.B }}.s3.amazonaws.com/releases/latest/foundation.yaml"'
+        )
+        == ROOT / "templates" / "foundation.yaml"
+    )
     # The parameters this repository actually has to override, read from the
     # template rather than named here, so a fourth one is covered on arrival.
     assert region_scoped_defaults(ROOT / "templates" / "foundation.yaml") == [
@@ -332,7 +410,21 @@ def check_link_patterns_match_what_they_claim():
         "AvailabilityZone2",
         "AvailabilityZone3",
     ]
-    return 15
+    # A launch button is read whether its query ends the line or closes a
+    # markdown link, and its prefilled parameters are read out of the query.
+    button = (
+        "[![Launch](img.png)](https://console.aws.amazon.com/cloudformation/home"
+        "?region=${{ env.AWS_REGION }}#/stacks/quickcreate?templateURL=https://"
+        "${{ env.S3_BUCKET }}.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml"
+        "&param_AvailabilityZone1=${{ env.AWS_REGION }}a)"
+    )
+    (lineno, query), = quickcreate_links(button)
+    assert lineno == 1
+    assert QUICKCREATE_PARAM.findall(query) == ["AvailabilityZone1"]
+    assert template_behind(QUICKCREATE_TEMPLATE.search(query).group(1)) == (
+        ROOT / "templates" / "foundation.yaml"
+    )
+    return 21
 
 
 CHECKS = (
@@ -340,6 +432,7 @@ CHECKS = (
     check_relative_doc_links_resolve,
     check_cli_commands_use_the_right_template_option,
     check_commands_override_region_scoped_defaults,
+    check_quickcreate_links_prefill_region_scoped_defaults,
     check_link_patterns_match_what_they_claim,
 )
 
