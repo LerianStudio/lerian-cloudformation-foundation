@@ -570,7 +570,11 @@ jobs:
 
           ### Quick Launch (Foundation)
 
-          [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/quickcreate?stackName=lerian-foundation&templateURL=https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/foundation.yaml)
+          The button prefills MPS3KeyPrefix with this release's prefix. Without it
+          the pinned foundation.yaml would pull its nested templates from
+          releases/latest/, mixing versions.
+
+          [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/quickcreate?stackName=lerian-foundation&templateURL=https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/foundation.yaml&param_MPS3BucketName=${{ env.S3_BUCKET }}&param_MPS3BucketRegion=${{ env.AWS_REGION }}&param_MPS3KeyPrefix=releases/v$BUNDLE_VERSION/)
 
           ### Documentation
 

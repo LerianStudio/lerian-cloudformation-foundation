@@ -15,15 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supplied. The chart is pinned by version and, optionally, by OCI digest.
 - CI now compiles the inline Lambda code of every template, so a syntax error is
   caught in the pull request instead of by a stack that hangs until it times out,
-  and runs `scripts/check-agent-handler.py`, which asserts what the agent handler
+  and runs `scripts/check-agent-templates.py`, which asserts what the agent handler
   actually does: the enrollment token stays out of the logs, a supplied digest
   pins the chart, a token full of YAML metacharacters cannot corrupt the values
   document, moving the agent to another namespace replaces the release instead of
-  duplicating it, and a delete never leaves a stack in `DELETE_FAILED`.
+  duplicating it, and a delete never leaves a stack in `DELETE_FAILED`. The same
+  script asserts that the Foundation's `Rules` block watches every agent
+  parameter, so a future parameter cannot be added outside the guard.
 - The Foundation rejects a half-filled agent parameter set at the `CreateStack`
   call, through a template `Rules` section. Supplying a control-plane URL and a
   token but no chart version used to build the VPC and the cluster first - about
-  twenty minutes - and only then fail and roll all of it back.
+  twenty minutes - and only then fail and roll all of it back. Supplying only the
+  optional chart digest is rejected the same way, instead of quietly producing a
+  cluster with no agent.
 
 ### Removed
 
@@ -59,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MPS3BucketName` now defaults to `lerian-cloudformation-templates`, the bucket
   releases are actually published to. The previous default named a bucket that
   does not exist, so every nested stack 404'd on a default deployment.
+- The quick-launch button on each GitHub release now prefills `MPS3KeyPrefix`
+  with that release's prefix. It pinned only the top-level template, so an older
+  release's button launched a pinned Foundation that pulled its nested templates
+  from `releases/latest/`.
 
 ## [0.1.0] - 2026-02-02
 
