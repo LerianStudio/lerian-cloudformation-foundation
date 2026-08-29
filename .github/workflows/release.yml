@@ -601,7 +601,6 @@ jobs:
           - [README](https://github.com/${{ github.repository }}/blob/main/README.md)
           - [Architecture](https://github.com/${{ github.repository }}/blob/main/docs/ARCHITECTURE.md)
           - [Troubleshooting](https://github.com/${{ github.repository }}/blob/main/docs/TROUBLESHOOTING.md)
-          - [Cost Estimation](https://github.com/${{ github.repository }}/blob/main/docs/COST_ESTIMATION.md)
           "
 
           echo "Created $BUNDLE_TAG"

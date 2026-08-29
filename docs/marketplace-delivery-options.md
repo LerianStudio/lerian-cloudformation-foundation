@@ -3,26 +3,31 @@
 Reference for the `AddDeliveryOptions` changeset. Each delivery option needs:
 DeliveryOptionTitle, ShortDescription, LongDescription, UsageInstructions.
 
+The listing offers **one** delivery option. It creates the cluster and enrolls
+the Lerian agent in it; every product — Midaz included — is installed afterwards
+by the Lerian control plane through that agent, not by a CloudFormation stack.
+The three options this file used to describe (Full Stack, Infrastructure,
+Application) launched templates that no longer exist. See
+[marketplace-changesets.md](marketplace-changesets.md) for the changeset that
+adds this one and restricts those three, in that order.
+
 ---
 
-## Delivery Option 1: Full Stack
+## Delivery Option: Lerian Foundation
 
-**DeliveryOptionTitle:** `Midaz Full Stack`
+**DeliveryOptionTitle:** `Lerian Foundation`
 
 **ShortDescription:**
-Deploy the complete Midaz ledger infrastructure and application in a single CloudFormation stack. Includes VPC, Amazon EKS, RDS PostgreSQL, DocumentDB, ElastiCache, AmazonMQ, and the Midaz application — fully configured across 3 Availability Zones with enterprise-grade security.
+Deploy the Lerian foundation — VPC, Amazon EKS, and the Lerian agent — in a single CloudFormation stack across 3 Availability Zones. The agent enrolls with the Lerian control plane, and you install and upgrade Midaz and every other Lerian product from the Lerian console, without further CloudFormation changes.
 
 **LongDescription:**
-The Full Stack deployment creates everything you need to run Midaz in a single CloudFormation stack. This is the fastest way to get started — one deploy, one stack, fully standalone.
+The Foundation stack creates the cluster Lerian products run on and connects it to the Lerian control plane. It is the only stack you launch from AWS Marketplace; everything after it happens in the Lerian console.
 
 What gets deployed:
 - VPC with 3-tier subnet architecture (public, private, database) across 3 AZs
-- Amazon EKS cluster with managed node groups
-- RDS PostgreSQL with Multi-AZ support for transactional data
-- Amazon DocumentDB (MongoDB-compatible) for document storage
-- Amazon ElastiCache (Valkey/Redis) for high-performance caching
-- Amazon MQ (RabbitMQ) for message queuing
-- Midaz ledger application deployed via Helm
+- Amazon EKS cluster with ARM64 (Graviton) managed node groups
+- The Lerian agent, installed into the cluster and enrolled with the control plane
+- Optional: Route53 hosted zone, AWS Load Balancer Controller, and ExternalDNS when you supply a domain name
 
 Security included:
 - Customer-managed KMS keys for encryption at rest
@@ -30,97 +35,36 @@ Security included:
 - AWS Secrets Manager for credential management
 - IAM Roles for Service Accounts (IRSA)
 - Security groups following least-privilege principles
+- The agent holds an outbound-only connection to the control plane: nothing needs to reach into your VPC, and no Lerian credential is stored in your account
+- Optional PermissionsBoundaryArn constrains every IAM role the stack creates
 
-Best for: Quick starts, single-product environments, evaluations, and standalone deployments where you don't plan to share infrastructure with other products.
+What is deliberately not here: no product application is installed by this stack, and no Lambda in your account holds cluster-admin after it completes. Product installs, upgrades, rollbacks and values changes are performed by the agent from inside the cluster, driven by the control plane.
+
+Best for: every customer. This is the entry point for Midaz and for any other Lerian product on the same cluster.
 
 **UsageInstructions:**
-After stack creation completes (~45 minutes):
+Before you launch: sign in to the Lerian console, create the environment for this cluster, and copy the enrollment token it issues. The token is single-use and short-lived, so generate it right before launching.
 
-1. Configure kubectl:
+Required parameters:
+- ControlPlaneURL — the control plane URL shown in the console
+- EnrollmentToken — the single-use token from the console
+- AgentChartVersion — the agent chart version the console tells you to run
+
+Leave all three empty to create the cluster with no control-plane connection. Supplying only some of them is rejected at CreateStack rather than 20 minutes into the deploy.
+
+After stack creation completes (~25 minutes):
+
+1. Confirm the cluster appears as connected in the Lerian console. That is the only check that matters — it proves the agent enrolled and is reachable.
+
+2. Optional, if you want cluster access yourself:
    aws eks update-kubeconfig --name <cluster-name> --region <region>
+   kubectl get pods -n lerian-system
 
-2. Verify pods are running:
-   kubectl get pods -n midaz
+3. Deploy the data services for the product you are installing (RDS PostgreSQL, DocumentDB, ElastiCache, AmazonMQ) with the product infrastructure stack, then create the release in the console.
 
-3. Check stack outputs for connection endpoints (RDS, DocumentDB, ElastiCache).
+If the cluster does not appear in the console, the agent's installation log is in the CloudWatch log group named by the AgentLogGroup output of the stack.
 
-Required parameters: RDSMasterUsername, DocumentDBMasterUsername, AmazonMQAdminUsername.
-
-Optional: Set EnableIngress=true with DomainName and IngressHostname for external access via ALB.
+Optional: Set DomainName to create a Route53 hosted zone and the AWS Load Balancer Controller; add EnableExternalDNS=true for automatic DNS records.
 Optional: Set PermissionsBoundaryArn to an IAM permissions boundary ARN (e.g., arn:aws:iam::ACCOUNT:policy/boundary) to constrain all IAM roles created by this stack.
 
----
-
-## Delivery Option 2: Infrastructure Only
-
-**DeliveryOptionTitle:** `Midaz Infrastructure`
-
-**ShortDescription:**
-Deploy Midaz databases and services (RDS PostgreSQL, DocumentDB, ElastiCache, AmazonMQ) on an existing Foundation stack. Part of the modular deployment — use this when sharing VPC and EKS across multiple products or when you need independent lifecycle management for infrastructure and application layers.
-
-**LongDescription:**
-The Infrastructure deployment creates only the data layer for Midaz, importing the shared VPC and EKS cluster from an existing Foundation stack. This is the modular approach — deploy Foundation once, then add product infrastructure stacks independently.
-
-What gets deployed:
-- RDS PostgreSQL with Multi-AZ support for transactional data
-- Amazon DocumentDB (MongoDB-compatible) for document storage
-- Amazon ElastiCache (Valkey/Redis) for high-performance caching
-- Amazon MQ (RabbitMQ) for message queuing
-- AWS Secrets Manager entries for all credentials
-- Security groups and KMS keys
-
-Prerequisites:
-- A Foundation stack must be deployed first (provides VPC + EKS)
-- The FoundationStackName parameter must reference the existing Foundation stack
-
-Best for: Multi-product environments (e.g., Midaz + Tracer on shared infrastructure), teams that want independent lifecycle management for infrastructure and application layers, and organizations with existing VPC/EKS infrastructure.
-
-After this stack completes, deploy the Application stack to install the Midaz ledger.
-
-**UsageInstructions:**
-Prerequisites: Deploy the Foundation stack first (provides VPC + EKS).
-
-1. Set FoundationStackName to your Foundation stack name (default: lerian-foundation).
-2. Provide RDSMasterUsername, DocumentDBMasterUsername, and AmazonMQAdminUsername.
-3. Optional: Set PermissionsBoundaryArn to apply an IAM permissions boundary to all created roles.
-4. After stack creation completes (~30 minutes), deploy the Midaz Application stack.
-5. Use the ExistingVpcId, ExistingClusterName parameters to override Foundation values if needed.
-
----
-
-## Delivery Option 3: Application Only
-
-**DeliveryOptionTitle:** `Midaz Application`
-
-**ShortDescription:**
-Deploy the Midaz ledger application via Helm to an existing EKS cluster with pre-provisioned databases. Part of the modular deployment — use this after deploying the Infrastructure stack. Supports custom domains, ALB ingress, and CRM integration.
-
-**LongDescription:**
-The Application deployment installs the Midaz ledger on an existing EKS cluster using Helm. It imports all database endpoints and credentials from the Infrastructure stack automatically.
-
-What gets deployed:
-- Midaz ledger application (Helm chart)
-- Kubernetes namespace, service accounts, and RBAC
-- Optional: ALB Ingress for external access
-- Optional: CRM service and ingress
-
-Prerequisites:
-- A Midaz Infrastructure stack must be deployed first
-- The InfrastructureStackName parameter must reference the existing Infrastructure stack
-
-Ingress options:
-- Set EnableIngress=true for ALB-based external access
-- Provide DomainName and IngressHostname for DNS routing
-- Optionally provide IngressCertificateArn for HTTPS
-
-Best for: Teams using the modular deployment approach, environments where infrastructure is managed separately from applications, and scenarios requiring independent application updates without touching the data layer.
-
-**UsageInstructions:**
-Prerequisites: Deploy the Midaz Infrastructure stack first.
-
-1. Set InfrastructureStackName to your Infrastructure stack name (default: midaz-infra).
-2. Optional: Set PermissionsBoundaryArn to apply an IAM permissions boundary to all created roles.
-3. After stack creation completes (~15 minutes), configure kubectl:
-   aws eks update-kubeconfig --name <cluster-name> --region <region>
-4. Verify pods: kubectl get pods -n midaz
-5. Optional: Enable ingress by setting EnableIngress=true, DomainName, and IngressHostname.
+Full documentation: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/README.md

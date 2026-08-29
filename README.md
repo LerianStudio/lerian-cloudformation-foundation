@@ -53,6 +53,32 @@ template that installs a product.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
+## Getting Started
+
+Four steps, and only the first two are CloudFormation.
+
+1. **Get an enrollment token.** Sign in to the Lerian console, create the
+   environment for this cluster, and copy the token it issues. It is single-use
+   and short-lived, so take it right before step 2. The console also gives you
+   the control plane URL and the agent chart version to run.
+
+2. **Launch the Foundation stack** — from the AWS Marketplace listing, or with
+   the launch button below, or with `aws cloudformation create-stack`. Supply
+   `ControlPlaneURL`, `EnrollmentToken` and `AgentChartVersion` together. About
+   25 minutes later the cluster shows up as connected in the console. If you
+   leave all three empty you get a cluster with no control-plane connection and
+   no way to install anything into it.
+
+3. **Launch the product infrastructure stack** for what you are deploying — for
+   Midaz, [`products/midaz/infrastructure.yaml`](products/midaz/README.md). It
+   imports the VPC and cluster from the Foundation stack and creates the
+   databases, cache and broker. Repeat per product on the same Foundation.
+
+4. **Install the product from the console**, or with the `lerian` CLI
+   (`lerian auth login`, then `lerian midaz ledger create`). The agent performs
+   the install from inside the cluster. Upgrades, rollbacks and configuration
+   changes happen there too — not as stack updates.
+
 ## Foundation Stack
 
 The Foundation stack creates the shared VPC and EKS cluster and enrolls the
@@ -87,20 +113,22 @@ control-plane connection.
 
 ## Cost Estimate
 
+Rough monthly cost of a Foundation stack plus one product's data services, at
+sa-east-1 on-demand rates. The cluster and its node group dominate; the rest
+scales with the instance classes you pick.
+
 | Size | Monthly Cost |
 |------|--------------|
 | Development | ~$970 |
 | Production | ~$1,220 |
 | Enterprise | ~$2,450 |
 
-See [docs/COST_ESTIMATION.md](docs/COST_ESTIMATION.md) for breakdown.
-
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
+- [Marketplace listing](docs/marketplace-changesets.md)
 
 ## License
 

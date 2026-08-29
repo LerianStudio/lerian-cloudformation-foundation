@@ -2,6 +2,11 @@
 
 Ready-to-run changesets for `prod-fildx2w4ikmba` (Lerian Midaz - Open-Source Ledger System).
 
+**These are drafts. Nothing here is submitted by CI** — a human runs them against
+the live catalog after this repository's changes are merged and released. Read
+[Execution Order](#execution-order) before running anything: the steps are
+ordered because the Catalog API rejects two of them out of sequence.
+
 ---
 
 ## 1. Fix Categories (remove "Operating Systems")
@@ -29,25 +34,43 @@ aws marketplace-catalog start-change-set \
 
 ---
 
-## 2. Add New Version with 3 Delivery Options
+## 2. Add the Foundation Delivery Option
 
-Before running: upload the 3 templates to the Marketplace S3 bucket and update the Template URLs below.
+The listing used to offer three delivery options — Full Stack, Infrastructure,
+Application. Two of the three launched `full-stack.yaml` and `application.yaml`,
+which installed the Midaz application from a Lambda holding cluster-admin, and
+which this repository no longer publishes. They are replaced by one option that
+delivers the cluster with the Lerian agent enrolled in it; products are installed
+afterwards by the control plane, through the agent.
 
-**Template URLs** (update after upload):
-- Full Stack: `https://awsmp-cft-211125678794-1707910187780.s3.us-east-1.amazonaws.com/<path>/full-stack.yaml`
-- Infrastructure: `https://awsmp-cft-211125678794-1707910187780.s3.us-east-1.amazonaws.com/<path>/infrastructure.yaml`
-- Application: `https://awsmp-cft-211125678794-1707910187780.s3.us-east-1.amazonaws.com/<path>/application.yaml`
+Wording for the fields below is maintained in
+[marketplace-delivery-options.md](marketplace-delivery-options.md) — edit there
+first, then mirror it here.
 
-**Architecture Diagram URL** (same for all 3):
+Before running: upload `foundation.yaml` **and every template it nests**
+(`vpc.yaml`, `eks.yaml`, `agent.yaml`, `route53.yaml`, `alb-controller.yaml`,
+`external-dns.yaml`) to the Marketplace S3 bucket under a single shared prefix,
+and set `MPS3BucketName` / `MPS3BucketRegion` / `MPS3KeyPrefix` defaults on the
+delivery option to that bucket and prefix. Marketplace validates nested template
+URLs, and a nested template missing from the prefix fails the changeset rather
+than the customer's deploy.
+
+**Template URL** (update after upload):
+`https://awsmp-cft-211125678794-1707910187780.s3.us-east-1.amazonaws.com/<path>/foundation.yaml`
+
+**Architecture Diagram URL:**
 `https://awsmp-cf-af-612309067705-1556123774245.s3.us-east-1.amazonaws.com/a72c0d74-a74a-451f-b225-71205fe3b872/a72c0d74-a74a-451f-b225-71205fe3b872/prod-fildx2w4ikmba/b1019bc9-4533-4cc7-8c59-eb970c1419fe/midaz_cf.png`
 
-**AMI** (same for all 3 — current production AMI):
+**AMI** (vestigial — the listing is an `AmiProduct` entity, so a delivery option
+must bind an AMI to a template parameter. The cluster runs EKS-managed ARM64
+node AMIs and never launches this one; `foundation.yaml` declares a
+`MarketplaceAMI` parameter that exists for this binding and nothing else):
 `ami-0f1d84b9b33468f19`
 
 ```bash
 aws marketplace-catalog start-change-set \
   --catalog AWSMarketplace \
-  --change-set-name "Add version with 3 delivery options" \
+  --change-set-name "Add foundation delivery option" \
   --change-set '[{
     "ChangeType": "AddDeliveryOptions",
     "Entity": {
@@ -56,70 +79,20 @@ aws marketplace-catalog start-change-set \
     },
     "DetailsDocument": {
       "Version": {
-        "VersionTitle": "v0.2.0",
-        "ReleaseNotes": "Added modular deployment options: Full Stack, Infrastructure Only, and Application Only. Templates now support optional PermissionsBoundaryArn parameter."
+        "VersionTitle": "v1.0.0",
+        "ReleaseNotes": "The listing now delivers the Lerian foundation: VPC, Amazon EKS and the Lerian agent, enrolled with the Lerian control plane. Midaz and every other Lerian product are installed into that cluster from the Lerian console, by the agent, instead of by a CloudFormation stack. The previous Full Stack, Infrastructure and Application delivery options are restricted: they installed the application layer from a Lambda holding cluster administrator rights, and their templates are no longer published."
       },
       "DeliveryOptions": [
         {
-          "DeliveryOptionTitle": "Midaz Full Stack",
+          "DeliveryOptionTitle": "Lerian Foundation",
           "Details": {
             "DeploymentTemplateDeliveryOptionDetails": {
-              "ShortDescription": "Deploy the complete Midaz ledger infrastructure and application in a single CloudFormation stack. Includes VPC, Amazon EKS, RDS PostgreSQL, DocumentDB, ElastiCache, AmazonMQ, and the Midaz application — fully configured across 3 Availability Zones with enterprise-grade security.",
-              "LongDescription": "The Full Stack deployment creates everything you need to run Midaz in a single CloudFormation stack. This is the fastest way to get started — one deploy, one stack, fully standalone. What gets deployed: VPC with 3-tier subnet architecture (public, private, database) across 3 AZs, Amazon EKS cluster with managed node groups, RDS PostgreSQL with Multi-AZ support, Amazon DocumentDB (MongoDB-compatible), Amazon ElastiCache (Valkey/Redis), Amazon MQ (RabbitMQ), and the Midaz ledger application deployed via Helm. Security: Customer-managed KMS keys, TLS/SSL encryption, AWS Secrets Manager, IAM Roles for Service Accounts (IRSA), and least-privilege security groups. Best for quick starts, single-product environments, evaluations, and standalone deployments.",
-              "UsageInstructions": "After stack creation completes (~45 minutes):\n\n1. Configure kubectl:\n   aws eks update-kubeconfig --name <cluster-name> --region <region>\n\n2. Verify pods are running:\n   kubectl get pods -n midaz\n\n3. Check stack outputs for connection endpoints.\n\nRequired parameters: RDSMasterUsername, DocumentDBMasterUsername, AmazonMQAdminUsername.\nOptional: Set EnableIngress=true with DomainName and IngressHostname for external access.\n\nFull documentation: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/products/midaz/README.md",
-              "RecommendedInstanceType": "c6i.xlarge",
+              "ShortDescription": "Deploy the Lerian foundation — VPC, Amazon EKS, and the Lerian agent — in a single CloudFormation stack across 3 Availability Zones. The agent enrolls with the Lerian control plane, and you install and upgrade Midaz and every other Lerian product from the Lerian console, without further CloudFormation changes.",
+              "LongDescription": "The Foundation stack creates the cluster Lerian products run on and connects it to the Lerian control plane. It is the only stack you launch from AWS Marketplace; everything after it happens in the Lerian console. What gets deployed: VPC with 3-tier subnet architecture (public, private, database) across 3 AZs, an Amazon EKS cluster with ARM64 (Graviton) managed node groups, and the Lerian agent installed into the cluster and enrolled with the control plane. Optionally a Route53 hosted zone, the AWS Load Balancer Controller and ExternalDNS, when you supply a domain name. Security: customer-managed KMS keys for encryption at rest, TLS/SSL in transit, AWS Secrets Manager for credentials, IAM Roles for Service Accounts (IRSA), least-privilege security groups, and an optional IAM permissions boundary applied to every role the stack creates. The agent holds an outbound-only connection to the control plane, so nothing needs to reach into your VPC and no Lerian credential is stored in your account. What is deliberately not here: no product application is installed by this stack, and no Lambda in your account holds cluster administrator rights after it completes. Product installs, upgrades, rollbacks and configuration changes are performed by the agent from inside the cluster, driven by the control plane. Best for every customer: this is the entry point for Midaz and for any other Lerian product on the same cluster.",
+              "UsageInstructions": "Before you launch: sign in to the Lerian console, create the environment for this cluster, and copy the enrollment token it issues. The token is single-use and short-lived, so generate it right before launching.\n\nRequired parameters:\n- ControlPlaneURL - the control plane URL shown in the console\n- EnrollmentToken - the single-use token from the console\n- AgentChartVersion - the agent chart version the console tells you to run\n\nLeave all three empty to create the cluster with no control-plane connection. Supplying only some of them is rejected at CreateStack rather than 20 minutes into the deploy.\n\nAfter stack creation completes (~25 minutes):\n\n1. Confirm the cluster appears as connected in the Lerian console. That is the only check that matters - it proves the agent enrolled and is reachable.\n\n2. Optional, if you want cluster access yourself:\n   aws eks update-kubeconfig --name <cluster-name> --region <region>\n   kubectl get pods -n lerian-system\n\n3. Deploy the data services for the product you are installing (RDS PostgreSQL, DocumentDB, ElastiCache, AmazonMQ) with the product infrastructure stack, then create the release in the console.\n\nIf the cluster does not appear in the console, the agent installation log is in the CloudWatch log group named by the stack's AgentLogGroup output.\n\nOptional: set DomainName to create a Route53 hosted zone and the AWS Load Balancer Controller; add EnableExternalDNS=true for automatic DNS records.\nOptional: set PermissionsBoundaryArn to constrain all IAM roles created by this stack.\n\nFull documentation: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/README.md",
+              "RecommendedInstanceType": "c7g.large",
               "ArchitectureDiagram": "https://awsmp-cf-af-612309067705-1556123774245.s3.us-east-1.amazonaws.com/a72c0d74-a74a-451f-b225-71205fe3b872/a72c0d74-a74a-451f-b225-71205fe3b872/prod-fildx2w4ikmba/b1019bc9-4533-4cc7-8c59-eb970c1419fe/midaz_cf.png",
-              "Template": "REPLACE_WITH_FULL_STACK_TEMPLATE_URL",
-              "TemplateSources": [
-                {
-                  "ParameterName": "MarketplaceAMI",
-                  "AmiSource": {
-                    "AmiId": "ami-0f1d84b9b33468f19",
-                    "AccessRoleArn": "arn:aws:iam::239025757440:role/AwsMarketplaceAmiIngestion",
-                    "UserName": "root",
-                    "OperatingSystemName": "UBUNTU",
-                    "OperatingSystemVersion": "23"
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "DeliveryOptionTitle": "Midaz Infrastructure",
-          "Details": {
-            "DeploymentTemplateDeliveryOptionDetails": {
-              "ShortDescription": "Deploy Midaz databases and services (RDS PostgreSQL, DocumentDB, ElastiCache, AmazonMQ) on an existing Foundation stack. Part of the modular deployment — use this when sharing VPC and EKS across multiple products or when you need independent lifecycle management.",
-              "LongDescription": "The Infrastructure deployment creates only the data layer for Midaz, importing the shared VPC and EKS cluster from an existing Foundation stack. This is the modular approach — deploy Foundation once, then add product infrastructure stacks independently. What gets deployed: RDS PostgreSQL with Multi-AZ support, Amazon DocumentDB (MongoDB-compatible), Amazon ElastiCache (Valkey/Redis), Amazon MQ (RabbitMQ), AWS Secrets Manager entries, security groups and KMS keys. Prerequisites: A Foundation stack must be deployed first (provides VPC + EKS). After this stack completes, deploy the Application stack to install the Midaz ledger. Best for multi-product environments, teams that want independent lifecycle management, and organizations with existing VPC/EKS infrastructure.",
-              "UsageInstructions": "Prerequisites: Deploy the Foundation stack first (provides VPC + EKS).\n\n1. Set FoundationStackName to your Foundation stack name (default: lerian-foundation).\n2. Provide RDSMasterUsername, DocumentDBMasterUsername, and AmazonMQAdminUsername.\n3. After stack creation completes (~30 minutes), deploy the Midaz Application stack.\n4. Use ExistingVpcId, ExistingClusterName parameters to override Foundation values if needed.\n\nFull documentation: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/products/midaz/README.md",
-              "RecommendedInstanceType": "c6i.xlarge",
-              "ArchitectureDiagram": "https://awsmp-cf-af-612309067705-1556123774245.s3.us-east-1.amazonaws.com/a72c0d74-a74a-451f-b225-71205fe3b872/a72c0d74-a74a-451f-b225-71205fe3b872/prod-fildx2w4ikmba/b1019bc9-4533-4cc7-8c59-eb970c1419fe/midaz_cf.png",
-              "Template": "REPLACE_WITH_INFRASTRUCTURE_TEMPLATE_URL",
-              "TemplateSources": [
-                {
-                  "ParameterName": "MarketplaceAMI",
-                  "AmiSource": {
-                    "AmiId": "ami-0f1d84b9b33468f19",
-                    "AccessRoleArn": "arn:aws:iam::239025757440:role/AwsMarketplaceAmiIngestion",
-                    "UserName": "root",
-                    "OperatingSystemName": "UBUNTU",
-                    "OperatingSystemVersion": "23"
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "DeliveryOptionTitle": "Midaz Application",
-          "Details": {
-            "DeploymentTemplateDeliveryOptionDetails": {
-              "ShortDescription": "Deploy the Midaz ledger application via Helm to an existing EKS cluster with pre-provisioned databases. Part of the modular deployment — use this after deploying the Infrastructure stack. Supports custom domains, ALB ingress, and CRM integration.",
-              "LongDescription": "The Application deployment installs the Midaz ledger on an existing EKS cluster using Helm. It imports all database endpoints and credentials from the Infrastructure stack automatically. What gets deployed: Midaz ledger application (Helm chart), Kubernetes namespace, service accounts, and RBAC. Optional: ALB Ingress for external access, CRM service and ingress. Prerequisites: A Midaz Infrastructure stack must be deployed first. Ingress options: Set EnableIngress=true for ALB-based external access, provide DomainName and IngressHostname for DNS routing. Best for teams using the modular deployment approach, environments where infrastructure is managed separately from applications.",
-              "UsageInstructions": "Prerequisites: Deploy the Midaz Infrastructure stack first.\n\n1. Set InfrastructureStackName to your Infrastructure stack name (default: midaz-infra).\n2. After stack creation completes (~15 minutes), configure kubectl:\n   aws eks update-kubeconfig --name <cluster-name> --region <region>\n3. Verify pods: kubectl get pods -n midaz\n4. Optional: Enable ingress with EnableIngress=true, DomainName, and IngressHostname.\n\nFull documentation: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/products/midaz/README.md",
-              "RecommendedInstanceType": "c6i.xlarge",
-              "ArchitectureDiagram": "https://awsmp-cf-af-612309067705-1556123774245.s3.us-east-1.amazonaws.com/a72c0d74-a74a-451f-b225-71205fe3b872/a72c0d74-a74a-451f-b225-71205fe3b872/prod-fildx2w4ikmba/b1019bc9-4533-4cc7-8c59-eb970c1419fe/midaz_cf.png",
-              "Template": "REPLACE_WITH_APPLICATION_TEMPLATE_URL",
+              "Template": "REPLACE_WITH_FOUNDATION_TEMPLATE_URL",
               "TemplateSources": [
                 {
                   "ParameterName": "MarketplaceAMI",
@@ -141,11 +114,60 @@ aws marketplace-catalog start-change-set \
   --profile lerian_root
 ```
 
-**IMPORTANT:** Before running, replace the 3 `REPLACE_WITH_*_TEMPLATE_URL` placeholders with the actual S3 URLs where the templates are uploaded. The Marketplace requires templates to be in its managed S3 bucket — you upload them via the Marketplace console or the API copies them during version creation.
+**IMPORTANT:** replace `REPLACE_WITH_FOUNDATION_TEMPLATE_URL` with the actual S3
+URL the template was uploaded to. The Marketplace requires templates to live in
+its managed S3 bucket — upload via the Marketplace console, or let the API copy
+them during version creation.
 
 ---
 
-## 3. Add Regions
+## 3. Restrict the Three Superseded Delivery Options
+
+Run this **after** changeset 2 has succeeded. The Catalog API refuses to restrict
+the last unrestricted delivery option of a product, so the new one has to exist
+first. Existing subscribers keep access to a restricted version; only new buyers
+stop seeing it.
+
+Get the current delivery option IDs — the titles are not accepted, only the IDs:
+
+```bash
+aws marketplace-catalog describe-entity \
+  --catalog AWSMarketplace \
+  --entity-id prod-fildx2w4ikmba \
+  --profile lerian_root \
+  --query 'DetailsDocument.Versions[].DeliveryOptions[].{Id:Id,Title:Title}'
+```
+
+Then restrict the three that correspond to `Midaz Full Stack`,
+`Midaz Infrastructure` and `Midaz Application`:
+
+```bash
+aws marketplace-catalog start-change-set \
+  --catalog AWSMarketplace \
+  --change-set-name "Restrict superseded delivery options" \
+  --change-set '[{
+    "ChangeType": "RestrictDeliveryOptions",
+    "Entity": {
+      "Type": "AmiProduct@1.0",
+      "Identifier": "prod-fildx2w4ikmba"
+    },
+    "DetailsDocument": {
+      "DeliveryOptionIds": [
+        "REPLACE_WITH_FULL_STACK_DELIVERY_OPTION_ID",
+        "REPLACE_WITH_INFRASTRUCTURE_DELIVERY_OPTION_ID",
+        "REPLACE_WITH_APPLICATION_DELIVERY_OPTION_ID"
+      ]
+    }
+  }]' \
+  --profile lerian_root
+```
+
+AWS Marketplace guidelines require supporting existing buyers of a restricted
+version for 90 days after restriction.
+
+---
+
+## 4. Add Regions
 
 The correct change type is `AddRegions` (additive — only specify new regions to add). Marketplace handles AMI replication automatically.
 
@@ -175,7 +197,40 @@ aws marketplace-catalog start-change-set \
 
 ## Execution Order
 
-1. **Fix Categories** (changeset 1) — ✅ SUCCEEDED (`cfgpdywsza9v0x8u6rxqosmaw`)
-2. **Add Regions** (changeset 3) — ✅ SUBMITTED (`cfxeljkpxcvcuagkmf832ccm`)
-3. **Upload templates** to Marketplace S3 — prepare template URLs
-4. **Add Delivery Options** (changeset 2) — after templates are uploaded
+Steps 3 through 6 are the migration to the foundation-and-agent listing. The
+order is load-bearing: a restricted-first sequence is rejected by the API, and a
+delete-first sequence 404s the live listing for anyone mid-purchase.
+
+1. **Fix Categories** (changeset 1) — SUCCEEDED (`cfgpdywsza9v0x8u6rxqosmaw`)
+2. **Add Regions** (changeset 4) — SUBMITTED (`cfxeljkpxcvcuagkmf832ccm`)
+3. **Release this repository to S3.** The GitHub release workflow publishes
+   `foundation.yaml` and its nested templates to
+   `s3://lerian-cloudformation-templates/releases/latest/`. Nothing in the
+   Marketplace flow works before this lands.
+4. **Upload `foundation.yaml` and its nested templates** to the Marketplace S3
+   bucket under one shared prefix, and note the resulting template URL.
+5. **Add the Foundation delivery option** (changeset 2) — needs the URL from
+   step 4.
+6. **Restrict the three superseded delivery options** (changeset 3) — only after
+   step 5 succeeds.
+7. **Delete the stale objects from the release bucket.** The release workflow
+   publishes with `aws s3 sync` without `--delete`, so
+   `releases/latest/products/midaz/{application,helm,full-stack}.yaml` keep
+   being served after this repository stops publishing them, and every
+   previously shared quick-create link still points at them. Delete them only
+   after step 6, so nothing the live listing references disappears while it is
+   still reachable:
+
+   ```bash
+   aws s3 rm s3://lerian-cloudformation-templates/releases/latest/products/midaz/application.yaml
+   aws s3 rm s3://lerian-cloudformation-templates/releases/latest/products/midaz/helm.yaml
+   aws s3 rm s3://lerian-cloudformation-templates/releases/latest/products/midaz/full-stack.yaml
+   ```
+
+   Versioned prefixes (`releases/v*/`, `products/midaz/*/v*/`) are immutable
+   history and stay as they are: stacks already deployed from them reference
+   those URLs on update.
+8. **Deploy the new delivery option once in a sandbox account** before the
+   listing goes live, and confirm the cluster appears connected in the control
+   plane. No CI check can prove this; it is the only end-to-end verification
+   that the enrollment path works.

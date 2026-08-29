@@ -1,181 +1,121 @@
 # AWS Marketplace - Checklist de Publicação
 
-## 1. Setup da Infraestrutura (Uma vez)
+O produto já está publicado: `prod-fildx2w4ikmba`, entidade `AmiProduct@1.0`,
+"Lerian Midaz - Open-Source Ledger System". Este arquivo cobre o que é feito a
+cada nova versão da listagem. Os changesets prontos estão em
+[marketplace-changesets.md](marketplace-changesets.md), e o texto das delivery
+options em [marketplace-delivery-options.md](marketplace-delivery-options.md).
 
-### 1.1 Criar bucket S3 e IAM Role
+O template que a listagem lança é `templates/foundation.yaml`: VPC + EKS + agent
+Lerian. Nenhum template deste repositório instala produto — isso é feito pelo
+control plane, através do agent, de dentro do cluster.
+
+---
+
+## 1. Infraestrutura de release (uma vez, já feita)
+
+O bucket de distribuição é `lerian-cloudformation-templates` (sa-east-1), e o
+release é publicado nele pelo workflow `.github/workflows/release.yml` via OIDC.
 
 ```bash
-# Configurar variáveis (opcional - já tem defaults)
-export BUCKET_NAME="midaz-cloudformation-templates"
-export AWS_REGION="us-east-1"
-export GITHUB_ORG="LerianStudio"
-export GITHUB_REPO="lerian-cloudformation-foundation"
-
-# Executar setup
+# Recriar o bucket e a role do GitHub Actions, se necessário
 ./scripts/setup-release-infrastructure.sh
 ```
 
-Isso cria:
-- ✅ S3 Bucket com acesso público para templates
-- ✅ IAM Role para GitHub Actions (OIDC)
-- ✅ Bucket policy para CloudFormation
-
-### 1.2 Configurar GitHub Secret
-
-Após o setup, adicionar o secret no repositório:
-
-1. Ir em **Settings** → **Secrets and variables** → **Actions**
-2. Criar **New repository secret**:
-   - Name: `AWS_ROLE_ARN`
-   - Value: `arn:aws:iam::ACCOUNT_ID:role/midaz-cloudformation-templates-github-actions`
+O secret `AWS_ROLE_ARN` do repositório aponta para a role criada por esse script.
 
 ---
 
-## 2. Primeira Release
+## 2. Validação pré-Marketplace
 
-### 2.1 Inicializar o repositório Git (se ainda não)
-
-```bash
-git init
-git add .
-git commit -m "feat: initial release of Midaz CloudFormation templates"
-git remote add origin git@github.com:LerianStudio/lerian-cloudformation-foundation.git
-git push -u origin main
-```
-
-### 2.2 Verificar Release Automático
-
-Após o push, o workflow `auto-release.yml` irá:
-- Criar tags para cada template (ex: `vpc-v0.1.0`)
-- Criar tag do bundle (ex: `release-v0.1.0`)
-- Upload para S3
-- Criar GitHub Releases
-
----
-
-## 3. Validação Pré-Marketplace
-
-### 3.1 Validar Templates Localmente
+### 2.1 Validar templates localmente
 
 ```bash
-# Instalar cfn-lint
-pip install cfn-lint
-
-# Validar todos os templates
-cfn-lint templates/*.yaml
-
-# Ou usar o script
+pip install cfn-lint pyyaml
 ./scripts/validate.sh
 ```
 
-### 3.2 Testar Deploy Manual
+`validate.sh` roda o parse YAML de todos os templates, confere os parâmetros
+obrigatórios de Marketplace em `foundation.yaml`, checa `NoEcho` nos parâmetros
+sensíveis, executa `scripts/check-agent-templates.py` (comportamento do handler
+do agent e o guarda de parâmetros da foundation), `scripts/check-docs-links.py`
+(todo link de template citado na documentação existe no layout de release) e,
+se `cfn-lint` estiver instalado, o lint completo.
+
+O CI roda o mesmo conjunto em cada pull request, mais Checkov e cfn-lint em sete
+regiões.
+
+### 2.2 Teste de deploy
+
+Um deploy real em conta sandbox é a única verificação de que o caminho de
+enrolamento funciona ponta a ponta — nenhum check de CI prova isso. Lance a
+`foundation.yaml` com `ControlPlaneURL`, `EnrollmentToken` e `AgentChartVersion`
+preenchidos e confirme que o cluster aparece como conectado no console.
 
 ```bash
-# Testar em us-east-1
-aws cloudformation deploy \
-  --stack-name midaz-test \
-  --template-file templates/midaz-complete.yaml \
-  --parameter-overrides \
-    EnvironmentName=test \
-    AvailabilityZone1=us-east-1a \
-    AvailabilityZone2=us-east-1b \
-    AvailabilityZone3=us-east-1c \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-1
+aws cloudformation create-stack \
+  --stack-name lerian-foundation-test \
+  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml \
+  --parameters \
+    ParameterKey=AvailabilityZone1,ParameterValue=sa-east-1a \
+    ParameterKey=AvailabilityZone2,ParameterValue=sa-east-1b \
+    ParameterKey=AvailabilityZone3,ParameterValue=sa-east-1c \
+    ParameterKey=ControlPlaneURL,ParameterValue=https://api.lerian.studio \
+    ParameterKey=EnrollmentToken,ParameterValue=<token-do-console> \
+    ParameterKey=AgentChartVersion,ParameterValue=<versao-do-chart> \
+  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --region sa-east-1
 
-# Limpar após teste
-aws cloudformation delete-stack --stack-name midaz-test --region us-east-1
+# Limpar após o teste
+aws cloudformation delete-stack --stack-name lerian-foundation-test --region sa-east-1
 ```
 
 ---
 
-## 4. Requisitos do AWS Marketplace
+## 3. Requisitos do AWS Marketplace
 
-### 4.1 Checklist Técnico
+### 3.1 Checklist técnico
 
 - [x] Templates hospedados em S3 público
 - [x] URLs S3 para nested stacks (não paths relativos)
 - [x] Parâmetros MPS3BucketName, MPS3BucketRegion, MPS3KeyPrefix
-- [x] NoEcho em parâmetros sensíveis (passwords, usernames)
+- [x] Parâmetro `MarketplaceAMI` na `foundation.yaml`, para o binding
+      `TemplateSources` exigido pela entidade `AmiProduct`
+- [x] NoEcho em parâmetros sensíveis (`EnrollmentToken`)
 - [x] AllowedPattern e ConstraintDescription em parâmetros
 - [x] Descriptions claras em todos os parâmetros
 - [x] Metadata com ParameterGroups e ParameterLabels
-- [ ] Testar em pelo menos 3 regiões (us-east-1, eu-west-1, ap-southeast-1)
-- [ ] Documentação do produto
+- [ ] Deploy de validação em conta sandbox (seção 2.2)
 
-### 4.2 Documentação Necessária
+### 3.2 Documentação
 
-Criar na pasta `docs/`:
-- [ ] `ARCHITECTURE.md` - Diagrama de arquitetura
-- [ ] `PRICING.md` - Estimativa de custos
-- [ ] `USER_GUIDE.md` - Guia de uso
-- [ ] `TROUBLESHOOTING.md` - Problemas comuns
+- [x] `docs/ARCHITECTURE.md`
+- [x] `docs/TROUBLESHOOTING.md`
+- [x] `README.md` com a jornada de onboarding
+- [x] `products/midaz/README.md`
 
-### 4.3 Assets de Marketing
+### 3.3 Assets de marketing
 
-- [ ] Logo do produto (120x120 e 250x250)
-- [ ] Screenshots do console
-- [ ] Descrição curta (< 200 caracteres)
-- [ ] Descrição longa (features, benefícios)
+Já publicados na listagem; só precisam de revisão se a arquitetura mudar.
 
----
-
-## 5. Submissão ao Marketplace
-
-### 5.1 Criar Conta de Seller
-
-1. Acessar [AWS Marketplace Management Portal](https://aws.amazon.com/marketplace/management/)
-2. Registrar como Seller
-3. Completar verificação de identidade
-4. Configurar informações de pagamento
-
-### 5.2 Criar Produto
-
-1. **Product** → **Create product** → **CloudFormation**
-2. Preencher informações:
-   - Product title: `Midaz - Open Source Ledger Platform`
-   - Short description
-   - Long description
-   - Categories: Financial Services, Databases
-3. Upload do logo
-4. Configurar pricing (Free ou BYOL)
-
-### 5.3 Configurar Template
-
-1. **Fulfillment** → **CloudFormation templates**
-2. Adicionar template:
-   - Template URL: `https://midaz-cloudformation-templates.s3.us-east-1.amazonaws.com/releases/v1.0.0/midaz-complete.yaml`
-   - Supported regions: selecionar regiões testadas
-3. Configurar parâmetros que serão expostos ao usuário
-
-### 5.4 Submeter para Review
-
-1. **Submit for review**
-2. AWS irá validar:
-   - Template syntax
-   - Security best practices
-   - Compliance com guidelines
-3. Tempo estimado: 3-5 dias úteis
+- [x] Logo do produto (120x120 e 250x250)
+- [x] Diagrama de arquitetura
+- [ ] Screenshots do console (mostrando o cluster conectado e o release do Midaz)
 
 ---
 
-## 6. Manutenção Pós-Publicação
+## 4. Publicar uma nova versão
 
-### 6.1 Atualizar Versão no Marketplace
-
-Quando houver nova release:
-
-1. Verificar que `auto-release.yml` criou nova versão
-2. No Marketplace Portal:
-   - **Products** → **Midaz** → **Fulfillment**
-   - Atualizar Template URL para nova versão
-   - **Submit for review**
-
-### 6.2 Monitoramento
-
-- Acompanhar métricas no Marketplace Portal
-- Responder reviews de usuários
-- Manter templates atualizados com patches de segurança
+1. Merge na `main`. O workflow de release publica em
+   `releases/latest/` e em `releases/v<versão>/`, e cria a tag e a GitHub Release.
+2. Fazer upload da `foundation.yaml` e de **todos** os templates que ela aninha
+   (`vpc`, `eks`, `agent`, `route53`, `alb-controller`, `external-dns`) para o
+   bucket S3 do Marketplace, sob um único prefixo compartilhado.
+3. Rodar os changesets de [marketplace-changesets.md](marketplace-changesets.md)
+   na ordem descrita lá — a ordem importa, a API rejeita dois dos passos fora de
+   sequência.
+4. Acompanhar em **Products** → **Fulfillment** no Marketplace Portal. Review da
+   AWS leva de 3 a 5 dias úteis.
 
 ---
 
@@ -192,7 +132,11 @@ Quando houver nova release:
 gh release list
 
 # Ver conteúdo do S3
-aws s3 ls s3://midaz-cloudformation-templates/releases/ --recursive
+aws s3 ls s3://lerian-cloudformation-templates/releases/ --recursive
+
+# Ver a listagem publicada
+aws marketplace-catalog describe-entity \
+  --catalog AWSMarketplace --entity-id prod-fildx2w4ikmba --profile lerian_root
 ```
 
 ---
@@ -200,5 +144,6 @@ aws s3 ls s3://midaz-cloudformation-templates/releases/ --recursive
 ## Links Úteis
 
 - [AWS Marketplace Seller Guide](https://docs.aws.amazon.com/marketplace/latest/userguide/cloudformation-products.html)
+- [Work with AMI-based products (Catalog API)](https://docs.aws.amazon.com/marketplace/latest/APIReference/work-with-single-ami-products.html)
 - [CloudFormation Best Practices](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/best-practices.html)
 - [cfn-lint Rules](https://github.com/aws-cloudformation/cfn-lint/blob/main/docs/rules.md)

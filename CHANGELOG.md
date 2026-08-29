@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   twenty minutes - and only then fail and roll all of it back. Supplying only the
   optional chart digest is rejected the same way, instead of quietly producing a
   cluster with no agent.
+- `MarketplaceAMI` on `foundation.yaml`. The listing is an `AmiProduct` entity,
+  so each delivery option must bind its AMI to a parameter of the launched
+  template; without the parameter the `AddDeliveryOptions` changeset is rejected.
+  The cluster runs EKS-managed ARM64 node AMIs and never launches this one.
+- `scripts/check-docs-links.py`, run by CI and by `scripts/validate.sh`: every
+  https template URL the documentation hands a customer is resolved back to the
+  file the release workflow publishes at that key. A launch button pointing at a
+  deleted template, or at a mistyped bucket, now fails the pull request - both
+  defects this release had to fix by hand.
+- A Getting Started section in the README covering the whole journey: enrollment
+  token from the console, Foundation stack, product infrastructure stack, then
+  the product installed from the console by the agent.
 
 ### Removed
 
@@ -67,6 +79,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with that release's prefix. It pinned only the top-level template, so an older
   release's button launched a pinned Foundation that pulled its nested templates
   from `releases/latest/`.
+- The Marketplace listing's delivery options are rewritten to the one path that
+  works. Two of the three published options - Full Stack and Application -
+  launched templates this repository no longer publishes, so a customer following
+  the listing reached a stack that could not be created. The draft changesets in
+  `docs/marketplace-changesets.md` now add a single `Lerian Foundation` option
+  and restrict the three superseded ones, in that order: the Catalog API refuses
+  to restrict the last unrestricted delivery option, so restricting first would
+  have failed. The runbook also sequences the deletion of the retired midaz
+  objects from the release bucket after the listing stops referencing them,
+  rather than before.
+- Documentation links no longer name files that do not exist: the README's
+  cost-estimation and security links, and the cost-estimation link in every
+  GitHub release's notes, pointed at documents this repository has never had.
+- The example control plane URL in the agent and Foundation parameter
+  descriptions is `https://api.lerian.studio`, the address the CLI documents.
+  The previous example named a host that does not resolve.
 
 ## [0.1.0] - 2026-02-02
 
