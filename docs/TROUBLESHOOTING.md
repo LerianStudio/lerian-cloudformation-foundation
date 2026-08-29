@@ -409,9 +409,16 @@ aws cloudformation describe-stacks \
 
 aws logs tail <log-group-from-above> --follow
 
-# Check the custom resource events
-aws cloudformation describe-stack-events \
+# Check the custom resource events. They belong to the nested agent stack, and
+# describe-stack-events does not recurse into nested stacks, so resolve it first.
+AGENT_STACK=$(aws cloudformation describe-stack-resource \
   --stack-name lerian-foundation \
+  --logical-resource-id AgentStack \
+  --query "StackResourceDetail.PhysicalResourceId" \
+  --output text)
+
+aws cloudformation describe-stack-events \
+  --stack-name "$AGENT_STACK" \
   --query "StackEvents[?ResourceType=='AWS::CloudFormation::CustomResource']"
 ```
 
