@@ -292,6 +292,13 @@ jobs:
       - name: Check agent template behaviour
         run: python3 scripts/check-agent-templates.py
 
+      # Launch buttons, quick-create links and copy-paste create-stack commands
+      # all carry a template URL a customer actually fetches. This resolves each
+      # one back to the file the release workflow publishes there, so a link
+      # cannot outlive the template it points at.
+      - name: Check documented template links
+        run: python3 scripts/check-docs-links.py
+
   # ============================================================================
   # CloudFormation-Specific: AWS Marketplace Compliance
   # ============================================================================

@@ -131,9 +131,14 @@ else
     echo "  [SKIP] pyyaml not available"
 fi
 
+echo ""
+echo "7. Checking documented template links..."
+echo "-------------------------------------------"
+python3 "$SCRIPT_DIR/check-docs-links.py"
+
 if [ "$CFN_LINT_AVAILABLE" = true ]; then
     echo ""
-    echo "7. Running cfn-lint..."
+    echo "8. Running cfn-lint..."
     echo "-------------------------------------------"
     cd "$PROJECT_DIR"
     cfn-lint templates/*.yaml products/**/*.yaml || true
@@ -144,7 +149,7 @@ echo "=========================================="
 echo "Validation Complete"
 echo "=========================================="
 echo ""
-echo "Next steps:"
-echo "  1. Create architecture diagram (1100x700 pixels)"
-echo "  2. Upload templates to S3 bucket"
-echo "  3. Submit to AWS Marketplace"
+echo "Next steps: see docs/MARKETPLACE_CHECKLIST.md"
+echo "  1. Merge, so the release workflow publishes to releases/latest/"
+echo "  2. Upload foundation.yaml and its nested templates to the Marketplace bucket"
+echo "  3. Run the changesets in docs/marketplace-changesets.md, in the order given"
