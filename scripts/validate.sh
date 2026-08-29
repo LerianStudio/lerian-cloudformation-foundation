@@ -42,7 +42,13 @@ for template in "$TEMPLATES_DIR"/*.yaml; do
     filename=$(basename "$template")
     case "$YAML_VALIDATOR" in
         python)
-            if python3 -c "import yaml; yaml.safe_load(open('$template'))" 2>/dev/null; then
+            # CloudFormation intrinsics (!Ref, !Sub, ...) are unknown YAML tags:
+            # a plain safe_load rejects every template in this repo.
+            if python3 -c "
+import yaml, sys
+yaml.SafeLoader.add_multi_constructor('!', lambda l, s, n: None)
+yaml.safe_load(open('$template'))
+" 2>/dev/null; then
                 echo "  [OK] $filename"
             else
                 echo "  [FAIL] $filename - Invalid YAML syntax"
