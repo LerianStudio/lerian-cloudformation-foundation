@@ -123,10 +123,10 @@ for param in "${sensitive_params[@]}"; do
 done
 
 echo ""
-echo "6. Checking agent.yaml inline handler behaviour..."
+echo "6. Checking agent template behaviour..."
 echo "-------------------------------------------"
 if python3 -c "import yaml" 2>/dev/null; then
-    python3 "$SCRIPT_DIR/check-agent-handler.py"
+    python3 "$SCRIPT_DIR/check-agent-templates.py"
 else
     echo "  [SKIP] pyyaml not available"
 fi

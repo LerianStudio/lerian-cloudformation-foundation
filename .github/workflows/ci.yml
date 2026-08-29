@@ -285,9 +285,11 @@ jobs:
       # Compiling the inline handler proves it parses. This runs it: the token
       # stays out of the logs, the digest pins the chart, a hostile token cannot
       # break the values document, a moved agent is replaced instead of
-      # duplicated, and a delete never leaves the stack in DELETE_FAILED.
-      - name: Check agent.yaml inline handler behaviour
-        run: python3 scripts/check-agent-handler.py
+      # duplicated, and a delete never leaves the stack in DELETE_FAILED. It also
+      # asserts foundation.yaml's Rules block watches every agent parameter, so
+      # no partial set can reach a deploy that ends without an agent.
+      - name: Check agent template behaviour
+        run: python3 scripts/check-agent-templates.py
 
   # ============================================================================
   # CloudFormation-Specific: AWS Marketplace Compliance

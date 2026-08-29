@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Behavioural checks for the inline Lambda handler in templates/agent.yaml.
+"""Behavioural checks for the agent templates.
 
-The handler ships as a template string, so nothing imports it and nothing type
-checks it. CI compiles it; this script loads it and asserts the behaviours the
-template's comments claim: the enrollment token never reaches a log line, the
-chart is pinned by digest when one is supplied, an opaque token cannot break out
-of the values document, the physical id follows the namespace so a moved agent
-is replaced rather than duplicated, and a delete never wedges the stack.
+templates/agent.yaml carries the Lambda handler as a template string, so nothing
+imports it and nothing type checks it. CI compiles it; this script loads it and
+asserts the behaviours the template's comments claim: the enrollment token never
+reaches a log line, the chart is pinned by digest when one is supplied, an opaque
+token cannot break out of the values document, the physical id follows the
+namespace so a moved agent is replaced rather than duplicated, and a delete never
+wedges the stack.
 
-Run: python3 scripts/check-agent-handler.py
+templates/foundation.yaml decides whether that stack is created at all. Its Rules
+block is the only thing standing between a half-filled parameter set and a
+twenty-minute deploy that ends with a cluster and no agent, so the wiring between
+the agent parameters and that rule is asserted here too.
+
+Run: python3 scripts/check-agent-templates.py
 """
 
 import json
@@ -19,13 +25,47 @@ import types
 
 import yaml
 
-TEMPLATE = pathlib.Path(__file__).resolve().parent.parent / "templates" / "agent.yaml"
+TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "templates"
+AGENT = TEMPLATES / "agent.yaml"
+FOUNDATION = TEMPLATES / "foundation.yaml"
+
+
+class CFNLoader(yaml.SafeLoader):
+    """Keeps intrinsics as {tag: value} instead of discarding them."""
+
+
+def _intrinsic(loader, suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        return {suffix: loader.construct_scalar(node)}
+    if isinstance(node, yaml.SequenceNode):
+        return {suffix: loader.construct_sequence(node, deep=True)}
+    return {suffix: loader.construct_mapping(node, deep=True)}
+
+
+CFNLoader.add_multi_constructor("!", _intrinsic)
+
+
+def load_template(path):
+    return yaml.load(path.read_text(), Loader=CFNLoader)
+
+
+def refs(node, known):
+    """Every template parameter Ref'd anywhere under node."""
+    if isinstance(node, dict):
+        found = set()
+        for key, value in node.items():
+            if key == "Ref" and isinstance(value, str) and value in known:
+                found.add(value)
+            else:
+                found |= refs(value, known)
+        return found
+    if isinstance(node, list):
+        return set().union(*(refs(item, known) for item in node))
+    return set()
 
 
 def load_handler():
-    loader = yaml.SafeLoader
-    loader.add_multi_constructor("!", lambda l, suffix, node: None)
-    doc = yaml.load(TEMPLATE.read_text(), Loader=loader)
+    doc = load_template(AGENT)
     source = doc["Resources"]["AgentDeployerFunction"]["Properties"]["Code"]["ZipFile"]
     module = types.ModuleType("agent_handler")
     exec(compile(source, "agent.yaml:AgentDeployerFunction", "exec"), module.__dict__)
@@ -132,7 +172,32 @@ def check_delete_never_wedges_the_stack(mod):
     assert "skipped" in sent["data"]["Message"], sent
 
 
-CHECKS = (
+def check_every_agent_parameter_arms_the_rule():
+    doc = load_template(FOUNDATION)
+    known = set(doc["Parameters"])
+    stacks = {
+        name: refs(resource.get("Properties", {}).get("Parameters", {}), known)
+        for name, resource in doc["Resources"].items()
+        if resource.get("Type") == "AWS::CloudFormation::Stack"
+    }
+    shared = set().union(*(p for name, p in stacks.items() if name != "AgentStack"))
+    agent_only = stacks["AgentStack"] - shared
+    assert agent_only, "AgentStack forwards no parameter of its own"
+
+    armed = refs(doc["Rules"]["AgentParametersComplete"]["RuleCondition"], known)
+    # A parameter the rule does not watch is a parameter a user can fill on its
+    # own: no assertion fires, ShouldDeployAgent stays false, and the deploy
+    # ends in a cluster with no agent and no error.
+    missing = agent_only - armed
+    assert not missing, f"agent parameters missing from RuleCondition: {sorted(missing)}"
+
+    # The condition that actually creates the stack may only rest on parameters
+    # the rule has already proven arrive together.
+    gate = refs(doc["Conditions"]["ShouldDeployAgent"], known)
+    assert gate <= armed, f"ShouldDeployAgent rests on unguarded parameters: {sorted(gate - armed)}"
+
+
+HANDLER_CHECKS = (
     check_token_never_logged,
     check_digest_pins_the_chart,
     check_values_survive_a_hostile_token,
@@ -140,13 +205,19 @@ CHECKS = (
     check_delete_never_wedges_the_stack,
 )
 
+TEMPLATE_CHECKS = (check_every_agent_parameter_arms_the_rule,)
+
 
 def main():
     mod = load_handler()
-    for check in CHECKS:
+    for check in HANDLER_CHECKS:
         check(mod)
         print(f"  [PASS] {check.__name__}")
-    print(f"agent.yaml inline handler: {len(CHECKS)}/{len(CHECKS)} checks passed")
+    for check in TEMPLATE_CHECKS:
+        check()
+        print(f"  [PASS] {check.__name__}")
+    total = len(HANDLER_CHECKS) + len(TEMPLATE_CHECKS)
+    print(f"agent templates: {total}/{total} checks passed")
     return 0
 
 

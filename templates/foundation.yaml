@@ -324,19 +324,25 @@ Parameters:
 # parameter set is rejected at the CreateStack call. Left to a Condition, the
 # same mistake would build the VPC and the EKS cluster first - roughly twenty
 # minutes - and only then fail the nested agent stack and roll all of it back.
+#
+# Every agent parameter appears in the RuleCondition, AgentChartDigest included:
+# touching any one of them means the agent is wanted, so the three required ones
+# are asserted. A digest supplied on its own would otherwise pass silently and
+# leave a cluster with no agent and no error.
 Rules:
   AgentParametersComplete:
     RuleCondition: !Or
       - !Not [!Equals [!Ref ControlPlaneURL, ""]]
       - !Not [!Equals [!Ref EnrollmentToken, ""]]
       - !Not [!Equals [!Ref AgentChartVersion, ""]]
+      - !Not [!Equals [!Ref AgentChartDigest, ""]]
     Assertions:
       - Assert: !Not [!Equals [!Ref ControlPlaneURL, ""]]
-        AssertDescription: "ControlPlaneURL is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave all three empty for a cluster with no control-plane connection."
+        AssertDescription: "ControlPlaneURL is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave every agent parameter empty - AgentChartDigest included - for a cluster with no control-plane connection."
       - Assert: !Not [!Equals [!Ref EnrollmentToken, ""]]
-        AssertDescription: "EnrollmentToken is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave all three empty for a cluster with no control-plane connection."
+        AssertDescription: "EnrollmentToken is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave every agent parameter empty - AgentChartDigest included - for a cluster with no control-plane connection."
       - Assert: !Not [!Equals [!Ref AgentChartVersion, ""]]
-        AssertDescription: "AgentChartVersion is required to install the Lerian agent. It has no default so a stale agent is never installed silently - supply the version you intend to run."
+        AssertDescription: "AgentChartVersion is required to install the Lerian agent. It has no default so a stale agent is never installed silently - supply the version you intend to run. AgentChartDigest alone is not enough."
 
 Conditions:
   HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
