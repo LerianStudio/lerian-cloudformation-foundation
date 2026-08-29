@@ -75,6 +75,7 @@ def load_handler():
 def check_token_never_logged(mod):
     event = {
         "RequestType": "Update",
+        "ResponseURL": "https://cloudformation-custom-resource-response.example/presigned-secret",
         "ResourceProperties": {
             "EnrollmentToken": "super-secret",
             "ClusterName": "c1",
@@ -85,7 +86,8 @@ def check_token_never_logged(mod):
     logged = json.dumps(mod.redact(event))
     assert "super-secret" not in logged, logged
     assert "older-secret" not in logged, logged
-    assert logged.count("<redacted>") == 2, logged
+    assert "presigned-secret" not in logged, logged
+    assert logged.count("<redacted>") == 3, logged
     # redact works on a copy: the handler still installs with the real token.
     assert event["ResourceProperties"]["EnrollmentToken"] == "super-secret"
 

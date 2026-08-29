@@ -181,6 +181,11 @@ Resources:
 
           def redact(event):
               safe = json.loads(json.dumps(event))
+              # ResponseURL is a one-use presigned URL that authorizes the
+              # CloudFormation result. A log reader must not be able to race the
+              # provider and forge SUCCESS or FAILED for the stack operation.
+              if 'ResponseURL' in safe:
+                  safe['ResponseURL'] = '<redacted>'
               for section in ('ResourceProperties', 'OldResourceProperties'):
                   props = safe.get(section) or {}
                   for name in REDACTED_PROPS:
