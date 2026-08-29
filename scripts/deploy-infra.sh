@@ -59,7 +59,6 @@ aws cloudformation deploy \
         MPS3BucketName="$S3_BUCKET" \
         MPS3BucketRegion="$AWS_REGION" \
         MPS3KeyPrefix="releases/latest/" \
-        MPS3ProductKeyPrefix="releases/latest/products/${PRODUCT}/" \
     --capabilities CAPABILITY_NAMED_IAM \
     --region "$AWS_REGION" \
     --disable-rollback
@@ -76,5 +75,6 @@ aws cloudformation describe-stacks \
     --output table
 
 echo ""
-echo -e "${BLUE}Next: Deploy Helm stack${NC}"
-echo "./scripts/deploy-helm-stack.sh $S3_BUCKET $STACK_NAME $AWS_REGION"
+echo -e "${BLUE}Next: install the product${NC}"
+echo "Open the Lerian console, pick this cluster's agent, and create a release"
+echo "pointing at infrastructure stack '$STACK_NAME'."
