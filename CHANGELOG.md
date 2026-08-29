@@ -124,6 +124,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `upload-templates.sh`'s printed suggestion is fixed too, and
   `scripts/check-docs-links.py` now fails the pull request on any
   `aws cloudformation` command whose subcommand and template option disagree.
+- `upload-templates.sh`'s printed `create-stack` command now supplies the three
+  availability zones. `foundation.yaml` defaults them to `us-east-2a/b/c`, and
+  CloudFormation validates an `AWS::EC2::AvailabilityZone::Name` value against
+  the launch region, so the printed command was rejected at `CreateStack` in
+  every region but one - including `us-east-1`, the script's own default. An
+  operator who uploaded the templates and pasted the command the script handed
+  back got a parameter validation error rather than a stack.
+  `scripts/check-docs-links.py` now reads each documented command's template and
+  fails the pull request when a region-scoped default is left unset, so the same
+  omission cannot return through another command or another parameter.
 - `scripts/check-docs-links.py` no longer skips two kinds of link it claimed to
   cover: an inline link carrying the optional title markdown allows after the
   target matched nothing at all and went unchecked, and a relative

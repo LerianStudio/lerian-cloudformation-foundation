@@ -30,12 +30,21 @@ stack outputs themselves. `deploy` takes `--template-file`, a local path;
 pairing is not a subtle failure - the CLI rejects it with "Unknown options"
 before it calls AWS at all - and it shipped in three places at once.
 
+The fourth check covers the way those same commands fail one step later, past
+the CLI and inside AWS. A parameter typed `AWS::EC2::AvailabilityZone::Name` is
+validated against the launch region, so its default is only valid in the region
+it was written for: foundation.yaml defaults to us-east-2a/b/c. A command that
+does not override those defaults is rejected at CreateStack in every other
+region - including us-east-1 - before a single resource is created.
+
 Run: python3 scripts/check-docs-links.py
 """
 
 import pathlib
 import re
 import sys
+
+import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -69,6 +78,29 @@ TEMPLATE_OPTION = {
     "update-stack": "--template-url",
 }
 CFN_COMMAND = re.compile(r"aws\s+cloudformation\s+(deploy|create-stack|update-stack)\b")
+TEMPLATE_ARGUMENT = re.compile(r"--template-(?:url|file)[=\s]+(\S+)")
+
+# A shell variable in a template argument is expanded by the reader's shell, not
+# here. Dropping it leaves the literal path around it, which is what identifies
+# the template.
+SHELL_VARIABLE = re.compile(r"\$\{?\w+\}?")
+
+
+class CFNLoader(yaml.SafeLoader):
+    """Keeps intrinsics as {tag: value} instead of refusing to load the file."""
+
+
+CFNLoader.add_multi_constructor(
+    "!", lambda loader, suffix, node: {suffix: str(getattr(node, "value", ""))}
+)
+
+
+def command_sources():
+    return sorted(
+        p
+        for p in ROOT.rglob("*")
+        if p.suffix in {".md", ".sh", ".yaml", ".yml"} and ".git" not in p.parts
+    )
 
 
 def publishes(key):
@@ -172,10 +204,7 @@ def cfn_commands(text):
 def check_cli_commands_use_the_right_template_option():
     failures = []
     checked = 0
-    sources = [p for p in ROOT.rglob("*") if p.suffix in {".md", ".sh", ".yaml", ".yml"}]
-    for path in sorted(sources):
-        if ".git" in path.parts:
-            continue
+    for path in command_sources():
         for lineno, subcommand, body in cfn_commands(path.read_text()):
             checked += 1
             wanted = TEMPLATE_OPTION[subcommand]
@@ -187,6 +216,71 @@ def check_cli_commands_use_the_right_template_option():
                         f"it takes {wanted}"
                     )
     assert not failures, "aws cli commands the cli would reject:\n  " + "\n  ".join(failures)
+    return checked
+
+
+def template_behind(argument):
+    """The repository template a --template-url or --template-file argument names.
+
+    The argument can be an S3 URL, a local path, or either one assembled from
+    shell variables, so it is matched by the path it ends with: `foundation.yaml`
+    resolves to templates/foundation.yaml, and the ambiguous `infrastructure.yaml`
+    is disambiguated by the product directory in front of it. None when nothing
+    in the tree matches - a placeholder like `https://...` names no template
+    whose parameters could be checked.
+    """
+    parts = [p for p in SHELL_VARIABLE.sub("", argument.strip("\"'")).split("/") if p]
+    if not parts or not parts[-1].endswith((".yaml", ".yml")):
+        return None
+    candidates = [p for p in ROOT.rglob("*.yaml") if ".git" not in p.parts]
+    for depth in range(1, len(parts) + 1):
+        tail = parts[-depth:]
+        matches = [p for p in candidates if list(p.relative_to(ROOT).parts)[-depth:] == tail]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            return None
+    return None
+
+
+def region_scoped_defaults(template):
+    """Parameters whose default only works in the region the template was written for.
+
+    An `AWS::`-prefixed parameter type is resolved against the launch region and
+    account, so CloudFormation validates its value before it creates anything. A
+    default for one is a region baked into the template: correct where the author
+    stood, rejected everywhere else.
+    """
+    document = yaml.load(template.read_text(), Loader=CFNLoader) or {}
+    parameters = document.get("Parameters") or {}
+    return sorted(
+        name
+        for name, spec in parameters.items()
+        if isinstance(spec, dict)
+        and str(spec.get("Type", "")).startswith(("AWS::", "List<AWS::"))
+        and "Default" in spec
+    )
+
+
+def check_commands_override_region_scoped_defaults():
+    failures = []
+    checked = 0
+    for path in command_sources():
+        for lineno, _subcommand, body in cfn_commands(path.read_text()):
+            argument = TEMPLATE_ARGUMENT.search(body)
+            template = template_behind(argument.group(1)) if argument else None
+            if template is None:
+                continue
+            checked += 1
+            missing = [name for name in region_scoped_defaults(template) if name not in body]
+            if missing:
+                failures.append(
+                    f"{path.relative_to(ROOT)}:{lineno}: launches "
+                    f"{template.relative_to(ROOT)} without {', '.join(missing)}; "
+                    f"the template's defaults name another region and CreateStack "
+                    f"rejects them here"
+                )
+    assert not failures, "commands AWS would reject at CreateStack:\n  " + "\n  ".join(failures)
     return checked
 
 
@@ -212,13 +306,40 @@ def check_link_patterns_match_what_they_claim():
     # The continuation must stop at the end of the command, not run into the next.
     _, _, body = next(cfn_commands("aws cloudformation create-stack \\\n  --template-url x\nrm -rf /"))
     assert "rm -rf" not in body
-    return 8
+
+    # A template argument reaches the file whether it arrives as a URL, a local
+    # path, or a string the reader's shell assembles.
+    assert template_behind("templates/foundation.yaml") == ROOT / "templates" / "foundation.yaml"
+    assert (
+        template_behind("https://b.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml")
+        == ROOT / "templates" / "foundation.yaml"
+    )
+    assert (
+        template_behind('"https://${BUCKET}.s3.${REGION}.amazonaws.com/${PREFIX}foundation.yaml"')
+        == ROOT / "templates" / "foundation.yaml"
+    )
+    # A basename every product shares is only resolved once the directory in
+    # front of it says which product, and a placeholder resolves to nothing.
+    assert template_behind("releases/latest/products/midaz/infrastructure.yaml") == (
+        ROOT / "products" / "midaz" / "infrastructure.yaml"
+    )
+    assert template_behind("infrastructure.yaml") is None
+    assert template_behind("https://...") is None
+    # The parameters this repository actually has to override, read from the
+    # template rather than named here, so a fourth one is covered on arrival.
+    assert region_scoped_defaults(ROOT / "templates" / "foundation.yaml") == [
+        "AvailabilityZone1",
+        "AvailabilityZone2",
+        "AvailabilityZone3",
+    ]
+    return 15
 
 
 CHECKS = (
     check_documented_templates_are_published,
     check_relative_doc_links_resolve,
     check_cli_commands_use_the_right_template_option,
+    check_commands_override_region_scoped_defaults,
     check_link_patterns_match_what_they_claim,
 )
 
