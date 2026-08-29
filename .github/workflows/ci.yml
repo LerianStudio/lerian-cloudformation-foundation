@@ -282,6 +282,13 @@ jobs:
           print("=" * 60)
           EOF
 
+      # Compiling the inline handler proves it parses. This runs it: the token
+      # stays out of the logs, the digest pins the chart, a hostile token cannot
+      # break the values document, a moved agent is replaced instead of
+      # duplicated, and a delete never leaves the stack in DELETE_FAILED.
+      - name: Check agent.yaml inline handler behaviour
+        run: python3 scripts/check-agent-handler.py
+
   # ============================================================================
   # CloudFormation-Specific: AWS Marketplace Compliance
   # ============================================================================

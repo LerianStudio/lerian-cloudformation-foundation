@@ -122,9 +122,18 @@ for param in "${sensitive_params[@]}"; do
     fi
 done
 
+echo ""
+echo "6. Checking agent.yaml inline handler behaviour..."
+echo "-------------------------------------------"
+if python3 -c "import yaml" 2>/dev/null; then
+    python3 "$SCRIPT_DIR/check-agent-handler.py"
+else
+    echo "  [SKIP] pyyaml not available"
+fi
+
 if [ "$CFN_LINT_AVAILABLE" = true ]; then
     echo ""
-    echo "6. Running cfn-lint..."
+    echo "7. Running cfn-lint..."
     echo "-------------------------------------------"
     cd "$PROJECT_DIR"
     cfn-lint templates/*.yaml products/**/*.yaml || true
