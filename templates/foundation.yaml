@@ -320,16 +320,33 @@ Parameters:
     AllowedPattern: "^$|^sha256:[a-f0-9]{64}$"
     ConstraintDescription: "Must be empty or a sha256:<64 hex characters> digest"
 
+# Rules run before CloudFormation creates anything, so a half-filled agent
+# parameter set is rejected at the CreateStack call. Left to a Condition, the
+# same mistake would build the VPC and the EKS cluster first - roughly twenty
+# minutes - and only then fail the nested agent stack and roll all of it back.
+Rules:
+  AgentParametersComplete:
+    RuleCondition: !Or
+      - !Not [!Equals [!Ref ControlPlaneURL, ""]]
+      - !Not [!Equals [!Ref EnrollmentToken, ""]]
+      - !Not [!Equals [!Ref AgentChartVersion, ""]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ControlPlaneURL, ""]]
+        AssertDescription: "ControlPlaneURL is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave all three empty for a cluster with no control-plane connection."
+      - Assert: !Not [!Equals [!Ref EnrollmentToken, ""]]
+        AssertDescription: "EnrollmentToken is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave all three empty for a cluster with no control-plane connection."
+      - Assert: !Not [!Equals [!Ref AgentChartVersion, ""]]
+        AssertDescription: "AgentChartVersion is required to install the Lerian agent. It has no default so a stale agent is never installed silently - supply the version you intend to run."
+
 Conditions:
   HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
   ShouldEnableALBController: !Equals [!Ref EnableALBController, "true"]
   ShouldEnableExternalDNS: !And
     - !Condition HasDomainName
     - !Equals [!Ref EnableExternalDNS, "true"]
-  # Both are required: a URL without a token cannot enroll, and a token without
-  # a URL has nowhere to enroll. An empty AgentChartVersion is deliberately NOT
-  # part of this condition - it fails the nested stack by name instead of
-  # silently skipping the agent.
+  # The Rules section above already guarantees these two arrive together with a
+  # chart version, so this condition only separates "agent wanted" from "agent
+  # not wanted"; it never has to describe a half-filled parameter set.
   ShouldDeployAgent: !And
     - !Not [!Equals [!Ref ControlPlaneURL, ""]]
     - !Not [!Equals [!Ref EnrollmentToken, ""]]
