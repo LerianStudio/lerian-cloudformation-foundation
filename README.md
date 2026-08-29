@@ -84,9 +84,10 @@ Four steps, and only the first two are CloudFormation.
 The Foundation stack creates the shared VPC and EKS cluster and enrolls the
 Lerian agent in it. Route53 and ALB Controller are created only when
 `DomainName` is set, and ExternalDNS only when `DomainName` is set and
-`EnableExternalDNS=true`. The agent is installed only when `ControlPlaneURL` and
-`EnrollmentToken` are both supplied — leave them empty for a cluster with no
-control-plane connection.
+`EnableExternalDNS=true`. The agent is installed only when `ControlPlaneURL`,
+`EnrollmentToken` and `AgentChartVersion` are all three supplied — leave them
+empty for a cluster with no control-plane connection. A partial set is rejected
+at CreateStack.
 
 | Stack | Description | Deploy |
 |-------|-------------|--------|

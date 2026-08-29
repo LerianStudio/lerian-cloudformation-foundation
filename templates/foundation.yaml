@@ -309,7 +309,7 @@ Parameters:
   ControlPlaneURL:
     Type: String
     Default: ""
-    Description: "Base URL of the Lerian control plane, e.g. https://api.lerian.studio. Together with EnrollmentToken this installs the Lerian agent in the cluster. Leave both empty for a cluster with no control-plane connection."
+    Description: "Base URL of the Lerian control plane, e.g. https://api.lerian.studio. Together with EnrollmentToken and AgentChartVersion this installs the Lerian agent in the cluster. Leave all three empty for a cluster with no control-plane connection."
     AllowedPattern: "^$|^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?(/.*)?$"
     ConstraintDescription: "Must be empty or an https:// URL"
 

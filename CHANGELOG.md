@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Agent Stack** (`agent.yaml`) - installs the `lerian-agent` Helm chart into the
   cluster and enrolls it with the Lerian control plane. Optional nested stack of
-  the Foundation, created when `ControlPlaneURL` and `EnrollmentToken` are both
-  supplied. The chart is pinned by version and, optionally, by OCI digest.
+  the Foundation, created when `ControlPlaneURL`, `EnrollmentToken` and
+  `AgentChartVersion` are all supplied. The chart is pinned by version and,
+  optionally, by OCI digest.
 - CI now compiles the inline Lambda code of every template, so a syntax error is
   caught in the pull request instead of by a stack that hangs until it times out,
   and runs `scripts/check-agent-templates.py`, which asserts what the agent handler
