@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Foundation Infrastructure Stack
-  Deploys shared VPC, EKS, and supporting services (Route53, ALB Controller, ExternalDNS).
+  Deploys shared VPC, EKS, and supporting services (Route53, ALB Controller, ExternalDNS),
+  and enrolls the Lerian agent in the cluster so the control plane can install products into it.
   Product stacks receive this stack's outputs as parameters (ExistingVpcId, ExistingClusterName, etc.).
   (c) Lerian Studio - https://lerian.studio
 
@@ -43,6 +44,13 @@ Metadata:
           - DomainName
           - EnableALBController
           - EnableExternalDNS
+      - Label:
+          default: "Lerian Control Plane"
+        Parameters:
+          - ControlPlaneURL
+          - EnrollmentToken
+          - AgentChartVersion
+          - AgentChartDigest
     ParameterLabels:
       # AWS Marketplace
       MPS3BucketName:
@@ -89,6 +97,15 @@ Metadata:
         default: "Enable ALB Controller"
       EnableExternalDNS:
         default: "Enable ExternalDNS"
+      # Lerian Control Plane
+      ControlPlaneURL:
+        default: "Control Plane URL"
+      EnrollmentToken:
+        default: "Agent Enrollment Token"
+      AgentChartVersion:
+        default: "Agent Chart Version"
+      AgentChartDigest:
+        default: "Agent Chart Digest (Optional)"
 
 Parameters:
   # =============================================================================
@@ -276,12 +293,49 @@ Parameters:
       - "false"
     Description: Enable ExternalDNS for automatic DNS management (requires DomainName)
 
+  # =============================================================================
+  # LERIAN CONTROL PLANE (AGENT ENROLLMENT)
+  # =============================================================================
+  ControlPlaneURL:
+    Type: String
+    Default: ""
+    Description: "Base URL of the Lerian control plane, e.g. https://cp.lerian.studio. Together with EnrollmentToken this installs the Lerian agent in the cluster. Leave both empty for a cluster with no control-plane connection."
+    AllowedPattern: "^$|^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?(/.*)?$"
+    ConstraintDescription: "Must be empty or an https:// URL"
+
+  EnrollmentToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Single-use enrollment token issued by the Lerian control plane for this tenant. Required together with ControlPlaneURL to install the agent."
+
+  AgentChartVersion:
+    Type: String
+    Default: ""
+    Description: "Version of the lerian-agent Helm chart to install. Required when the agent is enabled; deliberately has no version default so a stale agent is never installed silently."
+    AllowedPattern: "^$|^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+    ConstraintDescription: "Must be empty or an exact semantic version (e.g. 1.4.0)"
+
+  AgentChartDigest:
+    Type: String
+    Default: ""
+    Description: "Optional OCI manifest digest pinning the agent chart, e.g. sha256:<64 hex>. When set, the install is rejected unless AgentChartVersion resolves to it."
+    AllowedPattern: "^$|^sha256:[a-f0-9]{64}$"
+    ConstraintDescription: "Must be empty or a sha256:<64 hex characters> digest"
+
 Conditions:
   HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
   ShouldEnableALBController: !Equals [!Ref EnableALBController, "true"]
   ShouldEnableExternalDNS: !And
     - !Condition HasDomainName
     - !Equals [!Ref EnableExternalDNS, "true"]
+  # Both are required: a URL without a token cannot enroll, and a token without
+  # a URL has nowhere to enroll. An empty AgentChartVersion is deliberately NOT
+  # part of this condition - it fails the nested stack by name instead of
+  # silently skipping the agent.
+  ShouldDeployAgent: !And
+    - !Not [!Equals [!Ref ControlPlaneURL, ""]]
+    - !Not [!Equals [!Ref EnrollmentToken, ""]]
 
 Resources:
   # =============================================================================
@@ -409,6 +463,34 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
+  # =============================================================================
+  # LERIAN AGENT STACK
+  # =============================================================================
+  # Last stack in the chain and the end of the deployment story told here: once
+  # the agent is enrolled, the control plane installs products into this cluster.
+  AgentStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployAgent
+    DependsOn: EKSStack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}agent.yaml"
+      Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
+        ControlPlaneURL: !Ref ControlPlaneURL
+        EnrollmentToken: !Ref EnrollmentToken
+        AgentChartVersion: !Ref AgentChartVersion
+        AgentChartDigest: !Ref AgentChartDigest
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-agent-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
 Outputs:
   # =============================================================================
   # STACK METADATA
@@ -503,6 +585,24 @@ Outputs:
     Condition: ShouldEnableExternalDNS
     Description: ExternalDNS IAM Role ARN
     Value: !GetAtt ExternalDNSStack.Outputs.ExternalDNSRoleArn
+
+  # =============================================================================
+  # LERIAN AGENT OUTPUTS
+  # =============================================================================
+  AgentNamespace:
+    Condition: ShouldDeployAgent
+    Description: Kubernetes namespace the Lerian agent runs in
+    Value: !GetAtt AgentStack.Outputs.AgentNamespace
+
+  AgentChartVersion:
+    Condition: ShouldDeployAgent
+    Description: Version of the lerian-agent chart installed in this cluster
+    Value: !GetAtt AgentStack.Outputs.AgentChartVersion
+
+  AgentLogGroup:
+    Condition: ShouldDeployAgent
+    Description: CloudWatch Log Group holding the agent installation log
+    Value: !GetAtt AgentStack.Outputs.AgentLogGroup
 
   # =============================================================================
   # UTILITY COMMANDS

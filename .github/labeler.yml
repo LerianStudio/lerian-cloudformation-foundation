@@ -41,26 +41,18 @@ template:external-dns:
   - changed-files:
       - any-glob-to-any-file: 'templates/external-dns.yaml'
 
+template:agent:
+  - changed-files:
+      - any-glob-to-any-file: 'templates/agent.yaml'
+
 # Product: midaz
 product:midaz:
   - changed-files:
       - any-glob-to-any-file: 'products/midaz/**'
 
-product:midaz-complete:
-  - changed-files:
-      - any-glob-to-any-file: 'products/midaz/full-stack.yaml'
-
 product:midaz-infrastructure:
   - changed-files:
       - any-glob-to-any-file: 'products/midaz/infrastructure.yaml'
-
-product:midaz-helm:
-  - changed-files:
-      - any-glob-to-any-file: 'products/midaz/helm.yaml'
-
-product:midaz-application:
-  - changed-files:
-      - any-glob-to-any-file: 'products/midaz/application.yaml'
 
 # Area labels
 area:templates:
@@ -116,7 +108,7 @@ type:kubernetes:
           - 'templates/eks.yaml'
           - 'templates/alb-controller.yaml'
           - 'templates/external-dns.yaml'
-          - 'products/*/helm.yaml'
+          - 'templates/agent.yaml'
 
 type:messaging:
   - changed-files:

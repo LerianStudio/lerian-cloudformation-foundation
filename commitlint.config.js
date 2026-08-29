@@ -33,12 +33,10 @@ module.exports = {
         'alb-controller',
         'external-dns',
         'msk',
+        'agent',
         // Product: midaz
         'midaz',
-        'midaz-helm',
-        'midaz-complete',
         'midaz-infrastructure',
-        'midaz-application',
         // General
         'ci',
         'deps',

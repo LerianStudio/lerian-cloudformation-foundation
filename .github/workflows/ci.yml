@@ -56,11 +56,9 @@ jobs:
         alb-controller
         external-dns
         msk
+        agent
         midaz
-        midaz-helm
         midaz-infrastructure
-        midaz-application
-        midaz-complete
         scripts
         ci
         docs
@@ -241,6 +239,21 @@ jobs:
                       if isinstance(pconfig, dict) and not pconfig.get('Description'):
                           warnings.append(f'{f}: Parameter {pname} missing Description')
 
+                  # Inline Lambda code ships as a template string and is never
+                  # imported by anything, so a syntax error in it only surfaces
+                  # at deploy time, as a stack that hangs until it times out.
+                  for rname, rconfig in (data.get('Resources') or {}).items():
+                      if not isinstance(rconfig, dict):
+                          continue
+                      code = (rconfig.get('Properties') or {}).get('Code') or {}
+                      source = code.get('ZipFile') if isinstance(code, dict) else None
+                      if isinstance(source, str):
+                          try:
+                              compile(source, f'{f}:{rname}', 'exec')
+                              print(f'  [PASS] {f}: inline code of {rname} compiles')
+                          except SyntaxError as se:
+                              errors.append(f'{f}: {rname} inline code has a syntax error: {se}')
+
                   print(f'  [PASS] {f}')
                   validated += 1
 
@@ -322,41 +335,37 @@ jobs:
           errors = []
           warnings = []
 
-          # Check for full-stack.yaml in each product
-          for product_dir in sorted(glob.glob('products/*/')):
-              product = os.path.basename(os.path.normpath(product_dir))
-              master_file = os.path.join(product_dir, 'full-stack.yaml')
+          # templates/foundation.yaml is the template the Marketplace listing launches.
+          entry_file = 'templates/foundation.yaml'
+          if not os.path.exists(entry_file):
+              errors.append(f'{entry_file}: Marketplace entry template is missing')
+          else:
+              print(f"\nChecking Marketplace entry template: {entry_file}")
 
-              if not os.path.exists(master_file):
-                  warnings.append(f'Product {product}: No full-stack.yaml (Marketplace template)')
-                  continue
+              with open(entry_file) as f:
+                  entry = yaml.load(f, Loader=CFNLoader)
 
-              print(f"\nChecking product: {product}")
-
-              with open(master_file) as f:
-                  master = yaml.load(f, Loader=CFNLoader)
-
-              params = master.get('Parameters', {})
+              params = entry.get('Parameters', {})
 
               # Required Marketplace parameters
               required_params = ['MPS3BucketName', 'MPS3BucketRegion', 'MPS3KeyPrefix']
               for p in required_params:
                   if p not in params:
-                      errors.append(f'{product}/full-stack.yaml: Missing required Marketplace parameter: {p}')
+                      errors.append(f'{entry_file}: Missing required Marketplace parameter: {p}')
                   else:
                       print(f'  [PASS] Required parameter: {p}')
 
               # Check TemplateURL format in nested stacks
-              resources = master.get('Resources', {})
+              resources = entry.get('Resources', {})
               for name, resource in resources.items():
                   if resource.get('Type') == 'AWS::CloudFormation::Stack':
                       props = resource.get('Properties', {})
                       template_url = props.get('TemplateURL', '')
                       if isinstance(template_url, str):
                           if template_url.startswith('./') or template_url.startswith('../'):
-                              errors.append(f'{product}/{name}: TemplateURL uses relative path. Must use S3 URL.')
+                              errors.append(f'{entry_file}/{name}: TemplateURL uses relative path. Must use S3 URL.')
                           elif 'Sub' not in str(props.get('TemplateURL', {})):
-                              warnings.append(f'{product}/{name}: TemplateURL should use !Sub for dynamic S3 paths')
+                              warnings.append(f'{entry_file}/{name}: TemplateURL should use !Sub for dynamic S3 paths')
                       else:
                           print(f'  [PASS] Nested stack {name} uses S3 TemplateURL')
 
@@ -368,14 +377,14 @@ jobs:
                       if 'username' in pname_lower or 'keyprefix' in pname_lower:
                           continue  # Skip false positives
                       if not pconfig.get('NoEcho'):
-                          warnings.append(f'{product}/{pname}: Sensitive parameter should have NoEcho: true')
+                          errors.append(f'{entry_file}/{pname}: Sensitive parameter must have NoEcho: true')
                       else:
                           print(f'  [PASS] Sensitive parameter {pname} has NoEcho')
 
               # Check all parameters with AllowedPattern have ConstraintDescription
               for pname, pconfig in params.items():
                   if pconfig.get('AllowedPattern') and not pconfig.get('ConstraintDescription'):
-                      warnings.append(f'{product}/{pname}: Has AllowedPattern but missing ConstraintDescription')
+                      warnings.append(f'{entry_file}/{pname}: Has AllowedPattern but missing ConstraintDescription')
 
           # Check all templates for consistent tagging
           print("\nChecking all templates for tagging consistency...")

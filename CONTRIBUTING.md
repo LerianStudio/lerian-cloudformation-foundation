@@ -114,8 +114,8 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/). 
 Use the template name as scope:
 
 - `vpc`, `eks`, `rds`, `documentdb`, `elasticache`, `amazonmq`
-- `route53`, `alb-controller`, `external-dns`
-- `midaz-helm`, `midaz-infrastructure`, `midaz-complete`
+- `route53`, `alb-controller`, `external-dns`, `agent`
+- `midaz`, `midaz-infrastructure`
 - `scripts`, `ci`, `docs`
 
 ### Examples
