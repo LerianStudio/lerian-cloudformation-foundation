@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token from the console, Foundation stack, product infrastructure stack, then
   the product installed from the console by the agent.
 
+> **Cross-repo dependency, not satisfied by this release:** the Agent Stack
+> installs `lerian-agent` with exactly two values, `controlPlane.url` and
+> `agent.token`, where the token is the single-use enrollment token. The chart
+> published today (`LerianStudio/deployer`, `charts/lerian-agent`) reads
+> `agent.token` as a per-agent bearer token from an out-of-band registration
+> call and also requires `agent.id`, so it rejects that install and the failure
+> rolls back the whole VPC and cluster. A chart version that enrolls has to be
+> published before the Marketplace changeset is submitted, and its version is
+> the one customers are told to pass as `AgentChartVersion`. The gate is written
+> into `docs/marketplace-changesets.md`, step 8, and the values contract is
+> pinned by `scripts/check-agent-templates.py`.
+
 ### Removed
 
 - **BREAKING**: `products/midaz/application.yaml`, `products/midaz/helm.yaml`, and
@@ -59,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `products/midaz/README.md`.
 - `MPS3ProductKeyPrefix` from `products/midaz/infrastructure.yaml` - it pointed at
   the removed `application.yaml`.
+- `scripts/build-lambda-layer.sh`. It built a kubectl/helm Lambda layer for the
+  removed Midaz Helm deployer; no template in this repository consumes a layer,
+  and the agent deployer downloads helm at cold start instead.
 - `examples/` - its parameter tables documented the removed application layer
   (`DeployMidazHelm`, `MidazHelmRepository`, `MidazChartVersion`) and every one of
   its deployment examples launched `midaz-complete.yaml` or
@@ -167,6 +182,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   template the Foundation delivery option launches creates a secret - Secrets
   Manager belongs to the product infrastructure stacks, which this option does
   not launch.
+- The listing no longer claims that no Lambda in the customer's account holds
+  cluster administrator rights after the stack completes. Three of them do, and
+  have to: the agent deployer, and the AWS Load Balancer Controller and
+  ExternalDNS deployers when those are enabled - the first is created on every
+  agent launch and the second on every default launch, and CloudFormation needs
+  each of them to update and delete what it installed. The claim a security
+  reviewer can check against the deployed account is the true one: none of those
+  Lambdas installs, upgrades or configures a Lerian product.
+- The `AgentChartDigest` description no longer overstates what Helm verifies.
+  Helm rejects a version that resolves to a different digest, but a version that
+  resolves to nothing - a typo, or a tag never pushed - installs the digest
+  unchecked, so the stack could report a chart version nothing had verified. The
+  digest is now a stack output of its own, on both the agent stack and the
+  Foundation, and both descriptions name it as the authoritative record.
 - The example control plane URL in the agent and Foundation parameter
   descriptions is `https://api.lerian.studio`, the address the CLI documents.
   The previous example named a host that does not resolve.

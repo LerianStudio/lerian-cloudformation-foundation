@@ -61,7 +61,7 @@ Parameters:
   AgentChartDigest:
     Type: String
     Default: ""
-    Description: "Optional OCI manifest digest pinning the chart, e.g. sha256:<64 hex>. When set, Helm installs by digest and rejects the install if AgentChartVersion does not resolve to it."
+    Description: "Optional OCI manifest digest pinning the chart, e.g. sha256:<64 hex>. When set, Helm installs that exact digest: a version resolving to a different digest is rejected, but a version that resolves to nothing at all installs the digest unchecked. The digest, not the version, is then what ran - the AgentChartDigest output is the authoritative record."
     AllowedPattern: "^$|^sha256:[a-f0-9]{64}$"
     ConstraintDescription: "Must be empty or a sha256:<64 hex characters> digest"
 
@@ -74,6 +74,7 @@ Parameters:
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasChartDigest: !Not [!Equals [!Ref AgentChartDigest, ""]]
 
 Resources:
   # =============================================================================
@@ -324,6 +325,22 @@ Resources:
               os.environ['PATH'] = f"{TMP}:{os.environ.get('PATH', '')}"
 
           def write_values(props):
+              # The values contract with the lerian-agent chart, in full: two keys,
+              # controlPlane.url and agent.token. Nothing else is set, so every other
+              # value the chart exposes keeps its own default.
+              #
+              # CROSS-REPO DEPENDENCY - agent.token here is the single-use ENROLLMENT
+              # token, and the chart must accept it on its own. The lerian-agent chart
+              # published today (LerianStudio/deployer, charts/lerian-agent) does not:
+              # its agent.token is a per-agent bearer token from an out-of-band
+              # registration call, so it also requires a matching agent.id and fails
+              # the install without one. Enrollment - the agent's first heartbeat
+              # consuming the token and fixing its own identity - is what removes that
+              # requirement. A chart version that still requires agent.id fails this
+              # install and rolls the whole foundation back, so AgentChartVersion must
+              # name a chart published AFTER the enrollment contract lands. See
+              # docs/marketplace-changesets.md, step 8.
+              #
               # Written as JSON (valid YAML) so an opaque token can never break out
               # of the values document, and to a file rather than --set so it never
               # lands in the process arguments.
@@ -416,7 +433,10 @@ Resources:
   # environment, and is redacted before the event reaches CloudWatch. Every value
   # the install depends on is its own property, which is what makes CloudFormation
   # re-invoke the function when one of them changes - including the token, whose
-  # change re-runs the install and re-enrolls the agent with the new one.
+  # change re-runs the install with the new one. Whether the control plane then
+  # accepts a second enrollment for an already-enrolled agent is the control
+  # plane's rule, not this stack's: this template only guarantees the new token
+  # reaches the chart.
   # ServiceTimeout bounds a Lambda that dies without answering: without it,
   # CloudFormation waits the default hour before giving up.
   AgentDeployment:
@@ -443,8 +463,12 @@ Outputs:
     Value: !Ref AgentNamespace
 
   AgentChartVersion:
-    Description: Version of the lerian-agent chart that was installed
+    Description: "Version parameter the agent chart was installed with. When AgentChartDigest is set, read that output instead: Helm accepts a version that resolves to nothing, so this value can name a chart it never verified."
     Value: !Ref AgentChartVersion
+
+  AgentChartDigest:
+    Description: "OCI manifest digest the agent chart was pinned to, or 'unpinned' when none was supplied. Authoritative over AgentChartVersion whenever it is set."
+    Value: !If [HasChartDigest, !Ref AgentChartDigest, "unpinned"]
 
   AgentDeployerFunctionArn:
     Description: Agent Deployer Lambda Function ARN

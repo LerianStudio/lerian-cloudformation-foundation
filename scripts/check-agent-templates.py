@@ -98,7 +98,23 @@ def check_digest_pins_the_chart(mod):
     assert mod.chart_reference({"ChartRepository": repo}) == repo
 
 
-def check_values_survive_a_hostile_token(mod):
+def check_values_contract_survives_a_hostile_token(mod):
+    """The whole values contract with the lerian-agent chart, pinned here.
+
+    This stack sends two keys and nothing else: controlPlane.url and
+    agent.token, where agent.token is the SINGLE-USE ENROLLMENT token. The
+    chart published today (LerianStudio/deployer, charts/lerian-agent) reads
+    agent.token as a per-agent bearer token from an out-of-band registration
+    call and therefore also requires agent.id, so it rejects this install;
+    enrollment - the agent's first heartbeat consuming the token and fixing its
+    own identity - is what removes that requirement. Nothing in this repository
+    can verify the chart side, so this assertion is the contract: change it only
+    together with the chart, and with the version customers are told to supply
+    as AgentChartVersion. See docs/marketplace-changesets.md, step 8.
+
+    The token itself is opaque and attacker-influenced, so the same check feeds
+    a token full of YAML metacharacters and re-parses the document.
+    """
     original = mod.VALUES_FILE
     mod.VALUES_FILE = "/tmp/agent-values-check.json"
     hostile = "x\n  evil: true\n#'\""
@@ -114,6 +130,21 @@ def check_values_survive_a_hostile_token(mod):
         if os.path.exists(mod.VALUES_FILE):
             os.remove(mod.VALUES_FILE)
         mod.VALUES_FILE = original
+
+
+def check_digest_is_reported_as_authoritative():
+    """A pinned digest must be readable from the stack, not just the version.
+
+    Helm rejects a version that resolves to a DIFFERENT digest, but a version
+    that resolves to nothing - a typo, or a tag never pushed - installs the
+    digest unchecked (helm v3.21.4, pkg/registry/client.go ValidateReference:
+    "The resource does not have to be tagged when digest is specified"). So the
+    AgentChartVersion output can name a chart nothing verified, and the digest
+    output is the only honest record of what runs.
+    """
+    for path in (AGENT, FOUNDATION):
+        outputs = load_template(path)["Outputs"]
+        assert "AgentChartDigest" in outputs, f"{path.name} reports a chart version with no digest beside it"
 
 
 def check_namespace_change_replaces(mod):
@@ -213,12 +244,15 @@ def check_every_agent_parameter_arms_the_rule():
 HANDLER_CHECKS = (
     check_token_never_logged,
     check_digest_pins_the_chart,
-    check_values_survive_a_hostile_token,
+    check_values_contract_survives_a_hostile_token,
     check_namespace_change_replaces,
     check_delete_never_wedges_the_stack,
 )
 
-TEMPLATE_CHECKS = (check_every_agent_parameter_arms_the_rule,)
+TEMPLATE_CHECKS = (
+    check_every_agent_parameter_arms_the_rule,
+    check_digest_is_reported_as_authoritative,
+)
 
 
 def main():

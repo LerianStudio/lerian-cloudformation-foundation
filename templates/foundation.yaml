@@ -329,7 +329,7 @@ Parameters:
   AgentChartDigest:
     Type: String
     Default: ""
-    Description: "Optional OCI manifest digest pinning the agent chart, e.g. sha256:<64 hex>. When set, the install is rejected unless AgentChartVersion resolves to it."
+    Description: "Optional OCI manifest digest pinning the agent chart, e.g. sha256:<64 hex>. When set, Helm installs that exact digest: a version resolving to a different digest is rejected, but a version that resolves to nothing at all installs the digest unchecked. The AgentChartDigest output is then the authoritative record of what runs."
     AllowedPattern: "^$|^sha256:[a-f0-9]{64}$"
     ConstraintDescription: "Must be empty or a sha256:<64 hex characters> digest"
 
@@ -629,8 +629,13 @@ Outputs:
 
   AgentChartVersion:
     Condition: ShouldDeployAgent
-    Description: Version of the lerian-agent chart installed in this cluster
+    Description: "Version parameter the agent chart was installed with. When AgentChartDigest is set, read that output instead: Helm accepts a version that resolves to nothing, so this value can name a chart it never verified."
     Value: !GetAtt AgentStack.Outputs.AgentChartVersion
+
+  AgentChartDigest:
+    Condition: ShouldDeployAgent
+    Description: "OCI manifest digest the agent chart was pinned to, or 'unpinned' when none was supplied. Authoritative over AgentChartVersion whenever it is set."
+    Value: !GetAtt AgentStack.Outputs.AgentChartDigest
 
   AgentLogGroup:
     Condition: ShouldDeployAgent
