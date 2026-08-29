@@ -166,23 +166,33 @@ ruby << 'RUBYEOF'
 core_templates = Dir.glob('templates/*.yaml').map { |f| File.basename(f, '.yaml') }.to_set
 puts "   Found #{core_templates.size} core templates"
 
-# Check each product's full-stack.yaml references
-Dir.glob('products/*/full-stack.yaml').sort.each do |complete_file|
-  product = complete_file.split('/')[1]
+# foundation.yaml is the entry template; every nested template it names must exist
+content = File.read('templates/foundation.yaml')
+refs = content.scan(/\$\{MPS3KeyPrefix\}([a-z0-9-]+)\.yaml/).flatten.to_set
+
+puts "   foundation.yaml references: #{refs.size} templates"
+
+missing = refs - core_templates
+if missing.any?
+  puts "\n   ❌ foundation.yaml: Missing templates: #{missing.to_a.join(', ')}"
+  exit 1
+else
+  puts "   ✓ foundation.yaml: All referenced templates exist"
+end
+
+# Product infrastructure templates may nest shared templates too
+Dir.glob('products/*/infrastructure.yaml').sort.each do |infra_file|
+  product = infra_file.split('/')[1]
   product_templates = Dir.glob("products/#{product}/*.yaml").map { |f| File.basename(f, '.yaml') }.to_set
   all_templates = core_templates + product_templates
 
-  content = File.read(complete_file)
-  refs = content.scan(/\$\{MPS3KeyPrefix\}(?:products\/#{product}\/)?([a-z-]+)\.yaml/).flatten.to_set
-
-  puts "   #{product}/full-stack.yaml references: #{refs.size} templates"
-
+  refs = File.read(infra_file).scan(/\$\{MPS3(?:Product)?KeyPrefix\}(?:products\/#{product}\/)?([a-z0-9-]+)\.yaml/).flatten.to_set
   missing = refs - all_templates
   if missing.any?
     puts "\n   ❌ #{product}: Missing templates: #{missing.to_a.join(', ')}"
     exit 1
   else
-    puts "   ✓ #{product}: All referenced templates exist"
+    puts "   ✓ #{product}/infrastructure.yaml: #{refs.size} referenced templates exist"
   end
 end
 RUBYEOF
@@ -197,7 +207,7 @@ if [ "$HAS_AWSCLI" = true ]; then
     echo "   (Requires AWS credentials)"
 
     if aws sts get-caller-identity &>/dev/null; then
-        for template in products/*/full-stack.yaml products/*/infrastructure.yaml; do
+        for template in templates/*.yaml products/*/infrastructure.yaml; do
             if [ -f "$template" ]; then
                 if aws cloudformation validate-template --template-body "file://$template" &>/dev/null; then
                     echo -e "  ${GREEN}✓${NC} $template"
@@ -227,10 +237,10 @@ echo ""
 echo "  # 1. Upload templates to S3 (or use local file://)"
 echo "  aws s3 sync templates/ s3://your-bucket/templates/"
 echo ""
-echo "  # 2. Deploy complete stack (replace <product> with your product name)"
+echo "  # 2. Deploy the foundation stack (VPC + EKS + agent)"
 echo "  aws cloudformation deploy \\"
-echo "    --stack-name <product>-test \\"
-echo "    --template-file products/<product>/full-stack.yaml \\"
+echo "    --stack-name lerian-foundation \\"
+echo "    --template-file templates/foundation.yaml \\"
 echo "    --parameter-overrides \\"
 echo "      AvailabilityZone1=us-east-1a \\"
 echo "      AvailabilityZone2=us-east-1b \\"

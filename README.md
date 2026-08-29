@@ -28,37 +28,43 @@ Each product has its own deployment guide under [`products/`](products/):
 ## Architecture Overview
 
 ```
-Option 1: Full Stack (single deploy, standalone)
-┌─────────────────────────────────────────────────────────────┐
-│ full-stack.yaml                                             │
-│ VPC + EKS + RDS + DocumentDB + ElastiCache + AmazonMQ + App │
-└─────────────────────────────────────────────────────────────┘
-
-Option 2: Modular (multi-product, shared infrastructure)
-┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
-│ foundation   │────▶│ product/infra    │────▶│ product/app  │
-│ VPC + EKS    │     │ Databases        │     │ Helm deploy  │
-│ Route53      │     │ Caches, Brokers  │     │              │
-│ ALB + DNS    │     │                  │     │              │
-└──────────────┘     └──────────────────┘     └──────────────┘
-       │             ┌──────────────────┐     ┌──────────────┐
-       └────────────▶│ product/infra    │────▶│ product/app  │
-                     │ Databases        │     │ Helm deploy  │
-                     └──────────────────┘     └──────────────┘
+┌──────────────────────┐     ┌──────────────────┐
+│ foundation           │────▶│ product/infra    │
+│ VPC + EKS            │     │ Databases        │
+│ Route53, ALB + DNS   │     │ Caches, Brokers  │
+│ Lerian agent ────────┼──┐  └──────────────────┘
+└──────────────────────┘  │  ┌──────────────────┐
+                          │  │ product/infra    │
+                          │  │ Databases        │
+                          │  └──────────────────┘
+                          │
+                          ▼  outbound-only
+                   ┌──────────────────────────┐
+                   │ Lerian control plane     │
+                   │ installs product charts  │
+                   │ through the agent        │
+                   └──────────────────────────┘
 ```
 
-- **Full Stack**: Best for single-product deployments. One stack, one deploy.
-- **Modular**: Best when running multiple products on a shared VPC and EKS cluster. Deploy Foundation once, then add product stacks independently.
+CloudFormation delivers a cluster with an enrolled agent, plus the data services
+each product needs. Product applications are installed by the Lerian control
+plane through that agent, from inside the cluster — this repository contains no
+template that installs a product.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 ## Foundation Stack
 
-Use the Foundation stack when deploying **more than one product** on shared infrastructure. It creates the shared VPC and EKS. Route53 and ALB Controller are created only when `DomainName` is set, and ExternalDNS only when `DomainName` is set and `EnableExternalDNS=true`.
+The Foundation stack creates the shared VPC and EKS cluster and enrolls the
+Lerian agent in it. Route53 and ALB Controller are created only when
+`DomainName` is set, and ExternalDNS only when `DomainName` is set and
+`EnableExternalDNS=true`. The agent is installed only when `ControlPlaneURL` and
+`EnrollmentToken` are both supplied — leave them empty for a cluster with no
+control-plane connection.
 
 | Stack | Description | Deploy |
 |-------|-------------|--------|
-| **Foundation** | Shared VPC and EKS, with optional Route53 / ALB Controller / ExternalDNS | [![Launch][img]][foundation-sa-east-1] |
+| **Foundation** | Shared VPC and EKS with the Lerian agent, plus optional Route53 / ALB Controller / ExternalDNS | [![Launch][img]][foundation-sa-east-1] |
 
 [foundation-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml&stackName=lerian-foundation&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/&param_AvailabilityZone1=sa-east-1a&param_AvailabilityZone2=sa-east-1b&param_AvailabilityZone3=sa-east-1c
 

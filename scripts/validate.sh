@@ -66,32 +66,29 @@ done
 echo ""
 echo "2. Checking required Marketplace parameters..."
 echo "-------------------------------------------"
+# foundation.yaml is the template the Marketplace listing launches.
+MARKETPLACE_TEMPLATE="$TEMPLATES_DIR/foundation.yaml"
 required_params=("MPS3BucketName" "MPS3BucketRegion" "MPS3KeyPrefix")
-for complete_template in "${PROJECT_DIR}"/products/*/full-stack.yaml; do
-    product=$(basename "$(dirname "$complete_template")")
-    echo "  Checking product: $product"
-    for param in "${required_params[@]}"; do
-        if grep -q "$param:" "$complete_template"; then
-            echo "  [OK] $param found in $product/full-stack.yaml"
-        else
-            echo "  [FAIL] $param not found in $product/full-stack.yaml"
-            exit 1
-        fi
-    done
+for param in "${required_params[@]}"; do
+    if grep -q "$param:" "$MARKETPLACE_TEMPLATE"; then
+        echo "  [OK] $param found in foundation.yaml"
+    else
+        echo "  [FAIL] $param not found in foundation.yaml"
+        exit 1
+    fi
 done
 
 echo ""
 echo "3. Checking TemplateURL format..."
 echo "-------------------------------------------"
-for complete_template in "${PROJECT_DIR}"/products/*/full-stack.yaml; do
-    product=$(basename "$(dirname "$complete_template")")
-    if grep -q "TemplateURL: \./\|TemplateURL: \"\./" "$complete_template"; then
-        echo "  [FAIL] $product/full-stack.yaml: Found relative TemplateURL paths. Use S3 URLs."
+for template in "$TEMPLATES_DIR"/*.yaml; do
+    filename=$(basename "$template")
+    if grep -q "TemplateURL: \./\|TemplateURL: \"\./" "$template"; then
+        echo "  [FAIL] $filename: Found relative TemplateURL paths. Use S3 URLs."
         exit 1
-    else
-        echo "  [OK] $product/full-stack.yaml: All TemplateURLs use S3 format"
     fi
 done
+echo "  [OK] All TemplateURLs use S3 format"
 
 echo ""
 echo "4. Checking for hardcoded credentials..."
@@ -109,9 +106,9 @@ done
 echo ""
 echo "5. Checking sensitive parameters have NoEcho..."
 echo "-------------------------------------------"
-sensitive_params=("MasterUsername" "AdminUsername")
+sensitive_params=("EnrollmentToken")
 for param in "${sensitive_params[@]}"; do
-    count=$(grep -A5 "$param:" "$MASTER_TEMPLATE" | grep -c "NoEcho: true" || true)
+    count=$(grep -A5 "$param:" "$MARKETPLACE_TEMPLATE" | grep -c "NoEcho: true" || true)
     if [ "$count" -gt 0 ]; then
         echo "  [OK] $param has NoEcho"
     else

@@ -565,12 +565,12 @@ jobs:
           \`\`\`yaml
           MPS3BucketName: ${{ env.S3_BUCKET }}
           MPS3BucketRegion: ${{ env.AWS_REGION }}
-          MPS3KeyPrefix: releases/v$BUNDLE_VERSION/products/midaz/
+          MPS3KeyPrefix: releases/v$BUNDLE_VERSION/
           \`\`\`
 
-          ### Quick Launch (Midaz)
+          ### Quick Launch (Foundation)
 
-          [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/quickcreate?stackName=midaz&templateURL=https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/products/midaz/full-stack.yaml)
+          [![Launch Stack](https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png)](https://console.aws.amazon.com/cloudformation/home?region=${{ env.AWS_REGION }}#/stacks/quickcreate?stackName=lerian-foundation&templateURL=https://${{ env.S3_BUCKET }}.s3.${{ env.AWS_REGION }}.amazonaws.com/releases/v$BUNDLE_VERSION/foundation.yaml)
 
           ### Documentation
 
@@ -608,7 +608,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Marketplace Parameters" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "MPS3KeyPrefix=releases/v$BUNDLE_VERSION/products/midaz/" >> $GITHUB_STEP_SUMMARY
+          echo "MPS3KeyPrefix=releases/v$BUNDLE_VERSION/" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # ============================================================================
