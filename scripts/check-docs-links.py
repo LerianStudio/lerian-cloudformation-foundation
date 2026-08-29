@@ -23,6 +23,13 @@ finds a link to a document this repository has never had is at the same dead
 end, one click further in. Every relative link in every Markdown file must
 resolve to a file or directory that exists.
 
+The third check covers the other kind of copy-pasteable surface: the
+`aws cloudformation` commands in the docs, in the helper scripts, and in the
+stack outputs themselves. `deploy` takes `--template-file`, a local path;
+`create-stack` and `update-stack` take `--template-url`, an S3 URL. The wrong
+pairing is not a subtle failure - the CLI rejects it with "Unknown options"
+before it calls AWS at all - and it shipped in three places at once.
+
 Run: python3 scripts/check-docs-links.py
 """
 
@@ -40,13 +47,28 @@ TEMPLATE_URL = re.compile(
     r"https://([a-z0-9.-]+)\.s3\.([a-z0-9-]+)\.amazonaws\.com/(releases/[^\s)\]\"'&]+\.yaml)"
 )
 
-# Inline markdown links only: [text](target). Reference-style links ([text][ref])
-# and their definitions carry URLs, which the check above already covers.
-MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)\)")
+# Inline markdown links: [text](target), with the optional title markdown allows
+# after the target. Without the title branch a titled link matches nothing at all
+# and is silently skipped rather than checked.
+MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")
+
+# Reference-style definitions: [label]: target. Their targets resolve exactly like
+# an inline link's, so they run through the same loop. The check above only sees
+# https URLs into the release bucket, so a relative one would otherwise be unread.
+# Up to three leading spaces still make a definition; four make a code block.
+REFERENCE_LINK = re.compile(r"^ {0,3}\[[^\]]+\]:\s+(\S+)")
 
 # Anything with a scheme is somebody else's to resolve, and a bare #anchor points
 # inside the file that carries it.
 EXTERNAL_LINK = re.compile(r"^([a-z][a-z0-9+.-]*:|//|#)")
+
+# The template option each aws cloudformation subcommand actually accepts.
+TEMPLATE_OPTION = {
+    "deploy": "--template-file",
+    "create-stack": "--template-url",
+    "update-stack": "--template-url",
+}
+CFN_COMMAND = re.compile(r"aws\s+cloudformation\s+(deploy|create-stack|update-stack)\b")
 
 
 def publishes(key):
@@ -108,7 +130,7 @@ def check_relative_doc_links_resolve():
         if ".git" in path.parts:
             continue
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            for target in MARKDOWN_LINK.findall(line):
+            for target in MARKDOWN_LINK.findall(line) + REFERENCE_LINK.findall(line):
                 if EXTERNAL_LINK.match(target):
                     continue
                 checked += 1
@@ -124,13 +146,87 @@ def check_relative_doc_links_resolve():
     return checked
 
 
-CHECKS = (check_documented_templates_are_published, check_relative_doc_links_resolve)
+def cfn_commands(text):
+    """Yield (lineno, subcommand, body) for each aws cloudformation invocation.
+
+    A command is its first line plus every following line while the previous one
+    ends in a backslash, so the options belonging to it are read and the ones
+    belonging to the next command are not.
+
+    A match opening with a backtick is prose naming the command - a changelog
+    entry, a sentence in the README - not something anyone pastes into a shell.
+    """
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        match = CFN_COMMAND.search(lines[i])
+        if match and not lines[i][: match.start()].endswith("`"):
+            start, body = i + 1, [lines[i]]
+            while body[-1].rstrip().rstrip('"').endswith("\\") and i + 1 < len(lines):
+                i += 1
+                body.append(lines[i])
+            yield start, match.group(1), "\n".join(body)
+        i += 1
+
+
+def check_cli_commands_use_the_right_template_option():
+    failures = []
+    checked = 0
+    sources = [p for p in ROOT.rglob("*") if p.suffix in {".md", ".sh", ".yaml", ".yml"}]
+    for path in sorted(sources):
+        if ".git" in path.parts:
+            continue
+        for lineno, subcommand, body in cfn_commands(path.read_text()):
+            checked += 1
+            wanted = TEMPLATE_OPTION[subcommand]
+            for option in {"--template-file", "--template-url"} - {wanted}:
+                if option in body:
+                    failures.append(
+                        f"{path.relative_to(ROOT)}:{lineno}: "
+                        f"`aws cloudformation {subcommand}` is given {option}; "
+                        f"it takes {wanted}"
+                    )
+    assert not failures, "aws cli commands the cli would reject:\n  " + "\n  ".join(failures)
+    return checked
+
+
+def check_link_patterns_match_what_they_claim():
+    """No document in the tree carries a titled or relative reference link today,
+    so the patterns covering them are asserted directly. Otherwise the coverage is
+    untested until the day something depends on it."""
+    assert MARKDOWN_LINK.findall('[a](./x.md) [b](./y.md "Title") [c](./z.md)') == [
+        "./x.md",
+        "./y.md",
+        "./z.md",
+    ]
+    assert REFERENCE_LINK.findall("[label]: ./ref.md") == ["./ref.md"]
+    assert REFERENCE_LINK.findall("   [three spaces]: ./ref.md") == ["./ref.md"]
+    assert REFERENCE_LINK.findall("    [code block]: ./ref.md") == []
+    assert [c[1] for c in cfn_commands("aws cloudformation deploy \\\n  --template-url x")] == [
+        "deploy"
+    ]
+    # A backticked mention is prose about a command, not a command.
+    assert list(cfn_commands("fixed: `aws cloudformation deploy` took --template-url")) == []
+    # An echoed suggestion is one a reader pastes, so it is a command.
+    assert [c[1] for c in cfn_commands('echo "  aws cloudformation deploy \\\\"')] == ["deploy"]
+    # The continuation must stop at the end of the command, not run into the next.
+    _, _, body = next(cfn_commands("aws cloudformation create-stack \\\n  --template-url x\nrm -rf /"))
+    assert "rm -rf" not in body
+    return 8
+
+
+CHECKS = (
+    check_documented_templates_are_published,
+    check_relative_doc_links_resolve,
+    check_cli_commands_use_the_right_template_option,
+    check_link_patterns_match_what_they_claim,
+)
 
 
 def main():
     for check in CHECKS:
         count = check()
-        print(f"  [PASS] {check.__name__} ({count} links)")
+        print(f"  [PASS] {check.__name__} ({count} checked)")
     print(f"docs links: {len(CHECKS)}/{len(CHECKS)} checks passed")
     return 0
 

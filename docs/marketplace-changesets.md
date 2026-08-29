@@ -141,10 +141,14 @@ aws marketplace-catalog start-change-set \
 ```
 
 **IMPORTANT:** replace `REPLACE_WITH_FOUNDATION_TEMPLATE_URL` with the actual S3
-URL the edited root template was uploaded to. The root template has to live in
-the Marketplace-managed bucket — upload it through the Marketplace console. Its
-nested templates do not: they are fetched from the `MPS3*` prefix baked into
-that root template and copied alongside it at publish time.
+URL the edited root template was uploaded to. The only requirement AWS puts on
+it is that it be a publicly readable S3 URL — Marketplace copies the root
+template and its nested templates into its own bucket at publish time, so the
+copy you submit does not have to start there. Uploading through the Marketplace
+console is one way (it produces the `awsmp-cft-...` URL shown above); uploading
+the edited copy to the release bucket under a one-off prefix — not over the
+released `releases/v<VERSION>/foundation.yaml`, whose `MPS3KeyPrefix` default
+still reads `releases/latest/` — is equally valid.
 
 ---
 
@@ -232,8 +236,10 @@ delete-first sequence 404s the live listing for anyone mid-purchase.
 2. **Add Regions** (changeset 4) — SUBMITTED (`cfxeljkpxcvcuagkmf832ccm`)
 3. **Release this repository to S3.** The GitHub release workflow publishes
    `foundation.yaml` and its nested templates to
-   `s3://lerian-cloudformation-templates/releases/latest/`. Nothing in the
-   Marketplace flow works before this lands.
+   `s3://lerian-cloudformation-templates/releases/latest/`, and the same
+   templates to `s3://lerian-cloudformation-templates/releases/v<VERSION>/` —
+   the immutable copy step 4 pins, `<VERSION>` being the bundle version that
+   release produced. Nothing in the Marketplace flow works before this lands.
 4. **Edit and upload the root `foundation.yaml`.** Set its `MPS3KeyPrefix`
    default to the `releases/v<VERSION>/` prefix step 3 published, upload that
    copy to the Marketplace S3 bucket, and note the resulting template URL. The

@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer published, and Midaz upgrades move to the control plane.
 - Deploy scripts that existed only to drive those templates: `deploy.sh`,
   `deploy-stack.sh`, `deploy-helm.sh`, `deploy-helm-stack.sh`.
+- `deploy-infra.sh`, the last of that family. It could never have deployed
+  anything: it called `aws cloudformation deploy` with `--template-url`, an
+  option that subcommand does not have, and it passed none of the three database
+  master usernames the product stack requires and gives no default. The correct
+  command, per region and with every required parameter, is in
+  `products/midaz/README.md`.
 - `MPS3ProductKeyPrefix` from `products/midaz/infrastructure.yaml` - it pointed at
   the removed `application.yaml`.
 - `examples/` - its parameter tables documented the removed application layer
@@ -107,6 +113,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now pins `MPS3KeyPrefix` to the release's own `releases/v<VERSION>/` prefix in
   the uploaded copy, and states which templates go to the Marketplace bucket and
   which stay in the release bucket.
+- The Foundation stack's own "next step" output no longer hands the customer a
+  command the AWS CLI rejects. It suggested `aws cloudformation deploy` with
+  `--template-url`, which that subcommand does not accept, and it built the URL
+  from the `MPS3*` parameter values - which a Marketplace launch rewrites to the
+  Marketplace copy bucket, a bucket that holds the Foundation's nested templates
+  and never a product template, so the corrected command would still have 404'd.
+  The output is now the three steps that follow the stack, pointing at the
+  product README that carries the full command. The same broken pairing in
+  `upload-templates.sh`'s printed suggestion is fixed too, and
+  `scripts/check-docs-links.py` now fails the pull request on any
+  `aws cloudformation` command whose subcommand and template option disagree.
+- `scripts/check-docs-links.py` no longer skips two kinds of link it claimed to
+  cover: an inline link carrying the optional title markdown allows after the
+  target matched nothing at all and went unchecked, and a relative
+  reference-style definition was excluded on the stated grounds that the
+  template-URL check covered it, which only ever looks at https URLs into the
+  release bucket. Both forms now resolve like any other relative link.
+- The Marketplace runbook no longer claims the root template has to live in the
+  Marketplace-managed bucket. AWS requires only a publicly readable S3 URL, and
+  copies the template into its own bucket at publish time; an operator without
+  console upload access would have read the changeset as blocked. The runbook's
+  execution order also now states that the release publishes the immutable
+  `releases/v<VERSION>/` prefix, which the following step tells the operator to
+  pin without it ever having been established.
 - The listing's security summary no longer claims AWS Secrets Manager. No
   template the Foundation delivery option launches creates a secret - Secrets
   Manager belongs to the product infrastructure stacks, which this option does

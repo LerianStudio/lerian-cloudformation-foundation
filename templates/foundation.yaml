@@ -644,18 +644,23 @@ Outputs:
     Description: Command to configure kubectl
     Value: !Sub "aws eks update-kubeconfig --name ${EKSStack.Outputs.ClusterName} --region ${AWS::Region}"
 
-  DeployProductCommand:
+  # Deliberately not a copy-pasteable deploy command. The product stack has three
+  # parameters with no default (the database master usernames), so any command
+  # short enough to fit in an output would fail at CreateStack; and a Marketplace
+  # launch rewrites the MPS3* values to the Marketplace copy bucket, which holds
+  # only this template's nested stacks - never a product template - so a URL built
+  # from them would 404. The product README carries the whole command, per region.
+  NextSteps:
     Description: |
-      Example command to deploy a product infrastructure stack using this foundation.
-      The product stack auto-imports values via FoundationStackName.
+      What to do after this stack completes. Product applications are installed by
+      the Lerian control plane through the agent, never by a CloudFormation stack.
     Value: !Sub |
-      aws cloudformation deploy \
-        --stack-name midaz-infra \
-        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}products/midaz/infrastructure.yaml \
-        --parameter-overrides \
-          MPS3BucketName=${MPS3BucketName} \
-          MPS3BucketRegion=${MPS3BucketRegion} \
-          MPS3KeyPrefix=${MPS3KeyPrefix} \
-          FoundationStackName=${AWS::StackName} \
-        --capabilities CAPABILITY_IAM \
-        --region ${AWS::Region}
+      1. Confirm this cluster shows as connected in the Lerian console. If the agent
+         parameters were left empty it has no control-plane connection, and nothing
+         can be installed into it until you add one.
+      2. Launch the product infrastructure stack for the product you are deploying,
+         passing FoundationStackName=${AWS::StackName}. It creates the databases,
+         cache and broker, and imports this stack's VPC and cluster.
+         Midaz: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/products/midaz/README.md
+      3. Create the product release in the Lerian console. The agent performs the
+         install from inside the cluster.

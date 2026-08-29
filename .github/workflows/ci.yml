@@ -295,7 +295,10 @@ jobs:
       # Launch buttons, quick-create links and copy-paste create-stack commands
       # all carry a template URL a customer actually fetches. This resolves each
       # one back to the file the release workflow publishes there, so a link
-      # cannot outlive the template it points at.
+      # cannot outlive the template it points at. It also checks the links
+      # between the documents themselves, and that every aws cloudformation
+      # command we hand a customer pairs its subcommand with the template option
+      # the CLI accepts - deploy takes a file, create-stack takes a URL.
       - name: Check documented template links
         run: python3 scripts/check-docs-links.py
 
