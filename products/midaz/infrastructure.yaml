@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Midaz Infrastructure Stack
   Deploys RDS, DocumentDB, ElastiCache, and AmazonMQ for the Midaz product.
-  Requires a Foundation stack (VPC + EKS + agent) to be deployed first.
+  Requires a Foundation stack (VPC + EKS + agent) unless every required VPC,
+  subnet, cluster, and OIDC value is supplied through the Existing* overrides.
   Midaz itself is installed by the Lerian control plane through the cluster's agent,
   not by this stack: this stack only provisions the data services Midaz connects to.
   (c) Lerian Studio - https://lerian.studio

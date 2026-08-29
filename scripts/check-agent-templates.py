@@ -17,10 +17,13 @@ the agent parameters and that rule is asserted here too.
 Run: python3 scripts/check-agent-templates.py
 """
 
+import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
+import tempfile
 import types
 
 import yaml
@@ -28,6 +31,7 @@ import yaml
 TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "templates"
 AGENT = TEMPLATES / "agent.yaml"
 FOUNDATION = TEMPLATES / "foundation.yaml"
+SUB_PLACEHOLDER = re.compile(r"\$\{([A-Za-z0-9:.]+)\}")
 
 
 class CFNLoader(yaml.SafeLoader):
@@ -50,12 +54,26 @@ def load_template(path):
 
 
 def refs(node, known):
-    """Every template parameter Ref'd anywhere under node."""
+    """Every template parameter referenced anywhere under node."""
     if isinstance(node, dict):
         found = set()
         for key, value in node.items():
             if key == "Ref" and isinstance(value, str) and value in known:
                 found.add(value)
+            elif key == "Sub":
+                text = value[0] if isinstance(value, list) and value else value
+                overrides = (
+                    set(value[1])
+                    if isinstance(value, list) and len(value) > 1 and isinstance(value[1], dict)
+                    else set()
+                )
+                if isinstance(text, str):
+                    found |= {
+                        name
+                        for name in SUB_PLACEHOLDER.findall(text)
+                        if name in known and name not in overrides
+                    }
+                found |= refs(value, known)
             else:
                 found |= refs(value, known)
         return found
@@ -117,21 +135,69 @@ def check_values_contract_survives_a_hostile_token(mod):
     The token itself is opaque and attacker-influenced, so the same check feeds
     a token full of YAML metacharacters and re-parses the document.
     """
-    original = mod.VALUES_FILE
-    mod.VALUES_FILE = "/tmp/agent-values-check.json"
-    hostile = "x\n  evil: true\n#'\""
+    with tempfile.TemporaryDirectory(prefix="agent-values-check-") as workdir:
+        original = mod.VALUES_FILE
+        mod.VALUES_FILE = os.path.join(workdir, "values.json")
+        hostile = "x\n  evil: true\n#'\""
+        try:
+            mod.write_values(
+                {"ControlPlaneURL": "https://cp.example.com", "EnrollmentToken": hostile}
+            )
+            parsed = yaml.safe_load(pathlib.Path(mod.VALUES_FILE).read_text())
+            assert parsed == {
+                "controlPlane": {"url": "https://cp.example.com"},
+                "agent": {"token": hostile},
+            }, parsed
+            assert oct(os.stat(mod.VALUES_FILE).st_mode)[-3:] == "600"
+        finally:
+            mod.VALUES_FILE = original
+
+
+def check_helm_archive_is_verified(mod):
+    with tempfile.TemporaryDirectory(prefix="helm-archive-check-") as workdir:
+        archive = pathlib.Path(workdir) / "helm.tar.gz"
+        archive.write_bytes(b"known archive")
+        original = mod.HELM_SHA256
+        try:
+            mod.HELM_SHA256 = hashlib.sha256(archive.read_bytes()).hexdigest()
+            mod.verify_helm_archive(archive)
+            mod.HELM_SHA256 = "0" * 64
+            try:
+                mod.verify_helm_archive(archive)
+            except RuntimeError as exc:
+                assert str(exc) == "Helm archive checksum mismatch"
+            else:
+                raise AssertionError("a mismatched Helm archive was accepted")
+        finally:
+            mod.HELM_SHA256 = original
+
+
+def check_response_put_retries(mod):
+    attempts = []
+    sleeps = []
+
+    def urlopen(_request, timeout):
+        attempts.append(timeout)
+        if len(attempts) < 3:
+            raise RuntimeError("https://presigned-secret.example")
+        return types.SimpleNamespace()
+
+    event = {
+        "RequestType": "Create",
+        "ResponseURL": "https://presigned-secret.example",
+        "StackId": "stack",
+        "RequestId": "request",
+        "LogicalResourceId": "AgentDeployment",
+        "ResourceProperties": {"ClusterName": "c1", "Namespace": "lerian-system"},
+    }
+    original_urlopen, original_sleep = mod.urllib.request.urlopen, mod.time.sleep
+    mod.urllib.request.urlopen, mod.time.sleep = urlopen, sleeps.append
     try:
-        mod.write_values({"ControlPlaneURL": "https://cp.example.com", "EnrollmentToken": hostile})
-        parsed = yaml.safe_load(pathlib.Path(mod.VALUES_FILE).read_text())
-        assert parsed == {
-            "controlPlane": {"url": "https://cp.example.com"},
-            "agent": {"token": hostile},
-        }, parsed
-        assert oct(os.stat(mod.VALUES_FILE).st_mode)[-3:] == "600"
+        mod.send_response(event, types.SimpleNamespace(log_stream_name="stream"), "SUCCESS")
     finally:
-        if os.path.exists(mod.VALUES_FILE):
-            os.remove(mod.VALUES_FILE)
-        mod.VALUES_FILE = original
+        mod.urllib.request.urlopen, mod.time.sleep = original_urlopen, original_sleep
+    assert attempts == [30, 30, 30], attempts
+    assert sleeps == [1, 2], sleeps
 
 
 def check_digest_is_reported_as_authoritative():
@@ -205,6 +271,32 @@ def check_delete_never_wedges_the_stack(mod):
     assert "skipped" in sent["data"]["Message"], sent
 
 
+def check_failure_reason_is_bounded(mod):
+    sent = {}
+
+    def capture(event, context, status, data=None, reason=None):
+        sent.update(status=status, data=data, reason=reason)
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("x" * 5000)
+
+    original = mod.install_helm, mod.send_response, mod.logger.disabled
+    mod.install_helm, mod.send_response = explode, capture
+    mod.logger.disabled = True
+    try:
+        mod.handler(
+            {
+                "RequestType": "Create",
+                "ResourceProperties": {"ClusterName": "c1", "Namespace": "lerian-system"},
+            },
+            types.SimpleNamespace(log_stream_name="stream-1"),
+        )
+    finally:
+        mod.install_helm, mod.send_response, mod.logger.disabled = original
+    assert sent["status"] == "FAILED", sent
+    assert len(sent["reason"]) == 1000, sent
+
+
 def check_every_agent_parameter_arms_the_rule():
     doc = load_template(FOUNDATION)
     known = set(doc["Parameters"])
@@ -243,17 +335,30 @@ def check_every_agent_parameter_arms_the_rule():
     assert not unasserted, f"ShouldDeployAgent rests on unasserted parameters: {sorted(unasserted)}"
 
 
+def check_sub_parameters_are_references():
+    known = {"ControlPlaneURL", "EnrollmentToken"}
+    assert refs({"Sub": "${ControlPlaneURL}/agent"}, known) == {"ControlPlaneURL"}
+    assert refs(
+        {"Sub": ["${ControlPlaneURL}/${Alias}", {"Alias": {"Ref": "EnrollmentToken"}}]},
+        known,
+    ) == {"ControlPlaneURL", "EnrollmentToken"}
+
+
 HANDLER_CHECKS = (
     check_token_never_logged,
     check_digest_pins_the_chart,
     check_values_contract_survives_a_hostile_token,
+    check_helm_archive_is_verified,
+    check_response_put_retries,
     check_namespace_change_replaces,
     check_delete_never_wedges_the_stack,
+    check_failure_reason_is_bounded,
 )
 
 TEMPLATE_CHECKS = (
     check_every_agent_parameter_arms_the_rule,
     check_digest_is_reported_as_authoritative,
+    check_sub_parameters_are_references,
 )
 
 

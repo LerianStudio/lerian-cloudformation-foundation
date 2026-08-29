@@ -55,7 +55,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 ## Getting Started
 
-Four steps, and only the first two are CloudFormation.
+Four steps; steps 2 and 3 are CloudFormation.
 
 1. **Get an enrollment token.** Sign in to the Lerian console, create the
    environment for this cluster, and copy the token it issues. It is single-use

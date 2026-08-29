@@ -419,11 +419,9 @@ All critical components are deployed across multiple Availability Zones:
 ### Deployment Order
 
 1. **VPC** - Network foundation
-2. **EKS** - Container orchestration (parallel with databases)
-3. **RDS, DocumentDB, ElastiCache, AmazonMQ** - Data layer
-4. **Route53** - DNS
-5. **ALB Controller, External DNS** - Ingress and DNS automation
-6. **Agent** - Enrolls the cluster with the Lerian control plane
+2. **EKS and Route53** - EKS follows the VPC; optional DNS can start after the VPC
+3. **ALB Controller, External DNS, and Agent** - Follow the EKS cluster (External DNS also waits for Route53)
+4. **RDS, DocumentDB, ElastiCache, AmazonMQ** - Product data stacks are launched after Foundation completes
 
 CloudFormation stops there. Products are installed into the cluster by the
 control plane, through the agent, not by a stack.

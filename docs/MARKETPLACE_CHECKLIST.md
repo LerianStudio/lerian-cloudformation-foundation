@@ -53,18 +53,38 @@ enrolamento funciona ponta a ponta — nenhum check de CI prova isso. Lance a
 preenchidos e confirme que o cluster aparece como conectado no console.
 
 ```bash
+set +x # não registrar o segredo durante a leitura e a criação do arquivo
+umask 077
+REQUEST_FILE=$(mktemp)
+trap 'unset ENROLLMENT_TOKEN; rm -f "$REQUEST_FILE"' EXIT
+read -rsp 'Token de enrolamento: ' ENROLLMENT_TOKEN; printf '\n'
+export ENROLLMENT_TOKEN
+python3 - "$REQUEST_FILE" <<'PY'
+import json, os, sys
+
+request = {
+    "StackName": "lerian-foundation-test",
+    "TemplateURL": "https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml",
+    "Parameters": [
+        {"ParameterKey": "AvailabilityZone1", "ParameterValue": "sa-east-1a"},
+        {"ParameterKey": "AvailabilityZone2", "ParameterValue": "sa-east-1b"},
+        {"ParameterKey": "AvailabilityZone3", "ParameterValue": "sa-east-1c"},
+        {"ParameterKey": "ControlPlaneURL", "ParameterValue": "https://api.lerian.studio"},
+        {"ParameterKey": "EnrollmentToken", "ParameterValue": os.environ["ENROLLMENT_TOKEN"]},
+        {"ParameterKey": "AgentChartVersion", "ParameterValue": "<versao-do-chart>"},
+    ],
+    "Capabilities": ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"],
+}
+with open(sys.argv[1], "w") as output:
+    json.dump(request, output)
+PY
+unset ENROLLMENT_TOKEN
+
 aws cloudformation create-stack \
-  --stack-name lerian-foundation-test \
-  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml \
-  --parameters \
-    ParameterKey=AvailabilityZone1,ParameterValue=sa-east-1a \
-    ParameterKey=AvailabilityZone2,ParameterValue=sa-east-1b \
-    ParameterKey=AvailabilityZone3,ParameterValue=sa-east-1c \
-    ParameterKey=ControlPlaneURL,ParameterValue=https://api.lerian.studio \
-    ParameterKey=EnrollmentToken,ParameterValue=<token-do-console> \
-    ParameterKey=AgentChartVersion,ParameterValue=<versao-do-chart> \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --cli-input-json "file://$REQUEST_FILE" \
   --region sa-east-1
+rm -f "$REQUEST_FILE"
+trap - EXIT
 
 # Limpar após o teste
 aws cloudformation delete-stack --stack-name lerian-foundation-test --region sa-east-1

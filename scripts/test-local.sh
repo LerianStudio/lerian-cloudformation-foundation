@@ -48,13 +48,14 @@ echo ""
 echo "2. Validating YAML syntax..."
 YAML_ERRORS=0
 
-# Try Ruby first (more reliable for CloudFormation), then Python
 validate_yaml() {
     local file="$1"
-    if command -v ruby &>/dev/null; then
-        ruby -ryaml -e "YAML.load_file('$file')" 2>/dev/null
-    elif python3 -c "import yaml" 2>/dev/null; then
-        python3 -c "import yaml; yaml.safe_load(open('$file'))" 2>/dev/null
+    if python3 -c "import yaml" 2>/dev/null; then
+        python3 -c "
+import sys, yaml
+yaml.SafeLoader.add_multi_constructor('!', lambda loader, suffix, node: None)
+yaml.safe_load(open(sys.argv[1]))
+" "$file" 2>/dev/null
     else
         # Fallback: just check basic syntax
         head -1 "$file" | grep -q "AWSTemplateFormatVersion"
@@ -114,45 +115,49 @@ fi
 # =============================================================================
 echo "4. Validating CloudFormation structure..."
 
-# Use Ruby for YAML parsing (more reliable)
-ruby << 'RUBYEOF'
-require 'yaml'
+python3 << 'PYEOF'
+import glob
+import pathlib
+import yaml
 
+
+class CFNLoader(yaml.SafeLoader):
+    pass
+
+
+CFNLoader.add_multi_constructor("!", lambda loader, suffix, node: None)
 errors = []
 warnings = []
 
-Dir.glob('templates/*.yaml').sort.each do |filepath|
-  name = File.basename(filepath)
+for filepath in sorted(glob.glob("templates/*.yaml")):
+    name = pathlib.Path(filepath).name
+    try:
+        with open(filepath) as source:
+            data = yaml.load(source, Loader=CFNLoader)
+    except Exception as exc:
+        errors.append(f"{name}: Invalid YAML - {exc}")
+        continue
+    if "AWSTemplateFormatVersion" not in data:
+        errors.append(f"{name}: Missing AWSTemplateFormatVersion")
+    if "Description" not in data:
+        warnings.append(f"{name}: Missing Description")
+    if "Resources" not in data:
+        errors.append(f"{name}: Missing Resources section")
+    print(f"  ✓ {name}")
 
-  begin
-    data = YAML.load_file(filepath)
-  rescue => e
-    errors << "#{name}: Invalid YAML - #{e.message}"
-    next
-  end
-
-  # Check required sections
-  errors << "#{name}: Missing AWSTemplateFormatVersion" unless data['AWSTemplateFormatVersion']
-  warnings << "#{name}: Missing Description" unless data['Description']
-  errors << "#{name}: Missing Resources section" unless data['Resources']
-
-  puts "  ✓ #{name}"
-end
-
-if errors.any?
-  puts "\n❌ Errors:"
-  errors.each { |e| puts "  - #{e}" }
-  exit 1
-end
-
-if warnings.any?
-  puts "\n⚠️  Warnings (#{warnings.length}):"
-  warnings.first(5).each { |w| puts "  - #{w}" }
-  puts "  ... and #{warnings.length - 5} more" if warnings.length > 5
-end
-
-puts "\n✓ Structure validation passed"
-RUBYEOF
+if errors:
+    print("\n❌ Errors:")
+    for error in errors:
+        print(f"  - {error}")
+    raise SystemExit(1)
+if warnings:
+    print(f"\n⚠️  Warnings ({len(warnings)}):")
+    for warning in warnings[:5]:
+        print(f"  - {warning}")
+    if len(warnings) > 5:
+        print(f"  ... and {len(warnings) - 5} more")
+print("\n✓ Structure validation passed")
+PYEOF
 
 echo ""
 
@@ -161,41 +166,36 @@ echo ""
 # =============================================================================
 echo "5. Checking nested stack references..."
 
-ruby << 'RUBYEOF'
-# Get all core template names
-core_templates = Dir.glob('templates/*.yaml').map { |f| File.basename(f, '.yaml') }.to_set
-puts "   Found #{core_templates.size} core templates"
+python3 << 'PYEOF'
+import pathlib
+import re
 
-# foundation.yaml is the entry template; every nested template it names must exist
-content = File.read('templates/foundation.yaml')
-refs = content.scan(/\$\{MPS3KeyPrefix\}([a-z0-9-]+)\.yaml/).flatten.to_set
+root = pathlib.Path(".")
+core_templates = {path.stem for path in (root / "templates").glob("*.yaml")}
+print(f"   Found {len(core_templates)} core templates")
 
-puts "   foundation.yaml references: #{refs.size} templates"
-
+content = (root / "templates/foundation.yaml").read_text()
+refs = set(re.findall(r"\$\{MPS3KeyPrefix\}([a-z0-9-]+)\.yaml", content))
+print(f"   foundation.yaml references: {len(refs)} templates")
 missing = refs - core_templates
-if missing.any?
-  puts "\n   ❌ foundation.yaml: Missing templates: #{missing.to_a.join(', ')}"
-  exit 1
-else
-  puts "   ✓ foundation.yaml: All referenced templates exist"
-end
+if missing:
+    raise SystemExit(f"\n   ❌ foundation.yaml: Missing templates: {', '.join(sorted(missing))}")
+print("   ✓ foundation.yaml: All referenced templates exist")
 
-# Product infrastructure templates may nest shared templates too
-Dir.glob('products/*/infrastructure.yaml').sort.each do |infra_file|
-  product = infra_file.split('/')[1]
-  product_templates = Dir.glob("products/#{product}/*.yaml").map { |f| File.basename(f, '.yaml') }.to_set
-  all_templates = core_templates + product_templates
-
-  refs = File.read(infra_file).scan(/\$\{MPS3(?:Product)?KeyPrefix\}(?:products\/#{product}\/)?([a-z0-9-]+)\.yaml/).flatten.to_set
-  missing = refs - all_templates
-  if missing.any?
-    puts "\n   ❌ #{product}: Missing templates: #{missing.to_a.join(', ')}"
-    exit 1
-  else
-    puts "   ✓ #{product}/infrastructure.yaml: #{refs.size} referenced templates exist"
-  end
-end
-RUBYEOF
+for infra_file in sorted((root / "products").glob("*/infrastructure.yaml")):
+    product = infra_file.parent.name
+    product_templates = {path.stem for path in infra_file.parent.glob("*.yaml")}
+    all_templates = core_templates | product_templates
+    pattern = (
+        rf"\$\{{MPS3(?:Product)?KeyPrefix\}}"
+        rf"(?:products/{re.escape(product)}/)?([a-z0-9-]+)\.yaml"
+    )
+    refs = set(re.findall(pattern, infra_file.read_text()))
+    missing = refs - all_templates
+    if missing:
+        raise SystemExit(f"\n   ❌ {product}: Missing templates: {', '.join(sorted(missing))}")
+    print(f"   ✓ {product}/infrastructure.yaml: {len(refs)} referenced templates exist")
+PYEOF
 
 echo ""
 

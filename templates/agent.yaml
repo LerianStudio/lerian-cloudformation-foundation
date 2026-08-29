@@ -161,12 +161,14 @@ Resources:
       Code:
         ZipFile: |
           import base64
+          import hashlib
           import json
           import logging
           import os
           import stat
           import subprocess
           import tarfile
+          import time
           import urllib.request
 
           logger = logging.getLogger()
@@ -174,6 +176,9 @@ Resources:
 
           # Helm >= 3.17 is required: OCI install by digest landed there.
           HELM_VERSION = 'v3.21.4'
+          # Published at get.helm.sh beside HELM_VERSION. Pinning it here means a
+          # substituted download never executes with cluster-admin access.
+          HELM_SHA256 = '61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14'
           RELEASE_NAME = 'lerian-agent'
           REDACTED_PROPS = ('EnrollmentToken',)
           TMP = '/tmp'
@@ -209,11 +214,20 @@ Resources:
               req.add_header('Content-Type', '')
               req.add_header('Content-Length', len(json_body))
 
-              try:
-                  urllib.request.urlopen(req)
-                  logger.info(f"Response sent: {status}")
-              except Exception as e:
-                  logger.error(f"Failed to send response: {e}")
+              for attempt in range(3):
+                  try:
+                      urllib.request.urlopen(req, timeout=30)
+                      logger.info(f"Response sent: {status}")
+                      return
+                  except Exception as e:
+                      # HTTPError includes the presigned ResponseURL in its string;
+                      # log only the type so a failed callback cannot leak it.
+                      logger.warning(
+                          f"Response attempt {attempt + 1} failed: {type(e).__name__}"
+                      )
+                      if attempt < 2:
+                          time.sleep(2 ** attempt)
+              logger.error("Failed to send response after 3 attempts")
 
           def physical_id(props):
               cluster = props.get('ClusterName', 'unknown')
@@ -309,6 +323,12 @@ Resources:
                   raise Exception(f"Command failed: {result.stderr.strip()}")
               return result.stdout
 
+          def verify_helm_archive(archive):
+              with open(archive, 'rb') as f:
+                  actual = hashlib.file_digest(f, 'sha256').hexdigest()
+              if actual != HELM_SHA256:
+                  raise RuntimeError('Helm archive checksum mismatch')
+
           def install_helm():
               os.environ['HOME'] = TMP
               for sub in ('cache', 'config', 'data'):
@@ -322,6 +342,7 @@ Resources:
                   archive = f'{TMP}/helm.tar.gz'
                   urllib.request.urlretrieve(
                       f'https://get.helm.sh/helm-{HELM_VERSION}-linux-amd64.tar.gz', archive)
+                  verify_helm_archive(archive)
                   with tarfile.open(archive, 'r:gz') as tar:
                       tar.extractall(TMP, filter='data')
                   os.rename(f'{TMP}/linux-amd64/helm', helm_path)
@@ -397,7 +418,7 @@ Resources:
                   message = 'Agent removed'
               except Exception as e:
                   logger.warning(f"Uninstall skipped: {e}")
-                  message = f'Agent uninstall skipped: {e}'
+                  message = f'Agent uninstall skipped: {str(e)[:1000]}'
               send_response(event, context, 'SUCCESS', {'Message': message})
 
           def handler(event, context):
@@ -423,7 +444,7 @@ Resources:
 
               except Exception as e:
                   logger.error(f"Error: {str(e)}")
-                  send_response(event, context, 'FAILED', reason=str(e))
+                  send_response(event, context, 'FAILED', reason=str(e)[:1000])
 
       Tags:
         - Key: Name

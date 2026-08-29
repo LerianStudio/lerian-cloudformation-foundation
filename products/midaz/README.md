@@ -66,21 +66,41 @@ chart version you intend to run. Omit all three to create the cluster without an
 agent — nothing will be able to install products into it until you add one.
 
 ```bash
+set +x # do not shell-trace the secret read or request-file creation
+umask 077
+REQUEST_FILE=$(mktemp)
+trap 'unset ENROLLMENT_TOKEN; rm -f "$REQUEST_FILE"' EXIT
+read -rsp 'Enrollment token: ' ENROLLMENT_TOKEN; printf '\n'
+export ENROLLMENT_TOKEN
+python3 - "$REQUEST_FILE" <<'PY'
+import json, os, sys
+
+request = {
+    "StackName": "lerian-foundation",
+    "TemplateURL": "https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml",
+    "Parameters": [
+        {"ParameterKey": "MPS3BucketName", "ParameterValue": "lerian-cloudformation-templates"},
+        {"ParameterKey": "MPS3BucketRegion", "ParameterValue": "sa-east-1"},
+        {"ParameterKey": "MPS3KeyPrefix", "ParameterValue": "releases/latest/"},
+        {"ParameterKey": "AvailabilityZone1", "ParameterValue": "sa-east-1a"},
+        {"ParameterKey": "AvailabilityZone2", "ParameterValue": "sa-east-1b"},
+        {"ParameterKey": "AvailabilityZone3", "ParameterValue": "sa-east-1c"},
+        {"ParameterKey": "ControlPlaneURL", "ParameterValue": "https://api.lerian.studio"},
+        {"ParameterKey": "EnrollmentToken", "ParameterValue": os.environ["ENROLLMENT_TOKEN"]},
+        {"ParameterKey": "AgentChartVersion", "ParameterValue": "<agent-chart-version>"},
+    ],
+    "Capabilities": ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"],
+}
+with open(sys.argv[1], "w") as output:
+    json.dump(request, output)
+PY
+unset ENROLLMENT_TOKEN
+
 aws cloudformation create-stack \
-  --stack-name lerian-foundation \
-  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml \
-  --parameters \
-    ParameterKey=MPS3BucketName,ParameterValue=lerian-cloudformation-templates \
-    ParameterKey=MPS3BucketRegion,ParameterValue=sa-east-1 \
-    ParameterKey=MPS3KeyPrefix,ParameterValue=releases/latest/ \
-    ParameterKey=AvailabilityZone1,ParameterValue=sa-east-1a \
-    ParameterKey=AvailabilityZone2,ParameterValue=sa-east-1b \
-    ParameterKey=AvailabilityZone3,ParameterValue=sa-east-1c \
-    ParameterKey=ControlPlaneURL,ParameterValue=https://api.lerian.studio \
-    ParameterKey=EnrollmentToken,ParameterValue=<token-from-the-console> \
-    ParameterKey=AgentChartVersion,ParameterValue=<agent-chart-version> \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --cli-input-json "file://$REQUEST_FILE" \
   --region sa-east-1
+rm -f "$REQUEST_FILE"
+trap - EXIT
 ```
 
 **Step 2 — Product Infrastructure** (databases, auto-imports from Foundation):

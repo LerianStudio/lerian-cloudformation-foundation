@@ -59,7 +59,7 @@ REGION = "sa-east-1"
 
 # Stops at & so a quick-create link's following query parameters are not swallowed.
 TEMPLATE_URL = re.compile(
-    r"https://([a-z0-9.-]+)\.s3\.([a-z0-9-]+)\.amazonaws\.com/(releases/[^\s)\]\"'&]+\.yaml)"
+    r"https://([a-z0-9.-]+)\.s3(?:\.([a-z0-9-]+))?\.amazonaws\.com/(releases/[^\s)\]\"'&]+\.yaml)"
 )
 
 # Inline markdown links: [text](target), with the optional title markdown allows
@@ -149,7 +149,7 @@ def check_documented_templates_are_published():
             for bucket, region, key in TEMPLATE_URL.findall(line):
                 where = f"{path.relative_to(ROOT)}:{lineno}"
                 checked += 1
-                if bucket != BUCKET or region != REGION:
+                if bucket != BUCKET or (region and region != REGION):
                     failures.append(
                         f"{where}: URL points at {bucket} in {region}; "
                         f"releases are published to {BUCKET} in {REGION}"
@@ -285,13 +285,22 @@ def check_commands_override_region_scoped_defaults():
     failures = []
     checked = 0
     for path in command_sources():
-        for lineno, _subcommand, body in cfn_commands(path.read_text()):
-            argument = TEMPLATE_ARGUMENT.search(body)
-            template = template_behind(argument.group(1)) if argument else None
+        text = path.read_text()
+        for lineno, _subcommand, body in cfn_commands(text):
+            # A protected --cli-input-json file keeps secrets out of argv. In the
+            # documentation that file is generated immediately above the command,
+            # so inspect the containing example for its TemplateURL and parameters.
+            scope = text if "--cli-input-json" in body else body
+            argument = TEMPLATE_ARGUMENT.search(scope)
+            if argument:
+                template = template_behind(argument.group(1))
+            else:
+                documented_url = TEMPLATE_URL.search(scope)
+                template = template_behind(documented_url.group(0)) if documented_url else None
             if template is None:
                 continue
             checked += 1
-            missing = [name for name in region_scoped_defaults(template) if name not in body]
+            missing = [name for name in region_scoped_defaults(template) if name not in scope]
             if missing:
                 failures.append(
                     f"{path.relative_to(ROOT)}:{lineno}: launches "
@@ -362,6 +371,9 @@ def check_link_patterns_match_what_they_claim():
     assert REFERENCE_LINK.findall("[label]: ./ref.md") == ["./ref.md"]
     assert REFERENCE_LINK.findall("   [three spaces]: ./ref.md") == ["./ref.md"]
     assert REFERENCE_LINK.findall("    [code block]: ./ref.md") == []
+    assert TEMPLATE_URL.findall(
+        "https://lerian-cloudformation-templates.s3.amazonaws.com/releases/latest/foundation.yaml"
+    ) == [("lerian-cloudformation-templates", "", "releases/latest/foundation.yaml")]
     assert [c[1] for c in cfn_commands("aws cloudformation deploy \\\n  --template-url x")] == [
         "deploy"
     ]
