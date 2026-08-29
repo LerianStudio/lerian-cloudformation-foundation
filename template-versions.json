@@ -15,11 +15,7 @@
   },
   "products": {
     "midaz": {
-      "infrastructure": "0.2.9",
-      "helm": "0.2.9",
-      "application": "0.1.16",
-      "complete": "0.2.0",
-      "full-stack": "0.1.2"
+      "infrastructure": "0.2.9"
     },
     "tracer": {
       "infrastructure": "0.1.3"

@@ -42,7 +42,13 @@ for template in "$TEMPLATES_DIR"/*.yaml; do
     filename=$(basename "$template")
     case "$YAML_VALIDATOR" in
         python)
-            if python3 -c "import yaml; yaml.safe_load(open('$template'))" 2>/dev/null; then
+            # CloudFormation intrinsics (!Ref, !Sub, ...) are unknown YAML tags:
+            # a plain safe_load rejects every template in this repo.
+            if python3 -c "
+import yaml, sys
+yaml.SafeLoader.add_multi_constructor('!', lambda l, s, n: None)
+yaml.safe_load(open('$template'))
+" 2>/dev/null; then
                 echo "  [OK] $filename"
             else
                 echo "  [FAIL] $filename - Invalid YAML syntax"
@@ -66,32 +72,29 @@ done
 echo ""
 echo "2. Checking required Marketplace parameters..."
 echo "-------------------------------------------"
+# foundation.yaml is the template the Marketplace listing launches.
+MARKETPLACE_TEMPLATE="$TEMPLATES_DIR/foundation.yaml"
 required_params=("MPS3BucketName" "MPS3BucketRegion" "MPS3KeyPrefix")
-for complete_template in "${PROJECT_DIR}"/products/*/full-stack.yaml; do
-    product=$(basename "$(dirname "$complete_template")")
-    echo "  Checking product: $product"
-    for param in "${required_params[@]}"; do
-        if grep -q "$param:" "$complete_template"; then
-            echo "  [OK] $param found in $product/full-stack.yaml"
-        else
-            echo "  [FAIL] $param not found in $product/full-stack.yaml"
-            exit 1
-        fi
-    done
+for param in "${required_params[@]}"; do
+    if grep -q "$param:" "$MARKETPLACE_TEMPLATE"; then
+        echo "  [OK] $param found in foundation.yaml"
+    else
+        echo "  [FAIL] $param not found in foundation.yaml"
+        exit 1
+    fi
 done
 
 echo ""
 echo "3. Checking TemplateURL format..."
 echo "-------------------------------------------"
-for complete_template in "${PROJECT_DIR}"/products/*/full-stack.yaml; do
-    product=$(basename "$(dirname "$complete_template")")
-    if grep -q "TemplateURL: \./\|TemplateURL: \"\./" "$complete_template"; then
-        echo "  [FAIL] $product/full-stack.yaml: Found relative TemplateURL paths. Use S3 URLs."
+for template in "$TEMPLATES_DIR"/*.yaml; do
+    filename=$(basename "$template")
+    if grep -q "TemplateURL: \./\|TemplateURL: \"\./" "$template"; then
+        echo "  [FAIL] $filename: Found relative TemplateURL paths. Use S3 URLs."
         exit 1
-    else
-        echo "  [OK] $product/full-stack.yaml: All TemplateURLs use S3 format"
     fi
 done
+echo "  [OK] All TemplateURLs use S3 format"
 
 echo ""
 echo "4. Checking for hardcoded credentials..."
@@ -109,9 +112,9 @@ done
 echo ""
 echo "5. Checking sensitive parameters have NoEcho..."
 echo "-------------------------------------------"
-sensitive_params=("MasterUsername" "AdminUsername")
+sensitive_params=("EnrollmentToken")
 for param in "${sensitive_params[@]}"; do
-    count=$(grep -A5 "$param:" "$MASTER_TEMPLATE" | grep -c "NoEcho: true" || true)
+    count=$(grep -A5 "$param:" "$MARKETPLACE_TEMPLATE" | grep -c "NoEcho: true" || true)
     if [ "$count" -gt 0 ]; then
         echo "  [OK] $param has NoEcho"
     else
@@ -119,9 +122,27 @@ for param in "${sensitive_params[@]}"; do
     fi
 done
 
+echo ""
+echo "6. Checking agent template behaviour..."
+echo "-------------------------------------------"
+if python3 -c "import yaml" 2>/dev/null; then
+    python3 "$SCRIPT_DIR/check-agent-templates.py"
+else
+    echo "  [SKIP] pyyaml not available"
+fi
+
+echo ""
+echo "7. Checking documented template links..."
+echo "-------------------------------------------"
+if python3 -c "import yaml" 2>/dev/null; then
+    python3 "$SCRIPT_DIR/check-docs-links.py"
+else
+    echo "  [SKIP] pyyaml not available"
+fi
+
 if [ "$CFN_LINT_AVAILABLE" = true ]; then
     echo ""
-    echo "6. Running cfn-lint..."
+    echo "8. Running cfn-lint..."
     echo "-------------------------------------------"
     cd "$PROJECT_DIR"
     cfn-lint templates/*.yaml products/**/*.yaml || true
@@ -132,7 +153,7 @@ echo "=========================================="
 echo "Validation Complete"
 echo "=========================================="
 echo ""
-echo "Next steps:"
-echo "  1. Create architecture diagram (1100x700 pixels)"
-echo "  2. Upload templates to S3 bucket"
-echo "  3. Submit to AWS Marketplace"
+echo "Next steps: see docs/MARKETPLACE_CHECKLIST.md"
+echo "  1. Merge, so the release workflow publishes to releases/latest/"
+echo "  2. Upload foundation.yaml and its nested templates to the Marketplace bucket"
+echo "  3. Run the changesets in docs/marketplace-changesets.md, in the order given"

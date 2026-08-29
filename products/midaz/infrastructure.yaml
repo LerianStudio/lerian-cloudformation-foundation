@@ -2,8 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Midaz Infrastructure Stack
   Deploys RDS, DocumentDB, ElastiCache, and AmazonMQ for the Midaz product.
-  Requires a Foundation stack (VPC + EKS) to be deployed first.
-  Use midaz-application.yaml to deploy the Midaz application after this stack completes.
+  Requires a Foundation stack (VPC + EKS + agent) unless every required VPC,
+  subnet, cluster, and OIDC value is supplied through the Existing* overrides.
+  Midaz itself is installed by the Lerian control plane through the cluster's agent,
+  not by this stack: this stack only provisions the data services Midaz connects to.
   (c) Lerian Studio - https://lerian.studio
 
 Metadata:
@@ -15,7 +17,6 @@ Metadata:
           - MPS3BucketName
           - MPS3BucketRegion
           - MPS3KeyPrefix
-          - MPS3ProductKeyPrefix
           - MarketplaceAMI
       - Label:
           default: "General Configuration"
@@ -83,8 +84,6 @@ Metadata:
         default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
-      MPS3ProductKeyPrefix:
-        default: "Product Templates S3 Key Prefix"
       MarketplaceAMI:
         default: "Marketplace AMI ID"
       # General
@@ -183,13 +182,6 @@ Parameters:
     Type: String
     Description: "S3 key prefix for the shared CloudFormation templates"
     Default: "releases/latest/"
-    AllowedPattern: "^[a-zA-Z0-9-_./]*$"
-    ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
-
-  MPS3ProductKeyPrefix:
-    Type: String
-    Description: "S3 key prefix for the product-specific CloudFormation templates (application.yaml)"
-    Default: "releases/latest/products/midaz/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
 
@@ -823,18 +815,8 @@ Outputs:
       Name: !Sub "${AWS::StackName}-AmazonMQSecretArn"
 
   # =============================================================================
-  # UTILITY COMMANDS
+  # NEXT STEP
   # =============================================================================
-  DeployApplicationCommand:
-    Description: Command to deploy the Midaz application
-    Value: !Sub |
-      aws cloudformation deploy \
-        --stack-name ${AWS::StackName}-app \
-        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3ProductKeyPrefix}application.yaml \
-        --parameter-overrides \
-          InfrastructureStackName=${AWS::StackName} \
-          MPS3BucketName=${MPS3BucketName} \
-          MPS3KeyPrefix=${MPS3ProductKeyPrefix} \
-          PermissionsBoundaryArn=${PermissionsBoundaryArn} \
-        --capabilities CAPABILITY_IAM \
-        --region ${AWS::Region}
+  DeployApplicationInstructions:
+    Description: How to install Midaz on top of this infrastructure
+    Value: !Sub "Open the Lerian console, pick this cluster's agent, and create a Midaz release referencing infrastructure stack ${AWS::StackName}. The agent installs Midaz from inside the cluster."

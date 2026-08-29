@@ -405,23 +405,29 @@ All critical components are deployed across multiple Availability Zones:
                             │
                             ▼
                     ┌───────────────┐
-                    │ midaz-helm    │
-                    │ .yaml         │
+                    │ agent.yaml    │
+                    │ (enrollment)  │
+                    └───────┬───────┘
+                            │ outbound only
+                            ▼
+                    ┌───────────────┐
+                    │ Lerian        │
+                    │ control plane │
                     └───────────────┘
 ```
 
 ### Deployment Order
 
 1. **VPC** - Network foundation
-2. **EKS** - Container orchestration (parallel with databases)
-3. **RDS, DocumentDB, ElastiCache, AmazonMQ** - Data layer
-4. **Route53** - DNS
-5. **ALB Controller, External DNS** - Ingress and DNS automation
-6. **Midaz Helm** - Application deployment
+2. **EKS and Route53** - EKS follows the VPC; optional DNS can start after the VPC
+3. **ALB Controller, External DNS, and Agent** - Follow the EKS cluster (External DNS also waits for Route53)
+4. **RDS, DocumentDB, ElastiCache, AmazonMQ** - Product data stacks are launched after Foundation completes
+
+CloudFormation stops there. Products are installed into the cluster by the
+control plane, through the agent, not by a stack.
 
 ---
 
 For more information, see:
 - [README.md](../README.md) - Quick start guide
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
-- [COST_ESTIMATION.md](COST_ESTIMATION.md) - Cost breakdown

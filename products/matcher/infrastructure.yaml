@@ -186,7 +186,7 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
-    Default: "lerian-cloudformation-foundation"
+    Default: "lerian-cloudformation-templates"
 
   MPS3BucketRegion:
     Type: String
@@ -336,9 +336,6 @@ Parameters:
       - c6g.large
       - c6g.xlarge
       - c6g.2xlarge
-      - c6i.large
-      - c6i.xlarge
-      - c6i.2xlarge
       - m6g.medium
       - m6g.large
       - m6g.xlarge

@@ -25,6 +25,5 @@ packaged-*.json
 *.tmp
 *.bak
 
-# Lambda layer artifacts (build with scripts/build-lambda-layer.sh)
-kubectl-helm-layer.zip
+# Archives
 *.zip

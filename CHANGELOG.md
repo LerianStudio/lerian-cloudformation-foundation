@@ -5,6 +5,201 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Agent Stack** (`agent.yaml`) - installs the `lerian-agent` Helm chart into the
+  cluster and enrolls it with the Lerian control plane. Optional nested stack of
+  the Foundation, created when `ControlPlaneURL`, `EnrollmentToken` and
+  `AgentChartVersion` are all supplied. The chart is pinned by version and,
+  optionally, by OCI digest.
+- CI now compiles the inline Lambda code of every template, so a syntax error is
+  caught in the pull request instead of by a stack that hangs until it times out,
+  and runs `scripts/check-agent-templates.py`, which asserts what the agent handler
+  actually does: the enrollment token stays out of the logs, a supplied digest
+  pins the chart, a token full of YAML metacharacters cannot corrupt the values
+  document, moving the agent to another namespace replaces the release instead of
+  duplicating it, and a delete never leaves a stack in `DELETE_FAILED`. The same
+  script asserts that the Foundation's `Rules` block watches every agent
+  parameter, so a future parameter cannot be added outside the guard.
+- The Foundation rejects a half-filled agent parameter set at the `CreateStack`
+  call, through a template `Rules` section. Supplying a control-plane URL and a
+  token but no chart version used to build the VPC and the cluster first - about
+  twenty minutes - and only then fail and roll all of it back. Supplying only the
+  optional chart digest is rejected the same way, instead of quietly producing a
+  cluster with no agent.
+- `MarketplaceAMI` on `foundation.yaml`. The listing is an `AmiProduct` entity,
+  so each delivery option must bind its AMI to a parameter of the launched
+  template; without the parameter the `AddDeliveryOptions` changeset is rejected.
+  The cluster runs EKS-managed ARM64 node AMIs and never launches this one.
+- `scripts/check-docs-links.py`, run by CI and by `scripts/validate.sh`: every
+  https template URL the documentation hands a customer is resolved back to the
+  file the release workflow publishes at that key. A launch button pointing at a
+  deleted template, or at a mistyped bucket, now fails the pull request - both
+  defects this release had to fix by hand.
+- A Getting Started section in the README covering the whole journey: enrollment
+  token from the console, Foundation stack, product infrastructure stack, then
+  the product installed from the console by the agent.
+
+> **Cross-repo dependency, not satisfied by this release:** the Agent Stack
+> installs `lerian-agent` with exactly two values, `controlPlane.url` and
+> `agent.token`, where the token is the single-use enrollment token. The chart
+> published today (`LerianStudio/deployer`, `charts/lerian-agent`) reads
+> `agent.token` as a per-agent bearer token from an out-of-band registration
+> call and also requires `agent.id`, so it rejects that install and the failure
+> rolls back the whole VPC and cluster. A chart version that enrolls has to be
+> published before the Marketplace changeset is submitted, and its version is
+> the one customers are told to pass as `AgentChartVersion`. The gate is written
+> into `docs/marketplace-changesets.md`, step 8, and the values contract is
+> pinned by `scripts/check-agent-templates.py`.
+
+### Removed
+
+- **BREAKING**: `products/midaz/application.yaml`, `products/midaz/helm.yaml`, and
+  `products/midaz/full-stack.yaml`. The application layer is no longer deployed by
+  CloudFormation: the Lerian control plane installs products through the cluster's
+  agent. Existing stacks created from these templates keep running; they are simply
+  no longer published, and Midaz upgrades move to the control plane.
+- Deploy scripts that existed only to drive those templates: `deploy.sh`,
+  `deploy-stack.sh`, `deploy-helm.sh`, `deploy-helm-stack.sh`.
+- `deploy-infra.sh`, the last of that family. It could never have deployed
+  anything: it called `aws cloudformation deploy` with `--template-url`, an
+  option that subcommand does not have, and it passed none of the three database
+  master usernames the product stack requires and gives no default. The correct
+  command, per region and with every required parameter, is in
+  `products/midaz/README.md`.
+- `MPS3ProductKeyPrefix` from `products/midaz/infrastructure.yaml` - it pointed at
+  the removed `application.yaml`.
+- `scripts/build-lambda-layer.sh`. It built a kubectl/helm Lambda layer for the
+  removed Midaz Helm deployer; no template in this repository consumes a layer,
+  and the agent deployer downloads helm at cold start instead.
+- `examples/` - its parameter tables documented the removed application layer
+  (`DeployMidazHelm`, `MidazHelmRepository`, `MidazChartVersion`) and every one of
+  its deployment examples launched `midaz-complete.yaml` or
+  `midaz-infrastructure.yaml`, template paths this repository has not had for some
+  time. Parameter documentation lives in each template's own `Description`, which
+  CI checks is present and the CloudFormation console renders per field.
+
+> **Post-merge, not delivered by this release:** the release workflow publishes
+> with `aws s3 sync` without `--delete`, so `releases/latest/products/midaz/`
+> keeps serving `application.yaml`, `helm.yaml` and `full-stack.yaml` after this
+> change merges - and that is exactly where the current Marketplace listing and
+> every previously shared quick-create link point. Removing those three objects
+> needs to be sequenced with the Marketplace changeset, otherwise the live
+> listing 404s before the new delivery options take effect.
+
+### Fixed
+
+- `NodeInstanceType` no longer offers `c6i.*` x86 instance types. The node group
+  is created with `AmiType: AL2023_ARM_64_STANDARD`, so an x86 choice produced
+  nodes that never joined the cluster.
+- `MPS3BucketName` now defaults to `lerian-cloudformation-templates`, the bucket
+  releases are actually published to. The previous default named a bucket that
+  does not exist, so every nested stack 404'd on a default deployment.
+- The quick-launch button on each GitHub release now prefills `MPS3KeyPrefix`
+  with that release's prefix. It pinned only the top-level template, so an older
+  release's button launched a pinned Foundation that pulled its nested templates
+  from `releases/latest/`.
+- The Marketplace listing's delivery options are rewritten to the one path that
+  works. Two of the three published options - Full Stack and Application -
+  launched templates this repository no longer publishes, so a customer following
+  the listing reached a stack that could not be created. The draft changesets in
+  `docs/marketplace-changesets.md` now add a single `Lerian Foundation` option
+  and restrict the three superseded ones, in that order: the Catalog API refuses
+  to restrict the last unrestricted delivery option, so restricting first would
+  have failed. The runbook also sequences the deletion of the retired midaz
+  objects from the release bucket after the listing stops referencing them,
+  rather than before.
+- Documentation links no longer name files that do not exist: the README's
+  cost-estimation and security links, the cost-estimation link in every GitHub
+  release's notes, and the same cost-estimation link at the foot of
+  `docs/ARCHITECTURE.md` and `docs/TROUBLESHOOTING.md` all pointed at documents
+  this repository has never had. `scripts/check-docs-links.py` now resolves every
+  relative link in every Markdown file, so a link into a missing document fails
+  the pull request instead of the reader.
+- The Marketplace runbook's upload step described a mechanism that does not
+  exist. It told the operator to set the `MPS3BucketName` / `MPS3BucketRegion` /
+  `MPS3KeyPrefix` defaults "on the delivery option", and a delivery option has no
+  field for parameter defaults - they live in the template file. Followed
+  literally, the step submitted `foundation.yaml` with its committed
+  `releases/latest/` prefix, binding the listing to whichever nested templates
+  happened to sit there at submission rather than to the released ones. The step
+  now pins `MPS3KeyPrefix` to the release's own `releases/v<VERSION>/` prefix in
+  the uploaded copy, and states which templates go to the Marketplace bucket and
+  which stay in the release bucket.
+- The Foundation stack's own "next step" output no longer hands the customer a
+  command the AWS CLI rejects. It suggested `aws cloudformation deploy` with
+  `--template-url`, which that subcommand does not accept, and it built the URL
+  from the `MPS3*` parameter values - which a Marketplace launch rewrites to the
+  Marketplace copy bucket, a bucket that holds the Foundation's nested templates
+  and never a product template, so the corrected command would still have 404'd.
+  The output is now the three steps that follow the stack, pointing at the
+  product README that carries the full command. The same broken pairing in
+  `upload-templates.sh`'s printed suggestion is fixed too, and
+  `scripts/check-docs-links.py` now fails the pull request on any
+  `aws cloudformation` command whose subcommand and template option disagree.
+- `upload-templates.sh`'s printed `create-stack` command now supplies the three
+  availability zones. `foundation.yaml` defaults them to `us-east-2a/b/c`, and
+  CloudFormation validates an `AWS::EC2::AvailabilityZone::Name` value against
+  the launch region, so the printed command was rejected at `CreateStack` in
+  every region but one - including `us-east-1`, the script's own default. An
+  operator who uploaded the templates and pasted the command the script handed
+  back got a parameter validation error rather than a stack.
+  `scripts/check-docs-links.py` now reads each documented command's template and
+  fails the pull request when a region-scoped default is left unset, so the same
+  omission cannot return through another command or another parameter.
+- The same check now covers launch buttons, which is the surface the omission
+  actually shipped on: a quick-create URL carries its values as `param_<Name>`,
+  and one it does not prefill leaves the customer a console form CloudFormation
+  rejects after they press Create. Every button in the READMEs and in the
+  generated release notes is now read back against its template, so a new one
+  added without the availability zones fails the pull request instead of the
+  customer's first launch.
+- `scripts/check-docs-links.py` no longer skips a `.yml` template silently. It
+  accepted `.yml` arguments while only ever searching for `.yaml` files, so a
+  command or button naming one would resolve to nothing and pass every check
+  unread - the failure mode the script exists to remove, reproduced inside it.
+- `scripts/validate.sh` runs to completion again on a machine without pyyaml.
+  The link check acquired a YAML dependency and was invoked unguarded, so under
+  `set -e` it aborted the whole run before cfn-lint - on exactly the machines the
+  script's own Ruby fallback exists to support. It now skips, like the agent
+  check beside it, and the remaining steps still run.
+- `scripts/check-docs-links.py` no longer skips two kinds of link it claimed to
+  cover: an inline link carrying the optional title markdown allows after the
+  target matched nothing at all and went unchecked, and a relative
+  reference-style definition was excluded on the stated grounds that the
+  template-URL check covered it, which only ever looks at https URLs into the
+  release bucket. Both forms now resolve like any other relative link.
+- The Marketplace runbook no longer claims the root template has to live in the
+  Marketplace-managed bucket. AWS requires only a publicly readable S3 URL, and
+  copies the template into its own bucket at publish time; an operator without
+  console upload access would have read the changeset as blocked. The runbook's
+  execution order also now states that the release publishes the immutable
+  `releases/v<VERSION>/` prefix, which the following step tells the operator to
+  pin without it ever having been established.
+- The listing's security summary no longer claims AWS Secrets Manager. No
+  template the Foundation delivery option launches creates a secret - Secrets
+  Manager belongs to the product infrastructure stacks, which this option does
+  not launch.
+- The listing no longer claims that no Lambda in the customer's account holds
+  cluster administrator rights after the stack completes. Three of them do, and
+  have to: the agent deployer, and the AWS Load Balancer Controller and
+  ExternalDNS deployers when those are enabled - the first is created on every
+  agent launch and the second on every default launch, and CloudFormation needs
+  each of them to update and delete what it installed. The claim a security
+  reviewer can check against the deployed account is the true one: none of those
+  Lambdas installs, upgrades or configures a Lerian product.
+- The `AgentChartDigest` description no longer overstates what Helm verifies.
+  Helm rejects a version that resolves to a different digest, but a version that
+  resolves to nothing - a typo, or a tag never pushed - installs the digest
+  unchecked, so the stack could report a chart version nothing had verified. The
+  digest is now a stack output of its own, on both the agent stack and the
+  Foundation, and both descriptions name it as the authoritative record.
+- The example control plane URL in the agent and Foundation parameter
+  descriptions is `https://api.lerian.studio`, the address the CLI documents.
+  The previous example named a host that does not resolve.
+
 ## [0.1.0] - 2026-02-02
 
 ### Added

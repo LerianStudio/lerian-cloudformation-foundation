@@ -1,45 +1,38 @@
 # Midaz on AWS
 
-[Midaz](https://github.com/LerianStudio/midaz) is an open-source ledger platform. This guide covers deploying Midaz on AWS using CloudFormation.
+[Midaz](https://github.com/LerianStudio/midaz) is an open-source ledger platform. This guide covers the AWS data services Midaz runs on, deployed with CloudFormation.
 
 **Infrastructure components:** RDS PostgreSQL, DocumentDB, ElastiCache (Valkey/Redis), AmazonMQ (RabbitMQ)
 
-## Deployment Options
+## How Midaz gets deployed
 
 ```
-Option 1: Full Stack (single deploy, standalone)
-┌─────────────────────────────────────────────────────────────┐
-│ full-stack.yaml                                             │
-│ VPC + EKS + RDS + DocumentDB + ElastiCache + AmazonMQ + App │
-└─────────────────────────────────────────────────────────────┘
-
-Option 2: Modular (Foundation → Infrastructure → Application)
-┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
-│ foundation   │────▶│ infrastructure   │────▶│ application  │
-│ VPC + EKS    │     │ RDS, DocumentDB  │     │ Helm deploy  │
-│              │     │ ElastiCache      │     │              │
-│              │     │ AmazonMQ         │     │              │
-└──────────────┘     └──────────────────┘     └──────────────┘
-
-Option 3: Existing Cluster (attach to existing VPC/EKS)
-  Use Existing* parameters to skip Foundation and point to your own infra
+┌────────────────────────┐   ┌──────────────────────┐   ┌────────────────────┐
+│ foundation.yaml        │──▶│ infrastructure.yaml  │──▶│ Lerian console     │
+│ VPC + EKS + agent      │   │ RDS, DocumentDB      │   │ agent installs     │
+│ (agent enrolls with    │   │ ElastiCache          │   │ Midaz in-cluster   │
+│  the control plane)    │   │ AmazonMQ             │   │                    │
+└────────────────────────┘   └──────────────────────┘   └────────────────────┘
 ```
 
-1. **Full Stack** — Single deploy, standalone. Best for quick starts and single-product environments.
-2. **Modular** — Foundation + Infrastructure + Application as separate stacks. Best when running multiple products on shared infrastructure.
-3. **Existing Cluster** — Skip Foundation entirely and attach to your own VPC/EKS using `Existing*` parameters.
+CloudFormation stops at the data services. Midaz itself is installed by the
+Lerian control plane through the agent running in the cluster, so upgrades,
+rollbacks, and values changes happen in the console rather than as stack
+updates. Nothing in this repository installs a product chart.
+
+To attach to a VPC and EKS cluster you already run, skip the foundation stack
+and pass the `Existing*` parameters (`ExistingVpcId`, `ExistingClusterName`) to
+`infrastructure.yaml`.
 
 ## Quick Start — One-Click Deploy
 
 | Stack | Description | Deploy |
 |-------|-------------|--------|
-| **Full Stack** | VPC, EKS, databases, and application (standalone) | [![Launch][img]][midaz-full-sa-east-1] |
+| **Foundation** | Shared VPC, EKS, and the Lerian agent | [![Launch][img]][foundation-sa-east-1] |
 | **Infrastructure** | RDS, DocumentDB, ElastiCache, AmazonMQ (auto-imports from Foundation) | [![Launch][img]][midaz-infra-sa-east-1] |
-| **Application** | Helm charts (requires Infrastructure) | [![Launch][img]][midaz-app-sa-east-1] |
 
-[midaz-full-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/full-stack.yaml&stackName=midaz&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/&param_AvailabilityZone1=sa-east-1a&param_AvailabilityZone2=sa-east-1b&param_AvailabilityZone3=sa-east-1c
+[foundation-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml&stackName=lerian-foundation&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/&param_AvailabilityZone1=sa-east-1a&param_AvailabilityZone2=sa-east-1b&param_AvailabilityZone3=sa-east-1c
 [midaz-infra-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/infrastructure.yaml&stackName=midaz-infra&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/
-[midaz-app-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/application.yaml&stackName=midaz-app&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/
 
 [img]: https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png
 
@@ -47,18 +40,6 @@ Option 3: Existing Cluster (attach to existing VPC/EKS)
 
 <details>
 <summary>Other Regions</summary>
-
-**Full Stack**
-
-| Region | Launch |
-|--------|--------|
-| US East (N. Virginia) | [![Launch][img]][midaz-full-us-east-1] |
-| US West (Oregon) | [![Launch][img]][midaz-full-us-west-2] |
-| Europe (Ireland) | [![Launch][img]][midaz-full-eu-west-1] |
-
-[midaz-full-us-east-1]: https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/full-stack.yaml&stackName=midaz&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/&param_AvailabilityZone1=us-east-1a&param_AvailabilityZone2=us-east-1b&param_AvailabilityZone3=us-east-1c
-[midaz-full-us-west-2]: https://console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/full-stack.yaml&stackName=midaz&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/&param_AvailabilityZone1=us-west-2a&param_AvailabilityZone2=us-west-2b&param_AvailabilityZone3=us-west-2c
-[midaz-full-eu-west-1]: https://console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/full-stack.yaml&stackName=midaz&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/&param_AvailabilityZone1=eu-west-1a&param_AvailabilityZone2=eu-west-1b&param_AvailabilityZone3=eu-west-1c
 
 **Infrastructure**
 
@@ -72,60 +53,54 @@ Option 3: Existing Cluster (attach to existing VPC/EKS)
 [midaz-infra-us-west-2]: https://console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/infrastructure.yaml&stackName=midaz-infra&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/
 [midaz-infra-eu-west-1]: https://console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/infrastructure.yaml&stackName=midaz-infra&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/
 
-**Application**
-
-| Region | Launch |
-|--------|--------|
-| US East (N. Virginia) | [![Launch][img]][midaz-app-us-east-1] |
-| US West (Oregon) | [![Launch][img]][midaz-app-us-west-2] |
-| Europe (Ireland) | [![Launch][img]][midaz-app-eu-west-1] |
-
-[midaz-app-us-east-1]: https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/application.yaml&stackName=midaz-app&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/
-[midaz-app-us-west-2]: https://console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/application.yaml&stackName=midaz-app&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/
-[midaz-app-eu-west-1]: https://console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/application.yaml&stackName=midaz-app&param_MPS3BucketName=lerian-cloudformation-templates&param_MPS3BucketRegion=sa-east-1&param_MPS3KeyPrefix=releases/latest/
+The Foundation stack's launch links for other regions are in the
+[main README](../../README.md).
 
 </details>
 
 ## CLI Deploy
 
-### Option 1: Full Stack (standalone, single deploy)
-
-Deploys everything (VPC, EKS, databases, and application) in one stack:
-
-```bash
-aws cloudformation create-stack \
-  --stack-name midaz \
-  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/full-stack.yaml \
-  --parameters \
-    ParameterKey=AvailabilityZone1,ParameterValue=sa-east-1a \
-    ParameterKey=AvailabilityZone2,ParameterValue=sa-east-1b \
-    ParameterKey=AvailabilityZone3,ParameterValue=sa-east-1c \
-    ParameterKey=RDSMasterUsername,ParameterValue=postgres \
-    ParameterKey=DocumentDBMasterUsername,ParameterValue=docdbadmin \
-    ParameterKey=AmazonMQAdminUsername,ParameterValue=mqadmin \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
-  --region sa-east-1
-```
-
-### Option 2: Modular (Foundation + Infrastructure + Application)
-
-Use this when deploying **multiple products** on shared infrastructure, or when you want independent lifecycle management for each layer.
-
-**Step 1 — Foundation** (shared VPC + EKS):
+**Step 1 — Foundation** (shared VPC, EKS, and the agent). `EnrollmentToken` and
+`ControlPlaneURL` come from the Lerian console; `AgentChartVersion` is the agent
+chart version you intend to run. Omit all three to create the cluster without an
+agent — nothing will be able to install products into it until you add one.
 
 ```bash
+set +x # do not shell-trace the secret read or request-file creation
+umask 077
+REQUEST_FILE=$(mktemp)
+trap 'unset ENROLLMENT_TOKEN; rm -f "$REQUEST_FILE"' EXIT
+read -rsp 'Enrollment token: ' ENROLLMENT_TOKEN; printf '\n'
+export ENROLLMENT_TOKEN
+python3 - "$REQUEST_FILE" <<'PY'
+import json, os, sys
+
+request = {
+    "StackName": "lerian-foundation",
+    "TemplateURL": "https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml",
+    "Parameters": [
+        {"ParameterKey": "MPS3BucketName", "ParameterValue": "lerian-cloudformation-templates"},
+        {"ParameterKey": "MPS3BucketRegion", "ParameterValue": "sa-east-1"},
+        {"ParameterKey": "MPS3KeyPrefix", "ParameterValue": "releases/latest/"},
+        {"ParameterKey": "AvailabilityZone1", "ParameterValue": "sa-east-1a"},
+        {"ParameterKey": "AvailabilityZone2", "ParameterValue": "sa-east-1b"},
+        {"ParameterKey": "AvailabilityZone3", "ParameterValue": "sa-east-1c"},
+        {"ParameterKey": "ControlPlaneURL", "ParameterValue": "https://api.lerian.studio"},
+        {"ParameterKey": "EnrollmentToken", "ParameterValue": os.environ["ENROLLMENT_TOKEN"]},
+        {"ParameterKey": "AgentChartVersion", "ParameterValue": "<agent-chart-version>"},
+    ],
+    "Capabilities": ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"],
+}
+with open(sys.argv[1], "w") as output:
+    json.dump(request, output)
+PY
+unset ENROLLMENT_TOKEN
+
 aws cloudformation create-stack \
-  --stack-name lerian-foundation \
-  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/foundation.yaml \
-  --parameters \
-    ParameterKey=MPS3BucketName,ParameterValue=lerian-cloudformation-templates \
-    ParameterKey=MPS3BucketRegion,ParameterValue=sa-east-1 \
-    ParameterKey=MPS3KeyPrefix,ParameterValue=releases/latest/ \
-    ParameterKey=AvailabilityZone1,ParameterValue=sa-east-1a \
-    ParameterKey=AvailabilityZone2,ParameterValue=sa-east-1b \
-    ParameterKey=AvailabilityZone3,ParameterValue=sa-east-1c \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --cli-input-json "file://$REQUEST_FILE" \
   --region sa-east-1
+rm -f "$REQUEST_FILE"
+trap - EXIT
 ```
 
 **Step 2 — Product Infrastructure** (databases, auto-imports from Foundation):
@@ -148,38 +123,18 @@ aws cloudformation create-stack \
 
 > VPC, subnets, EKS cluster, and OIDC are automatically imported from the Foundation stack via `Fn::ImportValue`. To override any value, use the `Existing*` parameters (e.g., `ExistingVpcId`, `ExistingClusterName`).
 
-**Step 3 — Application** (Helm deploy on existing infrastructure):
-
-```bash
-aws cloudformation create-stack \
-  --stack-name midaz-app \
-  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/midaz/application.yaml \
-  --parameters \
-    ParameterKey=InfrastructureStackName,ParameterValue=midaz-infra \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
-  --region sa-east-1
-```
+**Step 3 — Midaz.** Open the Lerian console, select this cluster's agent, and
+create a Midaz release pointing at the `midaz-infra` stack. Ingress, replica
+counts, and chart version are release settings in the console, not stack
+parameters.
 
 > **Tip:** You can deploy multiple product infrastructure stacks (e.g., Midaz + Tracer) on the same Foundation.
-
-### With Ingress
-
-Add these parameters to enable external access:
-
-```bash
-    ParameterKey=EnableIngress,ParameterValue=true \
-    ParameterKey=DomainName,ParameterValue=example.com \
-    ParameterKey=IngressHostname,ParameterValue=ledger.example.com
-```
 
 ## Templates
 
 | Template | Description |
 |----------|-------------|
-| `full-stack.yaml` | Full stack — standalone VPC, EKS, databases, and application |
 | `infrastructure.yaml` | Databases only — RDS, DocumentDB, ElastiCache, AmazonMQ (auto-imports from Foundation) |
-| `application.yaml` | Application only — Helm charts (requires Infrastructure) |
-| `helm.yaml` | Helm deployment (internal) |
 
 ## Key Parameters
 
@@ -187,15 +142,12 @@ Add these parameters to enable external access:
 |-----------|---------|-------------|
 | `ProjectName` | `midaz` | Resource naming prefix |
 | `EnvironmentName` | `production` | Environment tag |
-| `FoundationStackName` | `lerian-foundation` | Foundation stack to import VPC/EKS from (infrastructure stack) |
-| `KubernetesVersion` | `1.35` | EKS version (foundation/full-stack) |
-| `NodeInstanceType` | `c7g.large` | EC2 instance type (foundation/full-stack) |
+| `FoundationStackName` | `lerian-foundation` | Foundation stack to import VPC/EKS from |
 | `RDSInstanceClass` | `db.t3.medium` | Database instance |
-| `EnableIngress` | `false` | Enable ALB ingress |
-| `DomainName` | — | Domain for Route53 + ALB |
-| `IngressHostname` | — | Hostname for the ingress endpoint |
 
-See [examples/aws/README.md](../../examples/aws/README.md) for all parameters.
+Every parameter carries its own description in
+[`infrastructure.yaml`](infrastructure.yaml); the CloudFormation console shows
+them next to each field.
 
 ## Architecture
 

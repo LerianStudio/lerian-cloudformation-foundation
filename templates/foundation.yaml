@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Foundation Infrastructure Stack
-  Deploys shared VPC, EKS, and supporting services (Route53, ALB Controller, ExternalDNS).
+  Deploys shared VPC, EKS, and supporting services (Route53, ALB Controller, ExternalDNS),
+  and enrolls the Lerian agent in the cluster so the control plane can install products into it.
   Product stacks receive this stack's outputs as parameters (ExistingVpcId, ExistingClusterName, etc.).
   (c) Lerian Studio - https://lerian.studio
 
@@ -14,6 +15,7 @@ Metadata:
           - MPS3BucketName
           - MPS3BucketRegion
           - MPS3KeyPrefix
+          - MarketplaceAMI
       - Label:
           default: "General Configuration"
         Parameters:
@@ -43,6 +45,13 @@ Metadata:
           - DomainName
           - EnableALBController
           - EnableExternalDNS
+      - Label:
+          default: "Lerian Control Plane"
+        Parameters:
+          - ControlPlaneURL
+          - EnrollmentToken
+          - AgentChartVersion
+          - AgentChartDigest
     ParameterLabels:
       # AWS Marketplace
       MPS3BucketName:
@@ -51,6 +60,8 @@ Metadata:
         default: "Template S3 Bucket Region"
       MPS3KeyPrefix:
         default: "Template S3 Key Prefix"
+      MarketplaceAMI:
+        default: "Marketplace AMI ID"
       # General
       EnvironmentName:
         default: "Environment"
@@ -89,6 +100,15 @@ Metadata:
         default: "Enable ALB Controller"
       EnableExternalDNS:
         default: "Enable ExternalDNS"
+      # Lerian Control Plane
+      ControlPlaneURL:
+        default: "Control Plane URL"
+      EnrollmentToken:
+        default: "Agent Enrollment Token"
+      AgentChartVersion:
+        default: "Agent Chart Version"
+      AgentChartDigest:
+        default: "Agent Chart Digest (Optional)"
 
 Parameters:
   # =============================================================================
@@ -97,7 +117,7 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
-    Default: "lerian-cloudformation-foundation"
+    Default: "lerian-cloudformation-templates"
 
   MPS3BucketRegion:
     Type: String
@@ -112,6 +132,16 @@ Parameters:
     Default: "releases/latest/"
     AllowedPattern: "^[a-zA-Z0-9-_./]*$"
     ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
+
+  # The Marketplace listing is an AmiProduct entity, so each delivery option has
+  # to bind its AMI to a parameter of the launched template (TemplateSources /
+  # ParameterName). This stack has no use for it - EKS node groups run the
+  # AL2023 ARM64 managed AMI - but without the parameter the AddDeliveryOptions
+  # changeset is rejected for naming a parameter the template does not declare.
+  MarketplaceAMI:
+    Type: String
+    Description: "AWS Marketplace AMI ID (required by the Marketplace delivery option form only, EKS uses managed AMIs)"
+    Default: "ami-placeholder"
 
   # =============================================================================
   # GENERAL CONFIGURATION
@@ -221,9 +251,6 @@ Parameters:
       - c6g.large
       - c6g.xlarge
       - c6g.2xlarge
-      - c6i.large
-      - c6i.xlarge
-      - c6i.2xlarge
       - m6g.medium
       - m6g.large
       - m6g.xlarge
@@ -276,12 +303,72 @@ Parameters:
       - "false"
     Description: Enable ExternalDNS for automatic DNS management (requires DomainName)
 
+  # =============================================================================
+  # LERIAN CONTROL PLANE (AGENT ENROLLMENT)
+  # =============================================================================
+  ControlPlaneURL:
+    Type: String
+    Default: ""
+    Description: "Base URL of the Lerian control plane, e.g. https://api.lerian.studio. Together with EnrollmentToken and AgentChartVersion this installs the Lerian agent in the cluster. Leave all three empty for a cluster with no control-plane connection."
+    AllowedPattern: "^$|^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?(/.*)?$"
+    ConstraintDescription: "Must be empty or an https:// URL"
+
+  EnrollmentToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Single-use enrollment token issued by the Lerian control plane for this tenant. Required together with ControlPlaneURL to install the agent."
+
+  AgentChartVersion:
+    Type: String
+    Default: ""
+    Description: "Version of the lerian-agent Helm chart to install. Required when the agent is enabled; deliberately has no version default so a stale agent is never installed silently."
+    AllowedPattern: "^$|^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+    ConstraintDescription: "Must be empty or an exact semantic version (e.g. 1.4.0)"
+
+  AgentChartDigest:
+    Type: String
+    Default: ""
+    Description: "Optional OCI manifest digest pinning the agent chart, e.g. sha256:<64 hex>. When set, Helm installs that exact digest: a version resolving to a different digest is rejected, but a version that resolves to nothing at all installs the digest unchecked. The AgentChartDigest output is then the authoritative record of what runs."
+    AllowedPattern: "^$|^sha256:[a-f0-9]{64}$"
+    ConstraintDescription: "Must be empty or a sha256:<64 hex characters> digest"
+
+# Rules run before CloudFormation creates anything, so a half-filled agent
+# parameter set is rejected at the CreateStack call. Left to a Condition, the
+# same mistake would build the VPC and the EKS cluster first - roughly twenty
+# minutes - and only then fail the nested agent stack and roll all of it back.
+#
+# Every agent parameter appears in the RuleCondition, AgentChartDigest included:
+# touching any one of them means the agent is wanted, so the three required ones
+# are asserted. A digest supplied on its own would otherwise pass silently and
+# leave a cluster with no agent and no error.
+Rules:
+  AgentParametersComplete:
+    RuleCondition: !Or
+      - !Not [!Equals [!Ref ControlPlaneURL, ""]]
+      - !Not [!Equals [!Ref EnrollmentToken, ""]]
+      - !Not [!Equals [!Ref AgentChartVersion, ""]]
+      - !Not [!Equals [!Ref AgentChartDigest, ""]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ControlPlaneURL, ""]]
+        AssertDescription: "ControlPlaneURL is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave every agent parameter empty - AgentChartDigest included - for a cluster with no control-plane connection."
+      - Assert: !Not [!Equals [!Ref EnrollmentToken, ""]]
+        AssertDescription: "EnrollmentToken is required to install the Lerian agent. Supply ControlPlaneURL, EnrollmentToken and AgentChartVersion together, or leave every agent parameter empty - AgentChartDigest included - for a cluster with no control-plane connection."
+      - Assert: !Not [!Equals [!Ref AgentChartVersion, ""]]
+        AssertDescription: "AgentChartVersion is required to install the Lerian agent. It has no default so a stale agent is never installed silently - supply the version you intend to run. AgentChartDigest alone is not enough."
+
 Conditions:
   HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
   ShouldEnableALBController: !Equals [!Ref EnableALBController, "true"]
   ShouldEnableExternalDNS: !And
     - !Condition HasDomainName
     - !Equals [!Ref EnableExternalDNS, "true"]
+  # The Rules section above already guarantees these two arrive together with a
+  # chart version, so this condition only separates "agent wanted" from "agent
+  # not wanted"; it never has to describe a half-filled parameter set.
+  ShouldDeployAgent: !And
+    - !Not [!Equals [!Ref ControlPlaneURL, ""]]
+    - !Not [!Equals [!Ref EnrollmentToken, ""]]
 
 Resources:
   # =============================================================================
@@ -409,6 +496,34 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
+  # =============================================================================
+  # LERIAN AGENT STACK
+  # =============================================================================
+  # Last stack in the chain and the end of the deployment story told here: once
+  # the agent is enrolled, the control plane installs products into this cluster.
+  AgentStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployAgent
+    DependsOn: EKSStack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}agent.yaml"
+      Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        ClusterName: !GetAtt EKSStack.Outputs.ClusterName
+        ControlPlaneURL: !Ref ControlPlaneURL
+        EnrollmentToken: !Ref EnrollmentToken
+        AgentChartVersion: !Ref AgentChartVersion
+        AgentChartDigest: !Ref AgentChartDigest
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-agent-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
 Outputs:
   # =============================================================================
   # STACK METADATA
@@ -505,24 +620,52 @@ Outputs:
     Value: !GetAtt ExternalDNSStack.Outputs.ExternalDNSRoleArn
 
   # =============================================================================
+  # LERIAN AGENT OUTPUTS
+  # =============================================================================
+  AgentNamespace:
+    Condition: ShouldDeployAgent
+    Description: Kubernetes namespace the Lerian agent runs in
+    Value: !GetAtt AgentStack.Outputs.AgentNamespace
+
+  AgentChartVersion:
+    Condition: ShouldDeployAgent
+    Description: "Version parameter the agent chart was installed with. When AgentChartDigest is set, read that output instead: Helm accepts a version that resolves to nothing, so this value can name a chart it never verified."
+    Value: !GetAtt AgentStack.Outputs.AgentChartVersion
+
+  AgentChartDigest:
+    Condition: ShouldDeployAgent
+    Description: "OCI manifest digest the agent chart was pinned to, or 'unpinned' when none was supplied. Authoritative over AgentChartVersion whenever it is set."
+    Value: !GetAtt AgentStack.Outputs.AgentChartDigest
+
+  AgentLogGroup:
+    Condition: ShouldDeployAgent
+    Description: CloudWatch Log Group holding the agent installation log
+    Value: !GetAtt AgentStack.Outputs.AgentLogGroup
+
+  # =============================================================================
   # UTILITY COMMANDS
   # =============================================================================
   KubeconfigCommand:
     Description: Command to configure kubectl
     Value: !Sub "aws eks update-kubeconfig --name ${EKSStack.Outputs.ClusterName} --region ${AWS::Region}"
 
-  DeployProductCommand:
+  # Deliberately not a copy-pasteable deploy command. The product stack has three
+  # parameters with no default (the database master usernames), so any command
+  # short enough to fit in an output would fail at CreateStack; and a Marketplace
+  # launch rewrites the MPS3* values to the Marketplace copy bucket, which holds
+  # only this template's nested stacks - never a product template - so a URL built
+  # from them would 404. The product README carries the whole command, per region.
+  NextSteps:
     Description: |
-      Example command to deploy a product infrastructure stack using this foundation.
-      The product stack auto-imports values via FoundationStackName.
+      What to do after this stack completes. Product applications are installed by
+      the Lerian control plane through the agent, never by a CloudFormation stack.
     Value: !Sub |
-      aws cloudformation deploy \
-        --stack-name midaz-infra \
-        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3KeyPrefix}products/midaz/infrastructure.yaml \
-        --parameter-overrides \
-          MPS3BucketName=${MPS3BucketName} \
-          MPS3BucketRegion=${MPS3BucketRegion} \
-          MPS3KeyPrefix=${MPS3KeyPrefix} \
-          FoundationStackName=${AWS::StackName} \
-        --capabilities CAPABILITY_IAM \
-        --region ${AWS::Region}
+      1. Confirm this cluster shows as connected in the Lerian console. If the agent
+         parameters were left empty it has no control-plane connection, and nothing
+         can be installed into it until you add one.
+      2. Launch the product infrastructure stack for the product you are deploying,
+         passing FoundationStackName=${AWS::StackName}. It creates the databases,
+         cache and broker, and imports this stack's VPC and cluster.
+         Midaz: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/products/midaz/README.md
+      3. Create the product release in the Lerian console. The agent performs the
+         install from inside the cluster.

@@ -372,6 +372,9 @@ aws iam get-role \
 
 ## Helm Deployment Issues
 
+The only chart CloudFormation installs is `lerian-agent`. Product charts are
+installed by the Lerian control plane through that agent.
+
 ### Helm Release Stuck
 
 **Symptom:** Helm deployment times out or stays in `pending-install`.
@@ -379,29 +382,53 @@ aws iam get-role \
 **Diagnosis:**
 ```bash
 # Check Helm release status
-helm status midaz -n midaz
+helm status lerian-agent -n lerian-system
 
 # List all releases
 helm list -A
 
 # Check for failed hooks
-kubectl get jobs -n midaz
+kubectl get jobs -n lerian-system
 ```
 
-### Lambda Custom Resource Failures
+### Agent Enrollment Failures
 
-**Symptom:** Helm stack deployed via Lambda fails.
+**Symptom:** The foundation stack fails on `AgentStack`, or the cluster never
+appears in the console.
+
+The stack's `AgentLogGroup` output names the log group to read. The enrollment
+token is redacted before anything is logged.
 
 **Diagnosis:**
 ```bash
-# Check Lambda logs
-aws logs tail /aws/lambda/midaz-helm-deployer --follow
+# Read the log group the stack reports
+aws cloudformation describe-stacks \
+  --stack-name lerian-foundation \
+  --query "Stacks[0].Outputs[?OutputKey=='AgentLogGroup'].OutputValue" \
+  --output text
 
-# Check CloudFormation custom resource events
+aws logs tail <log-group-from-above> --follow
+
+# Check the custom resource events. They belong to the nested agent stack, and
+# describe-stack-events does not recurse into nested stacks, so resolve it first.
+AGENT_STACK=$(aws cloudformation describe-stack-resource \
+  --stack-name lerian-foundation \
+  --logical-resource-id AgentStack \
+  --query "StackResourceDetail.PhysicalResourceId" \
+  --output text)
+
 aws cloudformation describe-stack-events \
-  --stack-name midaz-helm \
-  --query "StackEvents[?ResourceType=='Custom::HelmChart']"
+  --stack-name "$AGENT_STACK" \
+  --query "StackEvents[?ResourceType=='AWS::CloudFormation::CustomResource']"
 ```
+
+**Common causes:**
+
+| Cause | Fix |
+|-------|-----|
+| `AgentChartVersion` empty | The stack is rejected before creation; supply the version. |
+| Token already consumed | Enrollment tokens are single use. Issue a new one from the control plane. |
+| `AgentChartDigest` mismatch | Helm reports `chart reference digest mismatch`. The digest and the version must name the same chart. |
 
 ## Monitoring and Logs
 
@@ -538,4 +565,3 @@ If you're still experiencing issues:
 For more information, see:
 - [README.md](../README.md) - Quick start guide
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture details
-- [COST_ESTIMATION.md](COST_ESTIMATION.md) - Cost breakdown

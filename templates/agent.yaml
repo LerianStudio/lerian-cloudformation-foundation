@@ -1,0 +1,505 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Lerian BYOC Agent
+  Installs the lerian-agent Helm chart into an existing EKS cluster and enrolls it
+  with the Lerian control plane. The agent holds an outbound-only connection to the
+  control plane and performs every product install from inside the cluster, so this
+  is the last deployment stack that runs outside the control plane.
+  (c) Lerian Studio - https://lerian.studio
+
+Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    ConstraintDescription: "Must begin with a letter and contain only letters, numbers, and hyphens"
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  ClusterName:
+    Type: String
+    Description: EKS Cluster Name the agent is installed into
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and hyphens"
+
+  ControlPlaneURL:
+    Type: String
+    Description: "Base URL of the Lerian control plane the agent polls, e.g. https://api.lerian.studio. Must be https:// - the agent sends its bearer token on every request."
+    AllowedPattern: "^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?(/.*)?$"
+    ConstraintDescription: "Must be an https:// URL"
+
+  EnrollmentToken:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+    Description: "Single-use enrollment token issued by the Lerian control plane for this tenant. The agent's first heartbeat consumes it and fixes the agent's own identity."
+
+  AgentChartRepository:
+    Type: String
+    Default: "oci://ghcr.io/lerianstudio/charts/lerian-agent"
+    Description: OCI repository of the lerian-agent Helm chart
+    AllowedPattern: "^oci://.+$"
+    ConstraintDescription: "Must be an oci:// chart repository reference"
+
+  AgentChartVersion:
+    Type: String
+    Description: "Version of the lerian-agent Helm chart to install. Deliberately has no default: a stale default would silently install an obsolete agent."
+    AllowedPattern: "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+    ConstraintDescription: "Must be an exact semantic version (e.g. 1.4.0). No default is provided - supply the version you intend to run."
+
+  AgentChartDigest:
+    Type: String
+    Default: ""
+    Description: "Optional OCI manifest digest pinning the chart, e.g. sha256:<64 hex>. When set, Helm installs that exact digest: a version resolving to a different digest is rejected, but a version that resolves to nothing at all installs the digest unchecked. The digest, not the version, is then what ran - the AgentChartDigest output is the authoritative record."
+    AllowedPattern: "^$|^sha256:[a-f0-9]{64}$"
+    ConstraintDescription: "Must be empty or a sha256:<64 hex characters> digest"
+
+  AgentNamespace:
+    Type: String
+    Default: lerian-system
+    Description: Kubernetes namespace the agent is installed into (created if absent)
+    AllowedPattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    ConstraintDescription: "Must be a valid Kubernetes namespace name"
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasChartDigest: !Not [!Equals [!Ref AgentChartDigest, ""]]
+
+Resources:
+  # =============================================================================
+  # LAMBDA EXECUTION ROLE FOR THE AGENT INSTALLER
+  # =============================================================================
+  AgentDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # RoleName omitted - explicit name overflows IAM's 64-char limit for
+      # long ProjectNames; CFN auto-generates it. Consumers use !GetAtt .Arn.
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EKSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                Resource: !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-agent-deployer-role"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # EKS ACCESS ENTRY FOR THE INSTALLER ROLE
+  # =============================================================================
+  # Cluster admin is the floor, not a shortcut: the agent chart creates its own
+  # ClusterRole, and Kubernetes escalation prevention refuses to let an installer
+  # grant permissions it does not itself hold.
+  AgentDeployerAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt AgentDeployerRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - AccessScope:
+            Type: cluster
+          PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+  # =============================================================================
+  # LAMBDA FUNCTION THAT INSTALLS THE AGENT CHART
+  # =============================================================================
+  AgentDeployerFunction:
+    # checkov:skip=CKV_AWS_116:Deployer Lambda is one-shot during stack lifecycle, DLQ not applicable
+    # checkov:skip=CKV_AWS_117:Deployer Lambda needs internet access to reach the OCI chart registry and the EKS endpoint
+    Type: AWS::Lambda::Function
+    Properties:
+      # FunctionName omitted for the same reason as RoleName above: ProjectName
+      # accepts up to 128 characters and Lambda caps a function name at 64, so an
+      # explicit name would fail at create time - after the cluster already exists.
+      Description: Installs the lerian-agent Helm chart into the EKS cluster
+      Runtime: python3.13
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 1024
+      ReservedConcurrentExecutions: 1
+      Role: !GetAtt AgentDeployerRole.Arn
+      # No Environment variables on purpose: every value, including the enrollment
+      # token, arrives in the custom resource event instead. Lambda environment
+      # variables are readable by anyone holding lambda:GetFunctionConfiguration.
+      Code:
+        ZipFile: |
+          import base64
+          import hashlib
+          import json
+          import logging
+          import os
+          import stat
+          import subprocess
+          import tarfile
+          import time
+          import urllib.request
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          # Helm >= 3.17 is required: OCI install by digest landed there.
+          HELM_VERSION = 'v3.21.4'
+          # Published at get.helm.sh beside HELM_VERSION. Pinning it here means a
+          # substituted download never executes with cluster-admin access.
+          HELM_SHA256 = '61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14'
+          RELEASE_NAME = 'lerian-agent'
+          REDACTED_PROPS = ('EnrollmentToken',)
+          TMP = '/tmp'
+          VALUES_FILE = f'{TMP}/agent-values.json'
+
+          def redact(event):
+              safe = json.loads(json.dumps(event))
+              # ResponseURL is a one-use presigned URL that authorizes the
+              # CloudFormation result. A log reader must not be able to race the
+              # provider and forge SUCCESS or FAILED for the stack operation.
+              if 'ResponseURL' in safe:
+                  safe['ResponseURL'] = '<redacted>'
+              for section in ('ResourceProperties', 'OldResourceProperties'):
+                  props = safe.get(section) or {}
+                  for name in REDACTED_PROPS:
+                      if name in props:
+                          props[name] = '<redacted>'
+              return safe
+
+          def send_response(event, context, status, data=None, reason=None):
+              response_body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': resource_id(event),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+
+              json_body = json.dumps(response_body).encode('utf-8')
+              req = urllib.request.Request(event['ResponseURL'], data=json_body, method='PUT')
+              req.add_header('Content-Type', '')
+              req.add_header('Content-Length', len(json_body))
+
+              for attempt in range(3):
+                  try:
+                      urllib.request.urlopen(req, timeout=30)
+                      logger.info(f"Response sent: {status}")
+                      return
+                  except Exception as e:
+                      # HTTPError includes the presigned ResponseURL in its string;
+                      # log only the type so a failed callback cannot leak it.
+                      logger.warning(
+                          f"Response attempt {attempt + 1} failed: {type(e).__name__}"
+                      )
+                      if attempt < 2:
+                          time.sleep(2 ** attempt)
+              logger.error("Failed to send response after 3 attempts")
+
+          def physical_id(props):
+              cluster = props.get('ClusterName', 'unknown')
+              namespace = props.get('Namespace', 'unknown')
+              return f'{cluster}/{namespace}/{RELEASE_NAME}'
+
+          def resource_id(event):
+              # Delete echoes the id CloudFormation asked to delete. Create and
+              # Update derive it from the current properties, so moving the agent
+              # to another namespace reads as a replacement: CloudFormation then
+              # deletes the old id and the release in the old namespace goes away,
+              # instead of two enrolled agents polling the control plane.
+              if event['RequestType'] == 'Delete':
+                  return event['PhysicalResourceId']
+              return physical_id(event.get('ResourceProperties') or {})
+
+          def namespace_of(event, props):
+              # The physical id records where the release actually lives, which is
+              # what a delete after a namespace change has to uninstall from.
+              parts = (event.get('PhysicalResourceId') or '').split('/')
+              return parts[1] if len(parts) == 3 else props['Namespace']
+
+          def get_eks_token(cluster_name):
+              import boto3
+              from botocore.signers import RequestSigner
+              from botocore.model import ServiceId
+
+              session = boto3.Session()
+              region = session.region_name
+
+              signer = RequestSigner(
+                  ServiceId('sts'),
+                  region,
+                  'sts',
+                  'v4',
+                  session.get_credentials(),
+                  session.events
+              )
+
+              params = {
+                  'method': 'GET',
+                  'url': f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15',
+                  'body': {},
+                  'headers': {'x-k8s-aws-id': cluster_name},
+                  'context': {}
+              }
+
+              url = signer.generate_presigned_url(
+                  params,
+                  region_name=region,
+                  expires_in=60,
+                  operation_name=''
+              )
+
+              return 'k8s-aws-v1.' + base64.urlsafe_b64encode(url.encode('utf-8')).decode('utf-8').rstrip('=')
+
+          def setup_kubeconfig(cluster_name):
+              import boto3
+
+              cluster = boto3.client('eks').describe_cluster(name=cluster_name)['cluster']
+              token = get_eks_token(cluster_name)
+
+              kubeconfig = {
+                  'apiVersion': 'v1',
+                  'kind': 'Config',
+                  'clusters': [{
+                      'name': cluster_name,
+                      'cluster': {
+                          'server': cluster['endpoint'],
+                          'certificate-authority-data': cluster['certificateAuthority']['data']
+                      }
+                  }],
+                  'contexts': [{
+                      'name': cluster_name,
+                      'context': {'cluster': cluster_name, 'user': 'aws'}
+                  }],
+                  'current-context': cluster_name,
+                  'users': [{'name': 'aws', 'user': {'token': token}}]
+              }
+
+              path = f'{TMP}/kubeconfig'
+              with open(path, 'w') as f:
+                  json.dump(kubeconfig, f)
+              os.chmod(path, 0o600)
+              os.environ['KUBECONFIG'] = path
+
+          def run_command(cmd):
+              logger.info(f"Running: {' '.join(cmd)}")
+              result = subprocess.run(cmd, capture_output=True, text=True)
+              logger.info(f"stdout: {result.stdout}")
+              if result.returncode != 0:
+                  logger.error(f"stderr: {result.stderr}")
+                  raise Exception(f"Command failed: {result.stderr.strip()}")
+              return result.stdout
+
+          def verify_helm_archive(archive):
+              with open(archive, 'rb') as f:
+                  actual = hashlib.file_digest(f, 'sha256').hexdigest()
+              if actual != HELM_SHA256:
+                  raise RuntimeError('Helm archive checksum mismatch')
+
+          def install_helm():
+              os.environ['HOME'] = TMP
+              for sub in ('cache', 'config', 'data'):
+                  path = f'{TMP}/.helm/{sub}'
+                  os.makedirs(path, exist_ok=True)
+                  os.environ[f'HELM_{sub.upper()}_HOME'] = path
+
+              helm_path = f'{TMP}/helm'
+              if not os.path.exists(helm_path):
+                  logger.info(f"Downloading helm {HELM_VERSION}...")
+                  archive = f'{TMP}/helm.tar.gz'
+                  urllib.request.urlretrieve(
+                      f'https://get.helm.sh/helm-{HELM_VERSION}-linux-amd64.tar.gz', archive)
+                  verify_helm_archive(archive)
+                  with tarfile.open(archive, 'r:gz') as tar:
+                      tar.extractall(TMP, filter='data')
+                  os.rename(f'{TMP}/linux-amd64/helm', helm_path)
+                  os.chmod(helm_path, os.stat(helm_path).st_mode | stat.S_IEXEC)
+
+              os.environ['PATH'] = f"{TMP}:{os.environ.get('PATH', '')}"
+
+          def write_values(props):
+              # The values contract with the lerian-agent chart, in full: two keys,
+              # controlPlane.url and agent.token. Nothing else is set, so every other
+              # value the chart exposes keeps its own default.
+              #
+              # CROSS-REPO DEPENDENCY - agent.token here is the single-use ENROLLMENT
+              # token, and the chart must accept it on its own. The lerian-agent chart
+              # published today (LerianStudio/deployer, charts/lerian-agent) does not:
+              # its agent.token is a per-agent bearer token from an out-of-band
+              # registration call, so it also requires a matching agent.id and fails
+              # the install without one. Enrollment - the agent's first heartbeat
+              # consuming the token and fixing its own identity - is what removes that
+              # requirement. A chart version that still requires agent.id fails this
+              # install and rolls the whole foundation back, so AgentChartVersion must
+              # name a chart published AFTER the enrollment contract lands. See
+              # docs/marketplace-changesets.md, step 8.
+              #
+              # Written as JSON (valid YAML) so an opaque token can never break out
+              # of the values document, and to a file rather than --set so it never
+              # lands in the process arguments.
+              values = {
+                  'controlPlane': {'url': props['ControlPlaneURL']},
+                  'agent': {'token': props['EnrollmentToken']}
+              }
+              with open(VALUES_FILE, 'w') as f:
+                  json.dump(values, f)
+              os.chmod(VALUES_FILE, 0o600)
+
+          def chart_reference(props):
+              repository = props['ChartRepository']
+              digest = props.get('ChartDigest') or ''
+              return f'{repository}@{digest}' if digest else repository
+
+          def helm_install(props):
+              write_values(props)
+              try:
+                  run_command([
+                      'helm', 'upgrade', '--install', RELEASE_NAME,
+                      chart_reference(props),
+                      '--version', props['ChartVersion'],
+                      '--namespace', props['Namespace'],
+                      '--create-namespace',
+                      '--values', VALUES_FILE,
+                      '--atomic',
+                      '--timeout', '10m'
+                  ])
+              finally:
+                  if os.path.exists(VALUES_FILE):
+                      os.remove(VALUES_FILE)
+
+          def helm_uninstall(event, props):
+              try:
+                  run_command(['helm', 'uninstall', RELEASE_NAME, '-n', namespace_of(event, props)])
+              except Exception:
+                  logger.info("Helm release may not exist")
+
+          def handle_delete(event, context):
+              # Best effort by design: a stack must stay deletable even when the
+              # helm download fails or the cluster is already gone. Reporting
+              # FAILED here would leave the stack stuck in DELETE_FAILED.
+              props = event.get('ResourceProperties') or {}
+              try:
+                  install_helm()
+                  setup_kubeconfig(props['ClusterName'])
+                  helm_uninstall(event, props)
+                  message = 'Agent removed'
+              except Exception as e:
+                  logger.warning(f"Uninstall skipped: {e}")
+                  message = f'Agent uninstall skipped: {str(e)[:1000]}'
+              send_response(event, context, 'SUCCESS', {'Message': message})
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(redact(event))}")
+
+              if event['RequestType'] == 'Delete':
+                  handle_delete(event, context)
+                  return
+
+              try:
+                  props = event['ResourceProperties']
+
+                  install_helm()
+                  setup_kubeconfig(props['ClusterName'])
+                  helm_install(props)
+
+                  send_response(event, context, 'SUCCESS', {
+                      'ReleaseName': RELEASE_NAME,
+                      'Namespace': props['Namespace'],
+                      'ChartVersion': props['ChartVersion'],
+                      'ChartDigest': props.get('ChartDigest') or 'unpinned'
+                  })
+
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  send_response(event, context, 'FAILED', reason=str(e)[:1000])
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-agent-deployer"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # CUSTOM RESOURCE THAT TRIGGERS THE AGENT INSTALL
+  # =============================================================================
+  # The enrollment token travels in these properties rather than in the function's
+  # environment, and is redacted before the event reaches CloudWatch. Every value
+  # the install depends on is its own property, which is what makes CloudFormation
+  # re-invoke the function when one of them changes - including the token, whose
+  # change re-runs the install with the new one. Whether the control plane then
+  # accepts a second enrollment for an already-enrolled agent is the control
+  # plane's rule, not this stack's: this template only guarantees the new token
+  # reaches the chart.
+  # ServiceTimeout bounds a Lambda that dies without answering: without it,
+  # CloudFormation waits the default hour before giving up.
+  AgentDeployment:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: AgentDeployerAccessEntry
+    Properties:
+      ServiceToken: !GetAtt AgentDeployerFunction.Arn
+      ServiceTimeout: 1800
+      ClusterName: !Ref ClusterName
+      Namespace: !Ref AgentNamespace
+      ControlPlaneURL: !Ref ControlPlaneURL
+      EnrollmentToken: !Ref EnrollmentToken
+      ChartRepository: !Ref AgentChartRepository
+      ChartVersion: !Ref AgentChartVersion
+      ChartDigest: !Ref AgentChartDigest
+
+Outputs:
+  AgentReleaseName:
+    Description: Helm release name of the installed agent
+    Value: lerian-agent
+
+  AgentNamespace:
+    Description: Kubernetes namespace the agent runs in
+    Value: !Ref AgentNamespace
+
+  AgentChartVersion:
+    Description: "Version parameter the agent chart was installed with. When AgentChartDigest is set, read that output instead: Helm accepts a version that resolves to nothing, so this value can name a chart it never verified."
+    Value: !Ref AgentChartVersion
+
+  AgentChartDigest:
+    Description: "OCI manifest digest the agent chart was pinned to, or 'unpinned' when none was supplied. Authoritative over AgentChartVersion whenever it is set."
+    Value: !If [HasChartDigest, !Ref AgentChartDigest, "unpinned"]
+
+  AgentDeployerFunctionArn:
+    Description: Agent Deployer Lambda Function ARN
+    Value: !GetAtt AgentDeployerFunction.Arn
+
+  AgentLogGroup:
+    Description: CloudWatch Log Group for the agent deployer
+    Value: !Sub "/aws/lambda/${AgentDeployerFunction}"
