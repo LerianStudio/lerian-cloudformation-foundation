@@ -76,7 +76,7 @@ aws cloudformation create-stack \
     ParameterKey=AvailabilityZone1,ParameterValue=sa-east-1a \
     ParameterKey=AvailabilityZone2,ParameterValue=sa-east-1b \
     ParameterKey=AvailabilityZone3,ParameterValue=sa-east-1c \
-    ParameterKey=ControlPlaneURL,ParameterValue=https://cp.lerian.studio \
+    ParameterKey=ControlPlaneURL,ParameterValue=https://api.lerian.studio \
     ParameterKey=EnrollmentToken,ParameterValue=<token-from-the-console> \
     ParameterKey=AgentChartVersion,ParameterValue=<agent-chart-version> \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \

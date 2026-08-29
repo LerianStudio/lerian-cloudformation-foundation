@@ -35,7 +35,7 @@ Parameters:
 
   ControlPlaneURL:
     Type: String
-    Description: "Base URL of the Lerian control plane the agent polls, e.g. https://cp.lerian.studio. Must be https:// - the agent sends its bearer token on every request."
+    Description: "Base URL of the Lerian control plane the agent polls, e.g. https://api.lerian.studio. Must be https:// - the agent sends its bearer token on every request."
     AllowedPattern: "^https://[a-zA-Z0-9.-]+(:[0-9]{1,5})?(/.*)?$"
     ConstraintDescription: "Must be an https:// URL"
 
