@@ -62,11 +62,26 @@ jobs:
 
       - name: Process detected changes
         id: process
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
+          # A push to main can land more than one commit. The repo allows merge
+          # commits (one commit, carrying the PR title) and rebase merges (every
+          # branch commit, replayed). Reading only HEAD~1..HEAD sees the last of
+          # them, so a rebase-merged breaking PR whose final commit happens to be
+          # a "fix:" would publish a patch, and the templates its earlier commits
+          # touched would not be released at all. The push range covers both.
+          BEFORE="$PUSH_BEFORE"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || \
+             ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            BEFORE="HEAD~1"
+          fi
+          echo "Release range: ${BEFORE}..HEAD"
+
           # Detect changed core templates
-          CHANGED_CORE=$(git diff --name-only HEAD~1 HEAD -- templates/*.yaml 2>/dev/null || echo "")
+          CHANGED_CORE=$(git diff --name-only "$BEFORE" HEAD -- templates/*.yaml 2>/dev/null || echo "")
           # Detect changed product templates
-          CHANGED_PRODUCTS=$(git diff --name-only HEAD~1 HEAD -- products/ 2>/dev/null || echo "")
+          CHANGED_PRODUCTS=$(git diff --name-only "$BEFORE" HEAD -- products/ 2>/dev/null || echo "")
 
           HAS_CORE="false"
           HAS_PRODUCTS="false"
@@ -104,8 +119,10 @@ jobs:
             echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
 
-          # Determine bump type from commit message
-          COMMIT_MSG=$(git log -1 --pretty=%B)
+          # Determine bump type from every commit message in the push, so the
+          # strongest signal in the range wins rather than whichever commit
+          # happens to be last.
+          COMMIT_MSG=$(git log "${BEFORE}..HEAD" --pretty=%B)
           if echo "$COMMIT_MSG" | grep -qiE "^BREAKING CHANGE:|^[a-z]+(\(.+\))?!:"; then
             BUMP_TYPE="major"
           elif echo "$COMMIT_MSG" | grep -qiE "^feat(\(.+\))?:"; then
