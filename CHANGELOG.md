@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Agent Stack** (`agent.yaml`) - installs the `lerian-agent` Helm chart into the
+  cluster and enrolls it with the Lerian control plane. Optional nested stack of
+  the Foundation, created when `ControlPlaneURL` and `EnrollmentToken` are both
+  supplied. The chart is pinned by version and, optionally, by OCI digest.
+- CI now compiles the inline Lambda code of every template, so a syntax error is
+  caught in the pull request instead of by a stack that hangs until it times out.
+
+### Removed
+
+- **BREAKING**: `products/midaz/application.yaml`, `products/midaz/helm.yaml`, and
+  `products/midaz/full-stack.yaml`. The application layer is no longer deployed by
+  CloudFormation: the Lerian control plane installs products through the cluster's
+  agent. Existing stacks created from these templates keep running; they are simply
+  no longer published, and Midaz upgrades move to the control plane.
+- Deploy scripts that existed only to drive those templates: `deploy.sh`,
+  `deploy-stack.sh`, `deploy-helm.sh`, `deploy-helm-stack.sh`.
+- `MPS3ProductKeyPrefix` from `products/midaz/infrastructure.yaml` - it pointed at
+  the removed `application.yaml`.
+
+### Fixed
+
+- `NodeInstanceType` no longer offers `c6i.*` x86 instance types. The node group
+  is created with `AmiType: AL2023_ARM_64_STANDARD`, so an x86 choice produced
+  nodes that never joined the cluster.
+- `MPS3BucketName` now defaults to `lerian-cloudformation-templates`, the bucket
+  releases are actually published to. The previous default named a bucket that
+  does not exist, so every nested stack 404'd on a default deployment.
+
 ## [0.1.0] - 2026-02-02
 
 ### Added
