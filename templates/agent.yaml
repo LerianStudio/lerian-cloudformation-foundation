@@ -144,7 +144,9 @@ Resources:
     # checkov:skip=CKV_AWS_117:Deployer Lambda needs internet access to reach the OCI chart registry and the EKS endpoint
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub "${ProjectName}-agent-deployer"
+      # FunctionName omitted for the same reason as RoleName above: ProjectName
+      # accepts up to 128 characters and Lambda caps a function name at 64, so an
+      # explicit name would fail at create time - after the cluster already exists.
       Description: Installs the lerian-agent Helm chart into the EKS cluster
       Runtime: python3.13
       Handler: index.handler
@@ -189,7 +191,7 @@ Resources:
               response_body = {
                   'Status': status,
                   'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
-                  'PhysicalResourceId': event.get('PhysicalResourceId') or physical_id(event, context),
+                  'PhysicalResourceId': resource_id(event),
                   'StackId': event['StackId'],
                   'RequestId': event['RequestId'],
                   'LogicalResourceId': event['LogicalResourceId'],
@@ -207,11 +209,26 @@ Resources:
               except Exception as e:
                   logger.error(f"Failed to send response: {e}")
 
-          def physical_id(event, context):
-              props = event.get('ResourceProperties') or {}
+          def physical_id(props):
               cluster = props.get('ClusterName', 'unknown')
               namespace = props.get('Namespace', 'unknown')
               return f'{cluster}/{namespace}/{RELEASE_NAME}'
+
+          def resource_id(event):
+              # Delete echoes the id CloudFormation asked to delete. Create and
+              # Update derive it from the current properties, so moving the agent
+              # to another namespace reads as a replacement: CloudFormation then
+              # deletes the old id and the release in the old namespace goes away,
+              # instead of two enrolled agents polling the control plane.
+              if event['RequestType'] == 'Delete':
+                  return event['PhysicalResourceId']
+              return physical_id(event.get('ResourceProperties') or {})
+
+          def namespace_of(event, props):
+              # The physical id records where the release actually lives, which is
+              # what a delete after a namespace change has to uninstall from.
+              parts = (event.get('PhysicalResourceId') or '').split('/')
+              return parts[1] if len(parts) == 3 else props['Namespace']
 
           def get_eks_token(cluster_name):
               import boto3
@@ -340,26 +357,39 @@ Resources:
                   if os.path.exists(VALUES_FILE):
                       os.remove(VALUES_FILE)
 
-          def helm_uninstall(props):
+          def helm_uninstall(event, props):
               try:
-                  run_command(['helm', 'uninstall', RELEASE_NAME, '-n', props['Namespace']])
+                  run_command(['helm', 'uninstall', RELEASE_NAME, '-n', namespace_of(event, props)])
               except Exception:
                   logger.info("Helm release may not exist")
 
+          def handle_delete(event, context):
+              # Best effort by design: a stack must stay deletable even when the
+              # helm download fails or the cluster is already gone. Reporting
+              # FAILED here would leave the stack stuck in DELETE_FAILED.
+              props = event.get('ResourceProperties') or {}
+              try:
+                  install_helm()
+                  setup_kubeconfig(props['ClusterName'])
+                  helm_uninstall(event, props)
+                  message = 'Agent removed'
+              except Exception as e:
+                  logger.warning(f"Uninstall skipped: {e}")
+                  message = f'Agent uninstall skipped: {e}'
+              send_response(event, context, 'SUCCESS', {'Message': message})
+
           def handler(event, context):
               logger.info(f"Event: {json.dumps(redact(event))}")
+
+              if event['RequestType'] == 'Delete':
+                  handle_delete(event, context)
+                  return
 
               try:
                   props = event['ResourceProperties']
 
                   install_helm()
                   setup_kubeconfig(props['ClusterName'])
-
-                  if event['RequestType'] == 'Delete':
-                      helm_uninstall(props)
-                      send_response(event, context, 'SUCCESS', {'Message': 'Agent removed'})
-                      return
-
                   helm_install(props)
 
                   send_response(event, context, 'SUCCESS', {
@@ -383,15 +413,18 @@ Resources:
   # CUSTOM RESOURCE THAT TRIGGERS THE AGENT INSTALL
   # =============================================================================
   # The enrollment token travels in these properties rather than in the function's
-  # environment, and is redacted before the event reaches CloudWatch. It is
-  # deliberately absent from ConfigHash: a single-use token is consumed at the
-  # agent's first heartbeat, so re-running the install on a token change would be
-  # a no-op with the token written into the template's rendered properties.
+  # environment, and is redacted before the event reaches CloudWatch. Every value
+  # the install depends on is its own property, which is what makes CloudFormation
+  # re-invoke the function when one of them changes - including the token, whose
+  # change re-runs the install and re-enrolls the agent with the new one.
+  # ServiceTimeout bounds a Lambda that dies without answering: without it,
+  # CloudFormation waits the default hour before giving up.
   AgentDeployment:
     Type: AWS::CloudFormation::CustomResource
     DependsOn: AgentDeployerAccessEntry
     Properties:
       ServiceToken: !GetAtt AgentDeployerFunction.Arn
+      ServiceTimeout: 1800
       ClusterName: !Ref ClusterName
       Namespace: !Ref AgentNamespace
       ControlPlaneURL: !Ref ControlPlaneURL
@@ -399,8 +432,6 @@ Resources:
       ChartRepository: !Ref AgentChartRepository
       ChartVersion: !Ref AgentChartVersion
       ChartDigest: !Ref AgentChartDigest
-      ConfigHash: !Base64
-        Fn::Sub: "${ClusterName}-${AgentNamespace}-${ControlPlaneURL}-${AgentChartRepository}-${AgentChartVersion}-${AgentChartDigest}"
 
 Outputs:
   AgentReleaseName:
@@ -421,4 +452,4 @@ Outputs:
 
   AgentLogGroup:
     Description: CloudWatch Log Group for the agent deployer
-    Value: !Sub "/aws/lambda/${ProjectName}-agent-deployer"
+    Value: !Sub "/aws/lambda/${AgentDeployerFunction}"
