@@ -17,6 +17,12 @@ would publish there. A URL with no file behind it fails the check.
 Marketplace runbook's `aws s3 rm` cleanup names the retired midaz templates on
 purpose - and they are not something a customer can click.
 
+The second check covers the other half of the same failure: links between the
+documents themselves. A reader who follows the README into ARCHITECTURE.md and
+finds a link to a document this repository has never had is at the same dead
+end, one click further in. Every relative link in every Markdown file must
+resolve to a file or directory that exists.
+
 Run: python3 scripts/check-docs-links.py
 """
 
@@ -33,6 +39,14 @@ REGION = "sa-east-1"
 TEMPLATE_URL = re.compile(
     r"https://([a-z0-9.-]+)\.s3\.([a-z0-9-]+)\.amazonaws\.com/(releases/[^\s)\]\"'&]+\.yaml)"
 )
+
+# Inline markdown links only: [text](target). Reference-style links ([text][ref])
+# and their definitions carry URLs, which the check above already covers.
+MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)\)")
+
+# Anything with a scheme is somebody else's to resolve, and a bare #anchor points
+# inside the file that carries it.
+EXTERNAL_LINK = re.compile(r"^([a-z][a-z0-9+.-]*:|//|#)")
 
 
 def publishes(key):
@@ -87,13 +101,36 @@ def check_documented_templates_are_published():
     return checked
 
 
-CHECKS = (check_documented_templates_are_published,)
+def check_relative_doc_links_resolve():
+    failures = []
+    checked = 0
+    for path in sorted(ROOT.rglob("*.md")):
+        if ".git" in path.parts:
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            for target in MARKDOWN_LINK.findall(line):
+                if EXTERNAL_LINK.match(target):
+                    continue
+                checked += 1
+                # A link may address a heading inside the target document.
+                resolved = (path.parent / target.split("#", 1)[0]).resolve()
+                if not resolved.exists():
+                    failures.append(
+                        f"{path.relative_to(ROOT)}:{lineno}: {target} does not exist"
+                    )
+    assert not failures, "documentation links with nothing behind them:\n  " + "\n  ".join(
+        failures
+    )
+    return checked
+
+
+CHECKS = (check_documented_templates_are_published, check_relative_doc_links_resolve)
 
 
 def main():
     for check in CHECKS:
         count = check()
-        print(f"  [PASS] {check.__name__} ({count} template URLs)")
+        print(f"  [PASS] {check.__name__} ({count} links)")
     print(f"docs links: {len(CHECKS)}/{len(CHECKS)} checks passed")
     return 0
 

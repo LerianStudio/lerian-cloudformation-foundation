@@ -32,7 +32,6 @@ What gets deployed:
 Security included:
 - Customer-managed KMS keys for encryption at rest
 - TLS/SSL encryption for all data in transit
-- AWS Secrets Manager for credential management
 - IAM Roles for Service Accounts (IRSA)
 - Security groups following least-privilege principles
 - The agent holds an outbound-only connection to the control plane: nothing needs to reach into your VPC, and no Lerian credential is stored in your account

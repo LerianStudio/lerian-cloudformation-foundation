@@ -565,4 +565,3 @@ If you're still experiencing issues:
 For more information, see:
 - [README.md](../README.md) - Quick start guide
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture details
-- [COST_ESTIMATION.md](COST_ESTIMATION.md) - Cost breakdown

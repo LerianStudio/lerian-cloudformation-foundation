@@ -90,8 +90,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   objects from the release bucket after the listing stops referencing them,
   rather than before.
 - Documentation links no longer name files that do not exist: the README's
-  cost-estimation and security links, and the cost-estimation link in every
-  GitHub release's notes, pointed at documents this repository has never had.
+  cost-estimation and security links, the cost-estimation link in every GitHub
+  release's notes, and the same cost-estimation link at the foot of
+  `docs/ARCHITECTURE.md` and `docs/TROUBLESHOOTING.md` all pointed at documents
+  this repository has never had. `scripts/check-docs-links.py` now resolves every
+  relative link in every Markdown file, so a link into a missing document fails
+  the pull request instead of the reader.
+- The Marketplace runbook's upload step described a mechanism that does not
+  exist. It told the operator to set the `MPS3BucketName` / `MPS3BucketRegion` /
+  `MPS3KeyPrefix` defaults "on the delivery option", and a delivery option has no
+  field for parameter defaults - they live in the template file. Followed
+  literally, the step submitted `foundation.yaml` with its committed
+  `releases/latest/` prefix, binding the listing to whichever nested templates
+  happened to sit there at submission rather than to the released ones. The step
+  now pins `MPS3KeyPrefix` to the release's own `releases/v<VERSION>/` prefix in
+  the uploaded copy, and states which templates go to the Marketplace bucket and
+  which stay in the release bucket.
+- The listing's security summary no longer claims AWS Secrets Manager. No
+  template the Foundation delivery option launches creates a secret - Secrets
+  Manager belongs to the product infrastructure stacks, which this option does
+  not launch.
 - The example control plane URL in the agent and Foundation parameter
   descriptions is `https://api.lerian.studio`, the address the CLI documents.
   The previous example named a host that does not resolve.

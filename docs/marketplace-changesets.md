@@ -47,13 +47,39 @@ Wording for the fields below is maintained in
 [marketplace-delivery-options.md](marketplace-delivery-options.md) — edit there
 first, then mirror it here.
 
-Before running: upload `foundation.yaml` **and every template it nests**
-(`vpc.yaml`, `eks.yaml`, `agent.yaml`, `route53.yaml`, `alb-controller.yaml`,
-`external-dns.yaml`) to the Marketplace S3 bucket under a single shared prefix,
-and set `MPS3BucketName` / `MPS3BucketRegion` / `MPS3KeyPrefix` defaults on the
-delivery option to that bucket and prefix. Marketplace validates nested template
-URLs, and a nested template missing from the prefix fails the changeset rather
-than the customer's deploy.
+Before running: pin the nested-template prefix **in the template file itself**.
+A delivery option has no field for parameter defaults —
+`DeploymentTemplateDeliveryOptionDetails` carries the two descriptions, the
+usage instructions, a recommended instance type, the diagram URL, the template
+URL and `TemplateSources`, and nothing else; `TemplateSources` binds an AMI to a
+parameter and cannot set a value for any other. `MPS3BucketName`,
+`MPS3BucketRegion` and `MPS3KeyPrefix` are ordinary CloudFormation parameters,
+so their defaults come from `foundation.yaml` and from nowhere else.
+
+So:
+
+1. **Edit `MPS3KeyPrefix` to the released version's prefix** in the copy of
+   `foundation.yaml` you are about to upload — `releases/v<VERSION>/`, the
+   version this listing delivers. The committed default is `releases/latest/`,
+   which every release overwrites; submitted as-is, the listing binds whichever
+   nested templates happened to sit there at submission time rather than the
+   ones released with this root template. `MPS3BucketName`
+   (`lerian-cloudformation-templates`) and `MPS3BucketRegion` (`sa-east-1`)
+   already name the release bucket and stay as they are.
+
+2. **Leave the nested templates in the release bucket** at that prefix —
+   `vpc.yaml`, `eks.yaml`, `agent.yaml`, `route53.yaml`, `alb-controller.yaml`
+   and `external-dns.yaml`, all published there by the release workflow, all
+   publicly readable. Only the edited root `foundation.yaml` is uploaded to the
+   Marketplace bucket.
+
+At publish time AWS Marketplace copies the root template and every template it
+nests into its own S3 bucket, then rewrites the default **and the allowed
+values** of the three `MPS3*` parameters to point at those copies. A launched
+customer stack therefore never reads the Lerian bucket, and the `sa-east-1`
+constraint on `MPS3BucketRegion` in the committed template is not a limit on
+where the copies live. A nested template missing from the prefix fails the
+changeset rather than the customer's deploy.
 
 **Template URL** (update after upload):
 `https://awsmp-cft-211125678794-1707910187780.s3.us-east-1.amazonaws.com/<path>/foundation.yaml`
@@ -88,7 +114,7 @@ aws marketplace-catalog start-change-set \
           "Details": {
             "DeploymentTemplateDeliveryOptionDetails": {
               "ShortDescription": "Deploy the Lerian foundation — VPC, Amazon EKS, and the Lerian agent — in a single CloudFormation stack across 3 Availability Zones. The agent enrolls with the Lerian control plane, and you install and upgrade Midaz and every other Lerian product from the Lerian console, without further CloudFormation changes.",
-              "LongDescription": "The Foundation stack creates the cluster Lerian products run on and connects it to the Lerian control plane. It is the only stack you launch from AWS Marketplace; everything after it happens in the Lerian console. What gets deployed: VPC with 3-tier subnet architecture (public, private, database) across 3 AZs, an Amazon EKS cluster with ARM64 (Graviton) managed node groups, and the Lerian agent installed into the cluster and enrolled with the control plane. Optionally a Route53 hosted zone, the AWS Load Balancer Controller and ExternalDNS, when you supply a domain name. Security: customer-managed KMS keys for encryption at rest, TLS/SSL in transit, AWS Secrets Manager for credentials, IAM Roles for Service Accounts (IRSA), least-privilege security groups, and an optional IAM permissions boundary applied to every role the stack creates. The agent holds an outbound-only connection to the control plane, so nothing needs to reach into your VPC and no Lerian credential is stored in your account. What is deliberately not here: no product application is installed by this stack, and no Lambda in your account holds cluster administrator rights after it completes. Product installs, upgrades, rollbacks and configuration changes are performed by the agent from inside the cluster, driven by the control plane. Best for every customer: this is the entry point for Midaz and for any other Lerian product on the same cluster.",
+              "LongDescription": "The Foundation stack creates the cluster Lerian products run on and connects it to the Lerian control plane. It is the only stack you launch from AWS Marketplace; everything after it happens in the Lerian console. What gets deployed: VPC with 3-tier subnet architecture (public, private, database) across 3 AZs, an Amazon EKS cluster with ARM64 (Graviton) managed node groups, and the Lerian agent installed into the cluster and enrolled with the control plane. Optionally a Route53 hosted zone, the AWS Load Balancer Controller and ExternalDNS, when you supply a domain name. Security: customer-managed KMS keys for encryption at rest, TLS/SSL in transit, IAM Roles for Service Accounts (IRSA), least-privilege security groups, and an optional IAM permissions boundary applied to every role the stack creates. The agent holds an outbound-only connection to the control plane, so nothing needs to reach into your VPC and no Lerian credential is stored in your account. What is deliberately not here: no product application is installed by this stack, and no Lambda in your account holds cluster administrator rights after it completes. Product installs, upgrades, rollbacks and configuration changes are performed by the agent from inside the cluster, driven by the control plane. Best for every customer: this is the entry point for Midaz and for any other Lerian product on the same cluster.",
               "UsageInstructions": "Before you launch: sign in to the Lerian console, create the environment for this cluster, and copy the enrollment token it issues. The token is single-use and short-lived, so generate it right before launching.\n\nRequired parameters:\n- ControlPlaneURL - the control plane URL shown in the console\n- EnrollmentToken - the single-use token from the console\n- AgentChartVersion - the agent chart version the console tells you to run\n\nLeave all three empty to create the cluster with no control-plane connection. Supplying only some of them is rejected at CreateStack rather than 20 minutes into the deploy.\n\nAfter stack creation completes (~25 minutes):\n\n1. Confirm the cluster appears as connected in the Lerian console. That is the only check that matters - it proves the agent enrolled and is reachable.\n\n2. Optional, if you want cluster access yourself:\n   aws eks update-kubeconfig --name <cluster-name> --region <region>\n   kubectl get pods -n lerian-system\n\n3. Deploy the data services for the product you are installing (RDS PostgreSQL, DocumentDB, ElastiCache, AmazonMQ) with the product infrastructure stack, then create the release in the console.\n\nIf the cluster does not appear in the console, the agent installation log is in the CloudWatch log group named by the stack's AgentLogGroup output.\n\nOptional: set DomainName to create a Route53 hosted zone and the AWS Load Balancer Controller; add EnableExternalDNS=true for automatic DNS records.\nOptional: set PermissionsBoundaryArn to constrain all IAM roles created by this stack.\n\nFull documentation: https://github.com/LerianStudio/lerian-cloudformation-foundation/blob/main/README.md",
               "RecommendedInstanceType": "c7g.large",
               "ArchitectureDiagram": "https://awsmp-cf-af-612309067705-1556123774245.s3.us-east-1.amazonaws.com/a72c0d74-a74a-451f-b225-71205fe3b872/a72c0d74-a74a-451f-b225-71205fe3b872/prod-fildx2w4ikmba/b1019bc9-4533-4cc7-8c59-eb970c1419fe/midaz_cf.png",
@@ -115,9 +141,10 @@ aws marketplace-catalog start-change-set \
 ```
 
 **IMPORTANT:** replace `REPLACE_WITH_FOUNDATION_TEMPLATE_URL` with the actual S3
-URL the template was uploaded to. The Marketplace requires templates to live in
-its managed S3 bucket — upload via the Marketplace console, or let the API copy
-them during version creation.
+URL the edited root template was uploaded to. The root template has to live in
+the Marketplace-managed bucket — upload it through the Marketplace console. Its
+nested templates do not: they are fetched from the `MPS3*` prefix baked into
+that root template and copied alongside it at publish time.
 
 ---
 
@@ -207,8 +234,10 @@ delete-first sequence 404s the live listing for anyone mid-purchase.
    `foundation.yaml` and its nested templates to
    `s3://lerian-cloudformation-templates/releases/latest/`. Nothing in the
    Marketplace flow works before this lands.
-4. **Upload `foundation.yaml` and its nested templates** to the Marketplace S3
-   bucket under one shared prefix, and note the resulting template URL.
+4. **Edit and upload the root `foundation.yaml`.** Set its `MPS3KeyPrefix`
+   default to the `releases/v<VERSION>/` prefix step 3 published, upload that
+   copy to the Marketplace S3 bucket, and note the resulting template URL. The
+   nested templates stay in the release bucket at that prefix.
 5. **Add the Foundation delivery option** (changeset 2) — needs the URL from
    step 4.
 6. **Restrict the three superseded delivery options** (changeset 3) — only after

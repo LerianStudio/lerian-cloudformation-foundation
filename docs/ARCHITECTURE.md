@@ -433,4 +433,3 @@ control plane, through the agent, not by a stack.
 For more information, see:
 - [README.md](../README.md) - Quick start guide
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
-- [COST_ESTIMATION.md](COST_ESTIMATION.md) - Cost breakdown
