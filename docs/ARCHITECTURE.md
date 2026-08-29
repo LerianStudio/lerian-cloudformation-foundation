@@ -405,8 +405,14 @@ All critical components are deployed across multiple Availability Zones:
                             │
                             ▼
                     ┌───────────────┐
-                    │ midaz-helm    │
-                    │ .yaml         │
+                    │ agent.yaml    │
+                    │ (enrollment)  │
+                    └───────┬───────┘
+                            │ outbound only
+                            ▼
+                    ┌───────────────┐
+                    │ Lerian        │
+                    │ control plane │
                     └───────────────┘
 ```
 
@@ -417,7 +423,10 @@ All critical components are deployed across multiple Availability Zones:
 3. **RDS, DocumentDB, ElastiCache, AmazonMQ** - Data layer
 4. **Route53** - DNS
 5. **ALB Controller, External DNS** - Ingress and DNS automation
-6. **Midaz Helm** - Application deployment
+6. **Agent** - Enrolls the cluster with the Lerian control plane
+
+CloudFormation stops there. Products are installed into the cluster by the
+control plane, through the agent, not by a stack.
 
 ---
 

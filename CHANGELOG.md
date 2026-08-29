@@ -14,7 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Foundation, created when `ControlPlaneURL` and `EnrollmentToken` are both
   supplied. The chart is pinned by version and, optionally, by OCI digest.
 - CI now compiles the inline Lambda code of every template, so a syntax error is
-  caught in the pull request instead of by a stack that hangs until it times out.
+  caught in the pull request instead of by a stack that hangs until it times out,
+  and runs `scripts/check-agent-handler.py`, which asserts what the agent handler
+  actually does: the enrollment token stays out of the logs, a supplied digest
+  pins the chart, a token full of YAML metacharacters cannot corrupt the values
+  document, moving the agent to another namespace replaces the release instead of
+  duplicating it, and a delete never leaves a stack in `DELETE_FAILED`.
+- The Foundation rejects a half-filled agent parameter set at the `CreateStack`
+  call, through a template `Rules` section. Supplying a control-plane URL and a
+  token but no chart version used to build the VPC and the cluster first - about
+  twenty minutes - and only then fail and roll all of it back.
 
 ### Removed
 
@@ -27,6 +36,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `deploy-stack.sh`, `deploy-helm.sh`, `deploy-helm-stack.sh`.
 - `MPS3ProductKeyPrefix` from `products/midaz/infrastructure.yaml` - it pointed at
   the removed `application.yaml`.
+- `examples/` - its parameter tables documented the removed application layer
+  (`DeployMidazHelm`, `MidazHelmRepository`, `MidazChartVersion`) and every one of
+  its deployment examples launched `midaz-complete.yaml` or
+  `midaz-infrastructure.yaml`, template paths this repository has not had for some
+  time. Parameter documentation lives in each template's own `Description`, which
+  CI checks is present and the CloudFormation console renders per field.
+
+> **Post-merge, not delivered by this release:** the release workflow publishes
+> with `aws s3 sync` without `--delete`, so `releases/latest/products/midaz/`
+> keeps serving `application.yaml`, `helm.yaml` and `full-stack.yaml` after this
+> change merges - and that is exactly where the current Marketplace listing and
+> every previously shared quick-create link point. Removing those three objects
+> needs to be sequenced with the Marketplace changeset, otherwise the live
+> listing 404s before the new delivery options take effect.
 
 ### Fixed
 

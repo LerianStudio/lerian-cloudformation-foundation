@@ -125,7 +125,9 @@ parameters.
 | `FoundationStackName` | `lerian-foundation` | Foundation stack to import VPC/EKS from |
 | `RDSInstanceClass` | `db.t3.medium` | Database instance |
 
-See [examples/aws/README.md](../../examples/aws/README.md) for all parameters.
+Every parameter carries its own description in
+[`infrastructure.yaml`](infrastructure.yaml); the CloudFormation console shows
+them next to each field.
 
 ## Architecture
 

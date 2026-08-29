@@ -260,7 +260,6 @@ checkov -d templates/
 
 - `README.md` - Main documentation
 - `CHANGELOG.md` - Version history
-- `examples/aws/README.md` - Parameter reference
 - `docs/MARKETPLACE_CHECKLIST.md` - Publication guide
 
 ## Questions?
