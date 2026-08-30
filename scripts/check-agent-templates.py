@@ -121,16 +121,16 @@ def check_digest_pins_the_chart(mod):
 def check_values_contract_survives_a_hostile_token(mod):
     """The whole values contract with the lerian-agent chart, pinned here.
 
-    This stack sends two keys and nothing else: controlPlane.url and
-    agent.token, where agent.token is the SINGLE-USE ENROLLMENT token. The
-    chart published today (LerianStudio/deployer, charts/lerian-agent) reads
-    agent.token as a per-agent bearer token from an out-of-band registration
-    call and therefore also requires agent.id, so it rejects this install;
-    enrollment - the agent's first heartbeat consuming the token and fixing its
-    own identity - is what removes that requirement. Nothing in this repository
-    can verify the chart side, so this assertion is the contract: change it only
-    together with the chart, and with the version customers are told to supply
-    as AgentChartVersion. See docs/marketplace-changesets.md, step 8.
+    This stack sends three keys and nothing else: controlPlane.url, agent.token
+    (the SINGLE-USE ENROLLMENT token) and agent.managedNamespaces (the release's
+    own namespace - what an empty list would have meant - plus lerian-infra, so
+    a preflight repair can install cluster components). The chart renders write
+    Roles into every managed namespace, which is why the install creates
+    lerian-infra first; see check_infra_namespace_is_ensured. Nothing in this
+    repository can verify the chart side, so this assertion is the contract:
+    change it only together with the chart, and with the version customers are
+    told to supply as AgentChartVersion. See docs/marketplace-changesets.md,
+    step 8.
 
     The token itself is opaque and attacker-influenced, so the same check feeds
     a token full of YAML metacharacters and re-parses the document.
@@ -141,16 +141,74 @@ def check_values_contract_survives_a_hostile_token(mod):
         hostile = "x\n  evil: true\n#'\""
         try:
             mod.write_values(
-                {"ControlPlaneURL": "https://cp.example.com", "EnrollmentToken": hostile}
+                {
+                    "ControlPlaneURL": "https://cp.example.com",
+                    "EnrollmentToken": hostile,
+                    "Namespace": "lerian-system",
+                }
             )
             parsed = yaml.safe_load(pathlib.Path(mod.VALUES_FILE).read_text())
             assert parsed == {
                 "controlPlane": {"url": "https://cp.example.com"},
-                "agent": {"token": hostile},
+                "agent": {
+                    "token": hostile,
+                    "managedNamespaces": ["lerian-system", "lerian-infra"],
+                },
             }, parsed
             assert oct(os.stat(mod.VALUES_FILE).st_mode)[-3:] == "600"
         finally:
             mod.VALUES_FILE = original
+
+
+def check_infra_namespace_is_ensured(mod):
+    """The repair namespace is created before helm runs, and 409 is success.
+
+    The chart's managed-namespace Roles require lerian-infra to exist at
+    install time; helm --create-namespace only makes the release's own. The
+    call must go to the cluster's own endpoint with the issued bearer token,
+    and a namespace that already exists (409) must not fail the install while
+    any other refusal must.
+    """
+    cluster = {
+        "endpoint": "https://cluster.example",
+        "certificateAuthority": {"data": mod.base64.b64encode(b"ca-pem").decode()},
+    }
+    calls = []
+
+    class Refusal(mod.urllib.error.HTTPError):
+        def __init__(self, code):
+            Exception.__init__(self)
+            self.code = code
+
+    def urlopen(req, timeout, context):
+        calls.append((req.full_url, req.get_method(), req.get_header("Authorization")))
+        if len(calls) == 2:
+            raise Refusal(409)
+        if len(calls) == 3:
+            raise Refusal(403)
+        return types.SimpleNamespace()
+
+    original_urlopen, original_ssl = mod.urllib.request.urlopen, mod.ssl.create_default_context
+    mod.urllib.request.urlopen = urlopen
+    mod.ssl.create_default_context = lambda cadata: None
+    try:
+        mod.ensure_infra_namespace(cluster, "issued-token")
+        mod.ensure_infra_namespace(cluster, "issued-token")  # 409: already there
+        try:
+            mod.ensure_infra_namespace(cluster, "issued-token")
+        except mod.urllib.error.HTTPError as exc:
+            assert exc.code == 403
+        else:
+            raise AssertionError("a refused namespace create was swallowed")
+    finally:
+        mod.urllib.request.urlopen, mod.ssl.create_default_context = original_urlopen, original_ssl
+
+    assert all(
+        url == "https://cluster.example/api/v1/namespaces"
+        and method == "POST"
+        and auth == "Bearer issued-token"
+        for url, method, auth in calls
+    ), calls
 
 
 def check_helm_archive_is_verified(mod):
@@ -348,6 +406,7 @@ HANDLER_CHECKS = (
     check_token_never_logged,
     check_digest_pins_the_chart,
     check_values_contract_survives_a_hostile_token,
+    check_infra_namespace_is_ensured,
     check_helm_archive_is_verified,
     check_response_put_retries,
     check_namespace_change_replaces,
