@@ -156,6 +156,19 @@ def check_values_contract_survives_a_hostile_token(mod):
                 },
             }, parsed
             assert oct(os.stat(mod.VALUES_FILE).st_mode)[-3:] == "600"
+
+            # AgentNamespace is configurable and may already be lerian-infra.
+            # The chart renders a Role for every list item, so do not render the
+            # same namespaced resource twice in that valid configuration.
+            mod.write_values(
+                {
+                    "ControlPlaneURL": "https://cp.example.com",
+                    "EnrollmentToken": hostile,
+                    "Namespace": "lerian-infra",
+                }
+            )
+            parsed = yaml.safe_load(pathlib.Path(mod.VALUES_FILE).read_text())
+            assert parsed["agent"]["managedNamespaces"] == ["lerian-infra"], parsed
         finally:
             mod.VALUES_FILE = original
 

@@ -271,12 +271,14 @@ delete-first sequence 404s the live listing for anyone mid-purchase.
    that the enrollment path works.
 
    **Blocking prerequisite — a published `lerian-agent` chart that enrolls.**
-   The Foundation installs the chart with exactly two values,
-   `controlPlane.url` and `agent.token`, where the token is the single-use
-   enrollment token from the console. The chart published today
+   The Foundation installs the chart with exactly three values:
+   `controlPlane.url`, `agent.token`, and `agent.managedNamespaces` (the configured
+   agent namespace plus `lerian-infra`). The installer creates `lerian-infra`
+   before Helm runs because the chart renders namespaced access there. The token
+   is the single-use enrollment token from the console. The chart published today
    (`LerianStudio/deployer`, `charts/lerian-agent`) treats `agent.token` as a
    per-agent bearer token from an out-of-band registration call and therefore
-   also requires `agent.id`; installed with the two values above it fails, and
+   also requires `agent.id`; installed with the three values above it fails, and
    the failure rolls back the entire VPC and cluster about twenty minutes into
    the deploy. Enrollment — the agent's first heartbeat consuming the token and
    fixing its own identity — is what drops the `agent.id` requirement.
@@ -284,8 +286,8 @@ delete-first sequence 404s the live listing for anyone mid-purchase.
    Do not run this step, and do not submit the changeset, until a chart version
    accepting enrollment is published and its version number is the one this
    runbook and the delivery option's `UsageInstructions` tell customers to
-   supply as `AgentChartVersion`. Two questions belong to the same contract and
-   should be answered before the sandbox run: the exact values keys the chart
-   reads, and whether the control plane accepts a second enrollment for an
-   agent that is already enrolled (which is what changing `EnrollmentToken` on
-   an existing stack triggers).
+   supply as `AgentChartVersion`. Confirm that version reads all three values,
+   renders access for `lerian-infra`, and accepts enrollment before the sandbox
+   run. Also confirm whether the control plane accepts a second enrollment for an
+   agent that is already enrolled (which is what changing `EnrollmentToken` on an
+   existing stack triggers).

@@ -405,11 +405,18 @@ Resources:
               # Written as JSON (valid YAML) so an opaque token can never break out
               # of the values document, and to a file rather than --set so it never
               # lands in the process arguments.
+              # AgentNamespace is configurable and may itself be lerian-infra.
+              # Keep the list unique: the chart renders one Role per entry, so a
+              # duplicate namespace would render the same namespaced resource twice.
+              managed_namespaces = [props['Namespace']]
+              if props['Namespace'] != INFRA_NAMESPACE:
+                  managed_namespaces.append(INFRA_NAMESPACE)
+
               values = {
                   'controlPlane': {'url': props['ControlPlaneURL']},
                   'agent': {
                       'token': props['EnrollmentToken'],
-                      'managedNamespaces': [props['Namespace'], INFRA_NAMESPACE]
+                      'managedNamespaces': managed_namespaces
                   }
               }
               with open(VALUES_FILE, 'w') as f:
