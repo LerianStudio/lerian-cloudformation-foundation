@@ -12,7 +12,7 @@
     "external-dns": "0.1.5",
     "foundation": "1.0.0",
     "msk": "0.1.0",
-    "agent": "1.0.0"
+    "agent": "1.0.1"
   },
   "products": {
     "midaz": {
