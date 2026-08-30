@@ -19,10 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and runs `scripts/check-agent-templates.py`, which asserts what the agent handler
   actually does: the enrollment token stays out of the logs, a supplied digest
   pins the chart, a token full of YAML metacharacters cannot corrupt the values
-  document, moving the agent to another namespace replaces the release instead of
-  duplicating it, and a delete never leaves a stack in `DELETE_FAILED`. The same
-  script asserts that the Foundation's `Rules` block watches every agent
-  parameter, so a future parameter cannot be added outside the guard.
+  document, the repair namespace is created idempotently before Helm runs, moving
+  the agent to another namespace replaces the release instead of duplicating it,
+  and a delete never leaves a stack in `DELETE_FAILED`. The same script asserts
+  that the Foundation's `Rules` block watches every agent parameter, so a future
+  parameter cannot be added outside the guard.
 - The Foundation rejects a half-filled agent parameter set at the `CreateStack`
   call, through a template `Rules` section. Supplying a control-plane URL and a
   token but no chart version used to build the VPC and the cluster first - about
@@ -43,8 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the product installed from the console by the agent.
 
 > **Cross-repo dependency, not satisfied by this release:** the Agent Stack
-> installs `lerian-agent` with exactly two values, `controlPlane.url` and
-> `agent.token`, where the token is the single-use enrollment token. The chart
+> installs `lerian-agent` with exactly three values: `controlPlane.url`,
+> `agent.token`, and `agent.managedNamespaces` (the agent namespace plus
+> `lerian-infra`), where the token is the single-use enrollment token. The chart
 > published today (`LerianStudio/deployer`, `charts/lerian-agent`) reads
 > `agent.token` as a per-agent bearer token from an out-of-band registration
 > call and also requires `agent.id`, so it rejects that install and the failure
@@ -91,6 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Agent Stack now creates `lerian-infra` before installing the chart and
+  includes it in `agent.managedNamespaces`, allowing the enrolled agent to apply
+  preflight repairs there. Namespace creation is idempotent (an existing namespace
+  is accepted), while other Kubernetes API failures still fail the stack instead
+  of continuing to an unusable Helm release. The managed namespace list remains
+  unique when the configured agent namespace is itself `lerian-infra`.
 - `NodeInstanceType` no longer offers `c6i.*` x86 instance types. The node group
   is created with `AmiType: AL2023_ARM_64_STANDARD`, so an x86 choice produced
   nodes that never joined the cluster.

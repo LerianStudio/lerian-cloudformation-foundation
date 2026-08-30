@@ -166,9 +166,11 @@ Resources:
           import logging
           import os
           import stat
+          import ssl
           import subprocess
           import tarfile
           import time
+          import urllib.error
           import urllib.request
 
           logger = logging.getLogger()
@@ -180,6 +182,11 @@ Resources:
           # substituted download never executes with cluster-admin access.
           HELM_SHA256 = '61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14'
           RELEASE_NAME = 'lerian-agent'
+          # Where preflight repairs install cluster components. The chart renders
+          # write Roles into every managed namespace and Kubernetes refuses a Role
+          # in a namespace that does not exist, so the install creates it first -
+          # helm's --create-namespace only makes the release's own.
+          INFRA_NAMESPACE = 'lerian-infra'
           REDACTED_PROPS = ('EnrollmentToken',)
           TMP = '/tmp'
           VALUES_FILE = f'{TMP}/agent-values.json'
@@ -314,6 +321,31 @@ Resources:
               os.chmod(path, 0o600)
               os.environ['KUBECONFIG'] = path
 
+              return cluster, token
+
+          def ensure_infra_namespace(cluster, token):
+              # Idempotent: 409 means an earlier run already created it. Any other
+              # refusal fails the install - a chart whose managed-namespace Roles
+              # cannot be rendered would fail later with a worse message.
+              body = json.dumps({
+                  'apiVersion': 'v1',
+                  'kind': 'Namespace',
+                  'metadata': {'name': INFRA_NAMESPACE}
+              }).encode('utf-8')
+
+              ca = ssl.create_default_context(cadata=base64.b64decode(
+                  cluster['certificateAuthority']['data']).decode('utf-8'))
+              req = urllib.request.Request(
+                  f"{cluster['endpoint']}/api/v1/namespaces", data=body, method='POST')
+              req.add_header('Authorization', f'Bearer {token}')
+              req.add_header('Content-Type', 'application/json')
+
+              try:
+                  urllib.request.urlopen(req, timeout=30, context=ca)
+              except urllib.error.HTTPError as e:
+                  if e.code != 409:
+                      raise
+
           def run_command(cmd):
               logger.info(f"Running: {' '.join(cmd)}")
               result = subprocess.run(cmd, capture_output=True, text=True)
@@ -351,9 +383,12 @@ Resources:
               os.environ['PATH'] = f"{TMP}:{os.environ.get('PATH', '')}"
 
           def write_values(props):
-              # The values contract with the lerian-agent chart, in full: two keys,
-              # controlPlane.url and agent.token. Nothing else is set, so every other
-              # value the chart exposes keeps its own default.
+              # The values contract with the lerian-agent chart, in full: three keys,
+              # controlPlane.url, agent.token and agent.managedNamespaces. Nothing
+              # else is set, so every other value the chart exposes keeps its own
+              # default. The managed list names the release's own namespace (what an
+              # empty list would have meant) plus the infra namespace, so a preflight
+              # repair can install cluster components instead of only reporting them.
               #
               # CROSS-REPO DEPENDENCY - agent.token here is the single-use ENROLLMENT
               # token, and the chart must accept it on its own. The lerian-agent chart
@@ -370,9 +405,19 @@ Resources:
               # Written as JSON (valid YAML) so an opaque token can never break out
               # of the values document, and to a file rather than --set so it never
               # lands in the process arguments.
+              # AgentNamespace is configurable and may itself be lerian-infra.
+              # Keep the list unique: the chart renders one Role per entry, so a
+              # duplicate namespace would render the same namespaced resource twice.
+              managed_namespaces = [props['Namespace']]
+              if props['Namespace'] != INFRA_NAMESPACE:
+                  managed_namespaces.append(INFRA_NAMESPACE)
+
               values = {
                   'controlPlane': {'url': props['ControlPlaneURL']},
-                  'agent': {'token': props['EnrollmentToken']}
+                  'agent': {
+                      'token': props['EnrollmentToken'],
+                      'managedNamespaces': managed_namespaces
+                  }
               }
               with open(VALUES_FILE, 'w') as f:
                   json.dump(values, f)
@@ -432,7 +477,8 @@ Resources:
                   props = event['ResourceProperties']
 
                   install_helm()
-                  setup_kubeconfig(props['ClusterName'])
+                  cluster, token = setup_kubeconfig(props['ClusterName'])
+                  ensure_infra_namespace(cluster, token)
                   helm_install(props)
 
                   send_response(event, context, 'SUCCESS', {
