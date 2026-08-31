@@ -1,0 +1,26 @@
+apiVersion: platform.lerian.io/v1alpha1
+kind: Platform
+metadata:
+  name: sbx2
+  namespace: lerian-operator
+spec:
+  topology: shared
+  environmentContract:
+    postgres:
+      host: "lerian-plat-sbx2-rds.celz7wbjcemw.sa-east-1.rds.amazonaws.com"
+      port: "5432"
+      secretRef: "lerian-operator/contract-postgres"
+    kafka:
+      brokers: ""
+      secretRef: "lerian-operator/contract-kafka"
+      mechanism: "SCRAM-SHA-512"
+    objectStorage:
+      region: "sa-east-1"
+  authorizer:
+    clientId: "ac56c81d4d6d95c0ac12"
+    clientSecret: "6add4bc64f394456a77fa85708ad8c9b67e39e4c"
+    organizationIds: "11111111-1111-1111-1111-111111111111"
+  modules:
+    tracer:
+      enabled: true
+      version: "2.0.0-beta.7"

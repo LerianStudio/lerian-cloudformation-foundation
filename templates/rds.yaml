@@ -209,8 +209,10 @@ Resources:
       GenerateSecretString:
         SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
         GenerateStringKey: password
-        PasswordLength: 16
-        ExcludeCharacters: '"@/\'
+        PasswordLength: 32
+        # Alphanumeric only: consumers (e.g. Casdoor migrations) build postgres:// URLs
+        # from this password without percent-encoding, so URL-reserved chars break parsing.
+        ExcludePunctuation: true
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-rds-secret"

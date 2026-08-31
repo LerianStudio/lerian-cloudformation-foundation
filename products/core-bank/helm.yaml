@@ -1,0 +1,964 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Core Bank Helm Chart Deployment using Lambda Custom Resource (AWS Marketplace Ready)
+
+Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs
+
+  ClusterName:
+    Type: String
+    Description: EKS Cluster Name
+
+  RDSEndpoint:
+    Type: String
+    Description: RDS PostgreSQL Endpoint
+
+  RDSSecretArn:
+    Type: String
+    Description: RDS Password Secret ARN
+
+  RDSReplicaEndpoint:
+    Type: String
+    Description: RDS Read Replica Endpoint (optional — falls back to primary)
+    Default: ""
+
+  DocumentDBEndpoint:
+    Type: String
+    Description: DocumentDB Cluster Endpoint
+
+  DocumentDBSecretArn:
+    Type: String
+    Description: DocumentDB Password Secret ARN
+
+  ElastiCacheEndpoint:
+    Type: String
+    Description: ElastiCache Primary Endpoint
+
+  ElastiCacheSecretArn:
+    Type: String
+    Description: ElastiCache Auth Token Secret ARN
+    Default: ""
+
+  AmazonMQEndpoint:
+    Type: String
+    Description: AmazonMQ Broker Endpoint
+
+  AmazonMQSecretArn:
+    Type: String
+    Description: AmazonMQ Password Secret ARN
+
+  ReporterStorageBucketName:
+    Type: String
+    Description: S3 bucket name for reporter PDF storage
+
+  RDSKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: RDS KMS Key ARN for secret decryption
+
+  DocumentDBKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: DocumentDB KMS Key ARN for secret decryption
+
+  ElastiCacheKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: ElastiCache KMS Key ARN for secret decryption
+
+  AmazonMQKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: AmazonMQ KMS Key ARN for secret decryption
+
+  CoreBankHelmRepository:
+    Type: String
+    Default: "oci://ghcr.io/lerianstudio/core-bank-helm"
+    Description: Core Bank Helm Chart OCI repository
+
+  CoreBankChartVersion:
+    Type: String
+    Default: "0.1.0"
+    Description: Core Bank Helm Chart version
+
+  CoreBankReplicas:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Number of replicas for the ledger service
+
+  CoreBankNamespace:
+    Type: String
+    Default: core-bank
+    Description: Kubernetes namespace for Core Bank
+
+  NextAuthUrl:
+    Type: String
+    Default: ""
+    Description: Full public URL for the product console (e.g., https://console.example.com)
+
+  EnableIngress:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Ingress for external access (requires ALB Controller)
+
+  IngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the console Ingress (e.g., console.example.com)
+
+  IngressScheme:
+    Type: String
+    Default: "internal"
+    AllowedValues:
+      - "internal"
+      - "internet-facing"
+    Description: ALB scheme
+
+  IngressCertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM Certificate ARN for HTTPS (optional)
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasRDSReplica: !Not [!Equals [!Ref RDSReplicaEndpoint, ""]]
+  HasElastiCacheSecret: !Not [!Equals [!Ref ElastiCacheSecretArn, ""]]
+  ShouldEnableIngress: !Equals [!Ref EnableIngress, "true"]
+  HasCertificate: !Not [!Equals [!Ref IngressCertificateArn, ""]]
+  HasKMSKeys: !And
+    - !Not [!Equals [!Ref RDSKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref DocumentDBKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref ElastiCacheKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref AmazonMQKMSKeyArn, ""]]
+
+Resources:
+  # =============================================================================
+  # LAMBDA EXECUTION ROLE
+  # =============================================================================
+  HelmDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-helm-deployer-role"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EKSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                  - eks:ListClusters
+                Resource: !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref RDSSecretArn
+                  - !Ref DocumentDBSecretArn
+                  - !If [HasElastiCacheSecret, !Ref ElastiCacheSecretArn, !Ref "AWS::NoValue"]
+                  - !Ref AmazonMQSecretArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !If
+                  - HasKMSKeys
+                  - - !Ref RDSKMSKeyArn
+                    - !Ref DocumentDBKMSKeyArn
+                    - !Ref ElastiCacheKMSKeyArn
+                    - !Ref AmazonMQKMSKeyArn
+                  - - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+        - PolicyName: S3ReporterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketPolicy
+                Resource: !Sub "arn:aws:s3:::${ReporterStorageBucketName}"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # =============================================================================
+  # EKS ACCESS ENTRY FOR LAMBDA ROLE
+  # =============================================================================
+  HelmDeployerAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt HelmDeployerRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - AccessScope:
+            Type: cluster
+          PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+  # =============================================================================
+  # LAMBDA FUNCTION FOR HELM DEPLOYMENT
+  # =============================================================================
+  HelmDeployerFunction:
+    # checkov:skip=CKV_AWS_116:Deployer Lambda is one-shot during stack creation, DLQ not applicable
+    # checkov:skip=CKV_AWS_117:Deployer Lambda requires internet access for Helm chart deployment to EKS
+    # checkov:skip=CKV_AWS_173:Environment variables contain non-sensitive configuration references
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-helm-deployer"
+      Description: Deploys Core Bank Helm umbrella chart to EKS cluster
+      Runtime: python3.11
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 1024
+      ReservedConcurrentExecutions: 1
+      Role: !GetAtt HelmDeployerRole.Arn
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ClusterName
+          NAMESPACE: !Ref CoreBankNamespace
+          HELM_REPOSITORY: !Ref CoreBankHelmRepository
+          CHART_VERSION: !Ref CoreBankChartVersion
+          CORE_BANK_REPLICAS: !Ref CoreBankReplicas
+          PROJECT_NAME: !Ref ProjectName
+          AWS_DEFAULT_REGION: !Ref AWS::Region
+          RDS_ENDPOINT: !Ref RDSEndpoint
+          RDS_REPLICA_ENDPOINT: !If [HasRDSReplica, !Ref RDSReplicaEndpoint, !Ref RDSEndpoint]
+          RDS_SECRET_ARN: !Ref RDSSecretArn
+          DOCUMENTDB_ENDPOINT: !Ref DocumentDBEndpoint
+          DOCUMENTDB_SECRET_ARN: !Ref DocumentDBSecretArn
+          ELASTICACHE_ENDPOINT: !Ref ElastiCacheEndpoint
+          ELASTICACHE_SECRET_ARN: !If [HasElastiCacheSecret, !Ref ElastiCacheSecretArn, ""]
+          AMAZONMQ_ENDPOINT: !Ref AmazonMQEndpoint
+          AMAZONMQ_SECRET_ARN: !Ref AmazonMQSecretArn
+          REPORTER_S3_BUCKET: !Ref ReporterStorageBucketName
+          NEXTAUTH_URL: !Ref NextAuthUrl
+          ENABLE_INGRESS: !Ref EnableIngress
+          INGRESS_HOSTNAME: !Ref IngressHostname
+          INGRESS_SCHEME: !Ref IngressScheme
+          INGRESS_CERTIFICATE_ARN: !Ref IngressCertificateArn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          import subprocess
+          import base64
+          import urllib.request
+          import tempfile
+          import logging
+          import secrets
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def send_response(event, context, status, data=None, reason=None):
+              response_body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': event.get('PhysicalResourceId', context.log_stream_name),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+              json_body = json.dumps(response_body).encode('utf-8')
+              req = urllib.request.Request(event['ResponseURL'], data=json_body, method='PUT')
+              req.add_header('Content-Type', '')
+              req.add_header('Content-Length', len(json_body))
+              try:
+                  urllib.request.urlopen(req)
+                  logger.info(f"Response sent: {status}")
+              except Exception as e:
+                  logger.error(f"Failed to send response: {e}")
+
+          def get_secret(secret_arn):
+              client = boto3.client('secretsmanager')
+              response = client.get_secret_value(SecretId=secret_arn)
+              return json.loads(response['SecretString'])
+
+          def get_eks_token(cluster_name):
+              from botocore.signers import RequestSigner
+              from botocore.model import ServiceId
+              STS_TOKEN_EXPIRES_IN = 60
+              session = boto3.Session()
+              region = session.region_name
+              sts_client = session.client('sts', region_name=region)
+              service_id = ServiceId('sts')
+              signer = RequestSigner(
+                  service_id, region, 'sts', 'v4',
+                  session.get_credentials(), session.events
+              )
+              params = {
+                  'method': 'GET',
+                  'url': f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15',
+                  'body': {},
+                  'headers': {'x-k8s-aws-id': cluster_name},
+                  'context': {}
+              }
+              url = signer.generate_presigned_url(
+                  params, region_name=region,
+                  expires_in=STS_TOKEN_EXPIRES_IN, operation_name=''
+              )
+              token = 'k8s-aws-v1.' + base64.urlsafe_b64encode(url.encode('utf-8')).decode('utf-8').rstrip('=')
+              logger.info(f"Generated EKS token for cluster {cluster_name}")
+              return token
+
+          def setup_kubeconfig():
+              cluster_name = os.environ['CLUSTER_NAME']
+              eks = boto3.client('eks')
+              cluster = eks.describe_cluster(name=cluster_name)['cluster']
+              token = get_eks_token(cluster_name)
+              kubeconfig_yaml = f'''apiVersion: v1
+          kind: Config
+          clusters:
+          - name: {cluster_name}
+            cluster:
+              server: {cluster['endpoint']}
+              certificate-authority-data: {cluster['certificateAuthority']['data']}
+          contexts:
+          - name: {cluster_name}
+            context:
+              cluster: {cluster_name}
+              user: aws
+          current-context: {cluster_name}
+          users:
+          - name: aws
+            user:
+              token: {token}
+          '''
+              kubeconfig_path = '/tmp/kubeconfig'
+              with open(kubeconfig_path, 'w') as f:
+                  f.write(kubeconfig_yaml)
+              os.environ['KUBECONFIG'] = kubeconfig_path
+
+          def run_command(cmd):
+              logger.info(f"Running: {' '.join(cmd)}")
+              result = subprocess.run(cmd, capture_output=True, text=True)
+              logger.info(f"stdout: {result.stdout}")
+              if result.returncode != 0:
+                  logger.error(f"stderr: {result.stderr}")
+                  raise Exception(f"Command failed: {result.stderr}")
+              return result.stdout
+
+          def install_tools():
+              import urllib.request, tarfile, stat
+              tmp = '/tmp'
+              os.environ['HOME'] = tmp
+              os.environ['HELM_CACHE_HOME'] = f'{tmp}/.helm/cache'
+              os.environ['HELM_CONFIG_HOME'] = f'{tmp}/.helm/config'
+              os.environ['HELM_DATA_HOME'] = f'{tmp}/.helm/data'
+              os.makedirs(f'{tmp}/.helm/cache', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/config', exist_ok=True)
+              os.makedirs(f'{tmp}/.helm/data', exist_ok=True)
+              kubectl_path = f'{tmp}/kubectl'
+              if not os.path.exists(kubectl_path):
+                  logger.info("Downloading kubectl...")
+                  urllib.request.urlretrieve(
+                      'https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl', kubectl_path)
+                  os.chmod(kubectl_path, os.stat(kubectl_path).st_mode | stat.S_IEXEC)
+              helm_path = f'{tmp}/helm'
+              if not os.path.exists(helm_path):
+                  logger.info("Downloading helm...")
+                  helm_tar = f'{tmp}/helm.tar.gz'
+                  urllib.request.urlretrieve(
+                      'https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz', helm_tar)
+                  with tarfile.open(helm_tar, 'r:gz') as tar:
+                      tar.extractall(tmp)
+                  os.rename(f'{tmp}/linux-amd64/helm', helm_path)
+                  os.chmod(helm_path, os.stat(helm_path).st_mode | stat.S_IEXEC)
+              os.environ['PATH'] = f"{tmp}:{os.environ.get('PATH', '')}"
+
+          def create_namespace(namespace):
+              try:
+                  run_command(['kubectl', 'create', 'namespace', namespace])
+              except:
+                  logger.info(f"Namespace {namespace} may already exist")
+
+          def get_elasticache_password():
+              secret_arn = os.environ.get('ELASTICACHE_SECRET_ARN', '')
+              if not secret_arn:
+                  return ''
+              try:
+                  client = boto3.client('secretsmanager')
+                  response = client.get_secret_value(SecretId=secret_arn)
+                  return response['SecretString']
+              except Exception as e:
+                  logger.warning(f"Failed to fetch ElastiCache secret: {e}")
+                  return ''
+
+          def get_aws_ca_cert_base64():
+              return (
+                  "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURRVENDQWltZ0F3SUJBZ0lUQm15Zno1bS9q"
+                  "QW81NHZCNGlrUG1salpieWpBTkJna3Foa2lHOXcwQkFRc0YKQURBNU1Rc3dDUVlEVlFRR0V3SlZV"
+                  "ekVQTUEwR0ExVUVDaE1HUVcxaGVtOXVNUmt3RndZRFZRUURFeEJCYldGNgpiMjRnVW05dmRDQkRR"
+                  "U0F4TUI0WERURTFNRFV5TmpBd01EQXdNRm9YRFRNNE1ERXhOekF3TURBd01Gb3dPVEVMCk1Ba0dB"
+                  "MVVFQmhNQ1ZWTXhEekFOQmdOVkJBb1RCa0Z0WVhwdmJqRVpNQmNHQTFVRUF4TVFRVzFoZW05dUlG"
+                  "SnYKYjNRZ1EwRWdNVENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFM"
+                  "SjRnSEhLZU5YagpjYTlIZ0ZCMGZXN1kxNGgyOUpsbzkxZ2hZUGwwaEFFdnJBSXRodE9nUTNwT3Nx"
+                  "VFFOcm9Cdm8zYlNNZ0hGelpNCjlPNklJOGMrNnpmMXRSbjRTV2l3M3RlNWRqZ2RZWjZrL29JMnBl"
+                  "VktWdVJGNGZuOXRCYjZkTnFjbXpVNUwvcXcKSUZBR2JIclFnTEttK2Evc1J4bVBVRGdIM0tLSE9W"
+                  "ajR1dFdwK1Vobk1KYnVsSGhlYjRtalVjQXdobWFoUldhNgpWT3VqdzVINVNOei8wZWd3TFgwdGRI"
+                  "QTExNGdrOTU3RVdXNjdjNGNYOGpKR0tMaEQrcmNkcXNxMDhwOGtEaTFMCjkzRmNYbW4vNnBVQ3l6"
+                  "aUtybEE0Yjl2N0xXSWJ4Y2NlVk9GMzRHZklENXlISTlZL1FDQi9JSURFZ0V3K095UW0KamdTdWJK"
+                  "cklxZzBDQXdFQUFhTkNNRUF3RHdZRFZSMFRBUUgvQkFVd0F3RUIvekFPQmdOVkhROEJBZjhFQkFN"
+                  "QwpBWVl3SFFZRFZSME9CQllFRklRWXpJVTA3THdNbEpRdUNGbWN4N0lRVGdvSU1BMEdDU3FHU0li"
+                  "M0RRRUJDd1VBCkE0SUJBUUNZOGpkYVFaQ2hHc1YyVVNnZ05pTU9ydVlvdTZyNGxLNUlwREIvRy93"
+                  "a2pVdTB5S0dYOXJieGVuREkKVTVQTUNDamptQ1hQSTZUNTNpSFRmSVVKclU2YWRUckNDMnFKZUha"
+                  "RVJ4aGxiSTFCamp0L21zdjB0YWRRMXdVcwpOK2dEUzYzcFlhQUNidlh5OE1XeTdWdTMzUHFVWEhl"
+                  "ZUU2Vi9VcTJWOHZpVE85NkxYRnZLV2xKYllLOFU5MHZ2Cm8vdWZRSlZ0TVZUOFF0UEhSaDhqcmRr"
+                  "UFNIQ2EyWFY0Y2RGeVF6UjFibGRad2dKY0ptQXB6eU1aRm82SVE2WFUKNU1zSSt5TVJRK2hES1hK"
+                  "aW9hbGRYZ2pVa0s2NDJNNFV3dEJWOG9iMnhKTkRkMlpod0xub1FkZVhlR0FEYmtweQpycVhSZmJv"
+                  "UW5vWnNHNHE1V1RQNDY4U1F2dkc1Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+              )
+
+          def extract_host_from_endpoint(endpoint):
+              if '://' in endpoint:
+                  endpoint = endpoint.split('://')[1]
+              if ':' in endpoint:
+                  endpoint = endpoint.split(':')[0]
+              return endpoint
+
+          def create_k8s_secrets():
+              project = os.environ['PROJECT_NAME']
+              namespace = os.environ['NAMESPACE']
+              rds_secret = get_secret(os.environ['RDS_SECRET_ARN'])
+              docdb_secret = get_secret(os.environ['DOCUMENTDB_SECRET_ARN'])
+              mq_secret = get_secret(os.environ['AMAZONMQ_SECRET_ARN'])
+              redis_password = get_elasticache_password()
+              # Generate a random NextAuth secret if not provided via Secrets Manager
+              nextauth_secret = secrets.token_hex(32)
+
+              secrets_yaml = f'''
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-rds-credentials
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            username: "{rds_secret['username']}"
+            password: "{rds_secret['password']}"
+            DB_USER_ADMIN: "{rds_secret['username']}"
+            DB_ADMIN_PASSWORD: "{rds_secret['password']}"
+            DB_PASSWORD_MIDAZ: "{rds_secret['password']}"
+            DB_PASSWORD_TRACER: "{rds_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-documentdb-credentials
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            username: "{docdb_secret['username']}"
+            password: "{docdb_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-amazonmq-credentials
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            username: "{mq_secret['username']}"
+            password: "{mq_secret['password']}"
+            RABBITMQ_ADMIN_USER: "{mq_secret['username']}"
+            RABBITMQ_ADMIN_PASS: "{mq_secret['password']}"
+            RABBITMQ_DEFAULT_PASS: "{mq_secret['password']}"
+            RABBITMQ_CONSUMER_PASS: "{mq_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-midaz-secrets
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            DB_ONBOARDING_PASSWORD: "{rds_secret['password']}"
+            DB_ONBOARDING_REPLICA_PASSWORD: "{rds_secret['password']}"
+            DB_TRANSACTION_PASSWORD: "{rds_secret['password']}"
+            DB_TRANSACTION_REPLICA_PASSWORD: "{rds_secret['password']}"
+            MONGO_ONBOARDING_PASSWORD: "{docdb_secret['password']}"
+            MONGO_TRANSACTION_PASSWORD: "{docdb_secret['password']}"
+            RABBITMQ_DEFAULT_PASS: "{mq_secret['password']}"
+            RABBITMQ_CONSUMER_PASS: "{mq_secret['password']}"
+            REDIS_PASSWORD: "{redis_password}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-reporter-secrets
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            MONGO_PASSWORD: "{docdb_secret['password']}"
+            REDIS_PASSWORD: "{redis_password}"
+            RABBITMQ_DEFAULT_USER: "{mq_secret['username']}"
+            RABBITMQ_DEFAULT_PASS: "{mq_secret['password']}"
+            DATASOURCE_ONBOARDING_PASSWORD: "{rds_secret['password']}"
+            OBJECT_STORAGE_ACCESS_KEY_ID: ""
+            OBJECT_STORAGE_SECRET_KEY: ""
+            APP_ENC_KEY: ""
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-tracer-secrets
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            DB_PASSWORD: "{rds_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-console-secrets
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            NEXTAUTH_SECRET: "{nextauth_secret}"
+            MONGO_PASSWORD: "{docdb_secret['password']}"
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: {project}-plugin-fees-secrets
+            namespace: {namespace}
+          type: Opaque
+          stringData:
+            MONGO_PASSWORD: "{docdb_secret['password']}"
+          '''
+
+              secrets_file = '/tmp/secrets.yaml'
+              with open(secrets_file, 'w') as f:
+                  f.write(secrets_yaml)
+              run_command(['kubectl', 'apply', '-f', secrets_file])
+
+          def get_console_ingress_config():
+              enable_ingress = os.environ.get('ENABLE_INGRESS', 'false').lower() == 'true'
+              if not enable_ingress:
+                  return 'ingress:\n      enabled: false'
+              ingress_hostname = os.environ.get('INGRESS_HOSTNAME', '')
+              ingress_scheme = os.environ.get('INGRESS_SCHEME', 'internal')
+              certificate_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
+              if not ingress_hostname:
+                  return 'ingress:\n      enabled: false'
+              annotations = {
+                  'kubernetes.io/ingress.class': 'alb',
+                  'alb.ingress.kubernetes.io/scheme': ingress_scheme,
+                  'alb.ingress.kubernetes.io/target-type': 'ip',
+              }
+              if certificate_arn:
+                  annotations['alb.ingress.kubernetes.io/listen-ports'] = '\'[{"HTTP": 80}, {"HTTPS": 443}]\''
+                  annotations['alb.ingress.kubernetes.io/ssl-redirect'] = '"443"'
+                  annotations['alb.ingress.kubernetes.io/certificate-arn'] = certificate_arn
+              else:
+                  annotations['alb.ingress.kubernetes.io/listen-ports'] = '\'[{"HTTP": 80}]\''
+              annotations_yaml = '\n'.join([f'        {k}: {v}' for k, v in annotations.items()])
+              return f'''ingress:
+            enabled: true
+            className: alb
+            annotations:
+          {annotations_yaml}
+            hosts:
+              - host: {ingress_hostname}
+                paths:
+                  - path: /
+                    pathType: Prefix'''
+
+          def create_values_file():
+              project = os.environ['PROJECT_NAME']
+              namespace = os.environ['NAMESPACE']
+              replicas = os.environ.get('CORE_BANK_REPLICAS', '2')
+              region = os.environ.get('AWS_DEFAULT_REGION', 'sa-east-1')
+
+              rds_endpoint = os.environ['RDS_ENDPOINT']
+              rds_replica = os.environ['RDS_REPLICA_ENDPOINT']
+              docdb_endpoint = os.environ['DOCUMENTDB_ENDPOINT']
+              elasticache_endpoint = os.environ['ELASTICACHE_ENDPOINT']
+              amazonmq_endpoint = os.environ['AMAZONMQ_ENDPOINT']
+              s3_bucket = os.environ.get('REPORTER_S3_BUCKET', '')
+              nextauth_url = os.environ.get('NEXTAUTH_URL', '')
+
+              docdb_secret = get_secret(os.environ['DOCUMENTDB_SECRET_ARN'])
+              amazonmq_host = extract_host_from_endpoint(amazonmq_endpoint)
+              aws_ca_cert_b64 = get_aws_ca_cert_base64()
+
+              # Internal service URLs follow helm naming: {release}-{alias}-{component}
+              # With release=core-bank, alias=ledger → midaz-helm internal service
+              ledger_internal_url = f"http://core-bank-ledger.{namespace}.svc.cluster.local:3002"
+              console_ingress_config = get_console_ingress_config()
+
+              # DocumentDB connection parameters (same for all subcharts)
+              docdb_params = "tls=true&tlsInsecure=true&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false&connectTimeoutMS=10000&serverSelectionTimeoutMS=10000"
+
+              values = f'''
+          # ============================================================
+          # Product Console
+          # ============================================================
+          product-console:
+            enabled: true
+            useExistingSecret: true
+            existingSecretName: "{project}-console-secrets"
+            configmap:
+              NEXTAUTH_URL: "{nextauth_url}"
+              MIDAZ_BASE_PATH: "{ledger_internal_url}"
+              MIDAZ_TRANSACTION_BASE_PATH: "{ledger_internal_url}"
+              CRM_BASE_PATH: "{ledger_internal_url}"
+              REPORTER_BASE_PATH: "http://core-bank-reporter-manager.{namespace}.svc.cluster.local:4005"
+              MONGO_HOST: "{docdb_endpoint}"
+              MONGO_PORT: "27017"
+              MONGODB_DB_NAME: "midaz-console"
+              MONGO_PARAMETERS: "{docdb_params}"
+              PLUGIN_AUTH_ENABLED: "false"
+              PLUGIN_AUTH_BASE_PATH: ""
+              PLUGIN_IDENTITY_BASE_PATH: ""
+            {console_ingress_config}
+
+          # ============================================================
+          # Ledger (Midaz)
+          # ============================================================
+          ledger:
+            # Disable built-in services — using AWS managed
+            postgresql:
+              enabled: false
+            mongodb:
+              enabled: false
+            rabbitmq:
+              enabled: false
+            valkey:
+              enabled: false
+            keda:
+              enabled: false
+            # Ledger unified service
+            ledger:
+              enabled: true
+              replicaCount: {replicas}
+              configmap:
+                DB_ONBOARDING_HOST: "{rds_endpoint}"
+                DB_ONBOARDING_PORT: "5432"
+                DB_ONBOARDING_USER: "midaz"
+                DB_ONBOARDING_NAME: "onboarding"
+                DB_ONBOARDING_SSLMODE: "require"
+                DB_ONBOARDING_REPLICA_HOST: "{rds_replica}"
+                DB_ONBOARDING_REPLICA_PORT: "5432"
+                DB_ONBOARDING_REPLICA_USER: "midaz"
+                DB_ONBOARDING_REPLICA_NAME: "onboarding"
+                DB_ONBOARDING_REPLICA_SSLMODE: "require"
+                DB_TRANSACTION_HOST: "{rds_endpoint}"
+                DB_TRANSACTION_PORT: "5432"
+                DB_TRANSACTION_USER: "midaz"
+                DB_TRANSACTION_NAME: "transaction"
+                DB_TRANSACTION_SSLMODE: "require"
+                DB_TRANSACTION_REPLICA_HOST: "{rds_replica}"
+                DB_TRANSACTION_REPLICA_PORT: "5432"
+                DB_TRANSACTION_REPLICA_USER: "midaz"
+                DB_TRANSACTION_REPLICA_NAME: "transaction"
+                DB_TRANSACTION_REPLICA_SSLMODE: "require"
+                MONGO_ONBOARDING_URI: "mongodb"
+                MONGO_ONBOARDING_HOST: "{docdb_endpoint}"
+                MONGO_ONBOARDING_PORT: "27017"
+                MONGO_ONBOARDING_USER: "{docdb_secret['username']}"
+                MONGO_ONBOARDING_NAME: "onboarding"
+                MONGO_ONBOARDING_PARAMETERS: "{docdb_params}"
+                MONGO_TRANSACTION_URI: "mongodb"
+                MONGO_TRANSACTION_HOST: "{docdb_endpoint}"
+                MONGO_TRANSACTION_PORT: "27017"
+                MONGO_TRANSACTION_USER: "{docdb_secret['username']}"
+                MONGO_TRANSACTION_NAME: "transaction"
+                MONGO_TRANSACTION_PARAMETERS: "{docdb_params}"
+                REDIS_HOST: "{elasticache_endpoint}"
+                REDIS_TLS: "true"
+                REDIS_CA_CERT: "{aws_ca_cert_b64}"
+                RABBITMQ_URI: "amqps"
+                RABBITMQ_HOST: "{amazonmq_host}"
+                RABBITMQ_PORT_HOST: "5671"
+                RABBITMQ_PORT_AMQP: "15671"
+                RABBITMQ_PROTOCOL: "https"
+                RABBITMQ_DEFAULT_USER: "transaction"
+                RABBITMQ_CONSUMER_USER: "consumer"
+                RABBITMQ_TRANSACTION_ASYNC: "true"
+              useExistingSecret: true
+              existingSecretName: "{project}-midaz-secrets"
+            onboarding:
+              enabled: false
+            transaction:
+              enabled: false
+            global:
+              externalPostgresDefinitions:
+                enabled: true
+                connection:
+                  host: "{rds_endpoint}"
+                  port: "5432"
+                postgresAdminLogin:
+                  useExistingSecret:
+                    name: "{project}-rds-credentials"
+                midazCredentials:
+                  useExistingSecret:
+                    name: "{project}-rds-credentials"
+              externalRabbitmqDefinitions:
+                enabled: true
+                connection:
+                  protocol: "https"
+                  host: "{amazonmq_host}"
+                  port: "15671"
+                  portAmqp: "5671"
+                rabbitmqAdminLogin:
+                  useExistingSecret:
+                    name: "{project}-amazonmq-credentials"
+                appCredentials:
+                  useExistingSecret:
+                    name: "{project}-amazonmq-credentials"
+
+          # ============================================================
+          # Reporter
+          # ============================================================
+          reporter:
+            enabled: true
+            # Disable built-in services — using AWS managed
+            mongodb:
+              enabled: false
+            rabbitmq:
+              enabled: false
+            valkey:
+              enabled: false
+            seaweedfs:
+              enabled: false
+            keda:
+              enabled: false
+            common:
+              configmap:
+                RABBITMQ_URI: "amqps"
+                RABBITMQ_HOST: "{amazonmq_host}"
+                RABBITMQ_PORT_AMQP: "5671"
+                RABBITMQ_EXCHANGE: "reporter.generate-report.exchange"
+                RABBITMQ_GENERATE_REPORT_QUEUE: "reporter.generate-report.queue"
+                RABBITMQ_HEALTH_CHECK_URL: "https://{amazonmq_host}:15671"
+                REDIS_HOST: "{elasticache_endpoint}"
+                REDIS_TLS: "true"
+                REDIS_CA_CERT: "{aws_ca_cert_b64}"
+                MONGO_URI: "mongodb"
+                MONGO_HOST: "{docdb_endpoint}"
+                MONGO_PORT: "27017"
+                MONGO_NAME: "reporter-db"
+                MONGO_USER: "{docdb_secret['username']}"
+                MONGO_PARAMETERS: "{docdb_params}"
+                OBJECT_STORAGE_ENDPOINT: ""
+                OBJECT_STORAGE_BUCKET: "{s3_bucket}"
+                OBJECT_STORAGE_REGION: "{region}"
+                OBJECT_STORAGE_USE_PATH_STYLE: "false"
+                OBJECT_STORAGE_DISABLE_SSL: "false"
+                FETCHER_ENABLED: "false"
+                MULTI_TENANT_ENABLED: "false"
+            manager:
+              useExistingSecret: true
+              existingSecretName: "{project}-reporter-secrets"
+              configmap:
+                PLUGIN_AUTH_ENABLED: "false"
+                PLUGIN_AUTH_ADDRESS: ""
+            worker:
+              useExistingSecret: true
+              existingSecretName: "{project}-reporter-secrets"
+
+          # ============================================================
+          # Tracer
+          # ============================================================
+          tracer:
+            enabled: true
+            tracer:
+              useExistingSecret: true
+              existingSecretName: "{project}-tracer-secrets"
+              configmap:
+                DB_HOST: "{rds_endpoint}"
+                DB_PORT: "5432"
+                DB_NAME: "tracer"
+                DB_USER: "tracer"
+                DB_SSL_MODE: "require"
+                PLUGIN_AUTH_ENABLED: "false"
+                PLUGIN_AUTH_ADDRESS: ""
+                API_KEY_ENABLED: "false"
+                MULTI_TENANT_ENABLED: "false"
+                MULTI_TENANT_URL: ""
+                MULTI_TENANT_REDIS_HOST: ""
+            global:
+              externalPostgresDefinitions:
+                enabled: true
+                connection:
+                  host: "{rds_endpoint}"
+                  port: "5432"
+                postgresAdminLogin:
+                  useExistingSecret:
+                    name: "{project}-rds-credentials"
+                tracerCredentials:
+                  useExistingSecret:
+                    name: "{project}-rds-credentials"
+
+          # ============================================================
+          # Plugin Fees
+          # ============================================================
+          plugin-fees:
+            enabled: true
+            useExistingSecret: true
+            existingSecretName: "{project}-plugin-fees-secrets"
+            configmap:
+              MIDAZ_TRANSACTION_URL: "{ledger_internal_url}"
+              MONGO_HOST: "{docdb_endpoint}"
+              MONGO_PORT: "27017"
+              MONGO_NAME: "plugin-fees-db"
+              MONGO_PARAMETERS: "{docdb_params}"
+              PLUGIN_AUTH_ENABLED: "false"
+              PLUGIN_AUTH_ADDRESS: ""
+              MULTI_TENANT_ENABLED: "false"
+          '''
+
+              values_file = '/tmp/values.yaml'
+              with open(values_file, 'w') as f:
+                  f.write(values)
+              return values_file
+
+          def helm_install():
+              namespace = os.environ['NAMESPACE']
+              repository = os.environ['HELM_REPOSITORY']
+              version = os.environ['CHART_VERSION']
+              project = os.environ['PROJECT_NAME']
+              values_file = create_values_file()
+              run_command([
+                  'helm', 'upgrade', '--install', project,
+                  repository,
+                  '--version', version,
+                  '--namespace', namespace,
+                  '--create-namespace',
+                  '--values', values_file,
+                  '--wait',
+                  '--timeout', '20m'
+              ])
+
+          def helm_uninstall():
+              namespace = os.environ['NAMESPACE']
+              project = os.environ['PROJECT_NAME']
+              try:
+                  run_command(['helm', 'uninstall', project, '-n', namespace])
+              except:
+                  logger.info("Helm release may not exist")
+
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps(event)}")
+              try:
+                  request_type = event['RequestType']
+                  install_tools()
+                  setup_kubeconfig()
+                  if request_type == 'Delete':
+                      helm_uninstall()
+                      send_response(event, context, 'SUCCESS', {'Message': 'Core Bank Helm release deleted'})
+                      return
+                  namespace = os.environ['NAMESPACE']
+                  create_namespace(namespace)
+                  create_k8s_secrets()
+                  helm_install()
+                  send_response(event, context, 'SUCCESS', {
+                      'ReleaseName': os.environ['PROJECT_NAME'],
+                      'Namespace': namespace,
+                      'ChartVersion': os.environ['CHART_VERSION']
+                  })
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  send_response(event, context, 'FAILED', reason=str(e))
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-helm-deployer"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # =============================================================================
+  # CUSTOM RESOURCE TO TRIGGER HELM DEPLOYMENT
+  # =============================================================================
+  CoreBankHelmDeployment:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - HelmDeployerFunction
+      - HelmDeployerAccessEntry
+    Properties:
+      ServiceToken: !GetAtt HelmDeployerFunction.Arn
+      ChartVersion: !Ref CoreBankChartVersion
+      Namespace: !Ref CoreBankNamespace
+      ClusterName: !Ref ClusterName
+      ConfigHash: !Base64
+        Fn::Sub: "${RDSEndpoint}-${DocumentDBEndpoint}-${ElastiCacheEndpoint}-${ElastiCacheSecretArn}-${AmazonMQEndpoint}-${CoreBankChartVersion}-${CoreBankReplicas}-${EnableIngress}-${IngressHostname}-${IngressScheme}-${IngressCertificateArn}-${NextAuthUrl}-${ReporterStorageBucketName}-helm-values-v1"
+
+Outputs:
+  HelmReleaseName:
+    Description: Core Bank Helm Release Name
+    Value: !Ref ProjectName
+
+  HelmNamespace:
+    Description: Core Bank Kubernetes Namespace
+    Value: !Ref CoreBankNamespace
+
+  HelmChartVersion:
+    Description: Core Bank Helm Chart Version
+    Value: !Ref CoreBankChartVersion
+
+  HelmDeployerFunctionArn:
+    Description: Helm Deployer Lambda Function ARN
+    Value: !GetAtt HelmDeployerFunction.Arn
+
+  HelmDeployerLogGroup:
+    Description: CloudWatch Log Group for Helm Deployer
+    Value: !Sub "/aws/lambda/${ProjectName}-helm-deployer"
+
+  ConsoleEndpoint:
+    Description: Product Console Endpoint
+    Value: !If
+      - ShouldEnableIngress
+      - !If
+        - HasCertificate
+        - !Sub "https://${IngressHostname}"
+        - !Sub "http://${IngressHostname}"
+      - !Sub "core-bank-product-console.${CoreBankNamespace}.svc.cluster.local:3000"

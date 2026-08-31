@@ -454,11 +454,40 @@ jobs:
           cfn-lint templates/*.yaml products/**/*.yaml --regions ${{ matrix.region }} --format parseable || true
 
   # ============================================================================
+  # Lerian Platform: operator-go unit + golden-render drift gate
+  # ============================================================================
+  operator-go-test:
+    name: Platform Operator (Go)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: products/lerian-platform/operator-go
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: products/lerian-platform/operator-go/go.mod
+          cache-dependency-path: products/lerian-platform/operator-go/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      # Runs the whole suite, including the golden-render drift gate
+      # (internal/modules/catalog/render_golden_test.go): if a chart version bump
+      # moves a value key/endpoint format or a descriptor drops a hook, this fails
+      # here at PR time instead of on the cluster.
+      - name: go test
+        run: go test ./... -race -count=1
+
+  # ============================================================================
   # Summary Job
   # ============================================================================
   ci-summary:
     name: CI Summary
-    needs: [cfn-lint, checkov, validate-templates, marketplace-compliance]
+    needs: [cfn-lint, checkov, validate-templates, marketplace-compliance, operator-go-test]
     if: always()
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
@@ -472,13 +501,15 @@ jobs:
           echo "| Checkov Security | ${{ needs.checkov.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Template Validation | ${{ needs.validate-templates.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Marketplace Compliance | ${{ needs.marketplace-compliance.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform Operator (Go) | ${{ needs.operator-go-test.result == 'success' && 'Pass' || 'Fail' }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Fail if any check failed
         if: |
           needs.cfn-lint.result == 'failure' ||
           needs.checkov.result == 'failure' ||
           needs.validate-templates.result == 'failure' ||
-          needs.marketplace-compliance.result == 'failure'
+          needs.marketplace-compliance.result == 'failure' ||
+          needs.operator-go-test.result == 'failure'
         run: exit 1
 
   # ============================================================================

@@ -1,0 +1,465 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Lerian Platform - Per-App Stack (dedicated topology building block)
+  Provisions the DEDICATED infrastructure a single module needs (RDS / DocumentDB /
+  ElastiCache / AmazonMQ / S3, gated by Need* flags) and deploys that one module via
+  the platform Helm deployer (helm.yaml with OnlyApp=<AppKey>). Instantiated once per
+  enabled module by full-stack.yaml when InfraTopology=dedicated. The cluster/VPC are
+  shared (passed in from the parent); only the data layer is per-app.
+  (c) Lerian Studio - https://lerian.studio
+
+Parameters:
+  # ---------------------------------------------------------------------------
+  # AWS Marketplace (nested template URLs)
+  # ---------------------------------------------------------------------------
+  MPS3BucketName:
+    Type: String
+    Description: "S3 bucket with the CloudFormation templates (Marketplace-managed)"
+  MPS3BucketRegion:
+    Type: String
+    Description: "Region of the template S3 bucket"
+  MPS3KeyPrefix:
+    Type: String
+    Description: "S3 key prefix for the templates"
+
+  # ---------------------------------------------------------------------------
+  # Identity / general
+  # ---------------------------------------------------------------------------
+  ProjectName:
+    Type: String
+    Description: "Per-app project name (parent passes ${StackName}-<suffix>); used for resource naming"
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN"
+  AppKey:
+    Type: String
+    Description: "Module key deployed by this stack (ledger|reporter|tracer|fetcher|console|access_manager|bank_transfer|fees)"
+
+  # ---------------------------------------------------------------------------
+  # Shared cluster / network (from the parent)
+  # ---------------------------------------------------------------------------
+  ClusterName:
+    Type: String
+    Description: EKS cluster name (shared)
+  VpcId:
+    Type: String
+    Description: VPC ID (shared)
+  VpcCIDR:
+    Type: String
+    Description: VPC CIDR (shared)
+  PrivateSubnetIds:
+    Type: String
+    Description: Comma-separated private subnet IDs
+  DatabaseSubnetIds:
+    Type: String
+    Description: Comma-separated database subnet IDs
+
+  # ---------------------------------------------------------------------------
+  # Which data services this app needs (dedicated instances)
+  # ---------------------------------------------------------------------------
+  NeedRDS:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  NeedDocumentDB:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  NeedElastiCache:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  NeedAmazonMQ:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  NeedS3:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
+  # ---------------------------------------------------------------------------
+  # RDS sizing (defaults mirror full-stack)
+  # ---------------------------------------------------------------------------
+  RDSInstanceClass:
+    Type: String
+    Default: db.r7g.large
+  RDSAllocatedStorage:
+    Type: Number
+    Default: 100
+  RDSMaxAllocatedStorage:
+    Type: Number
+    Default: 500
+  RDSStorageType:
+    Type: String
+    Default: gp3
+  RDSIops:
+    Type: Number
+    Default: 3000
+  RDSDatabaseName:
+    Type: String
+    Default: midaz
+  RDSMasterUsername:
+    Type: String
+    Default: lerian_admin
+  CreateReadReplica:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  RDSForceSSL:
+    Type: String
+    Default: "1"
+  RDSMultiAZ:
+    Type: String
+    Default: "true"
+  RDSDeletionProtection:
+    Type: String
+    Default: "true"
+  RDSBackupRetentionPeriod:
+    Type: Number
+    Default: 30
+
+  # ---------------------------------------------------------------------------
+  # DocumentDB sizing
+  # ---------------------------------------------------------------------------
+  DocumentDBInstanceClass:
+    Type: String
+    Default: db.r6g.large
+  DocumentDBInstanceCount:
+    Type: Number
+    Default: 3
+  DocumentDBMasterUsername:
+    Type: String
+    Default: lerian_admin
+  DocumentDBDeletionProtection:
+    Type: String
+    Default: "true"
+  DocumentDBBackupRetentionPeriod:
+    Type: Number
+    Default: 30
+
+  # ---------------------------------------------------------------------------
+  # ElastiCache / AmazonMQ sizing
+  # ---------------------------------------------------------------------------
+  ElastiCacheNodeType:
+    Type: String
+    Default: cache.m7g.large
+  AmazonMQInstanceType:
+    Type: String
+    Default: mq.m5.large
+  AmazonMQDeploymentMode:
+    Type: String
+    Default: SINGLE_INSTANCE
+  AmazonMQAdminUsername:
+    Type: String
+    Default: lerian_admin
+
+  AdditionalIngressCIDR1:
+    Type: String
+    Default: ""
+  AdditionalIngressCIDR2:
+    Type: String
+    Default: ""
+  AdditionalIngressCIDR3:
+    Type: String
+    Default: ""
+
+  # ---------------------------------------------------------------------------
+  # Application (Helm) config
+  # ---------------------------------------------------------------------------
+  DeployApplication:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  PlatformNamespace:
+    Type: String
+    Default: lerian-platform
+  # Global Enable* flags forwarded so cross-app config stays correct (e.g. Reporter->Fetcher).
+  EnableLedger:        { Type: String, Default: "false" }
+  EnableReporter:      { Type: String, Default: "false" }
+  EnableTracer:        { Type: String, Default: "false" }
+  EnableFetcher:       { Type: String, Default: "false" }
+  EnableConsole:       { Type: String, Default: "false" }
+  EnableAccessManager: { Type: String, Default: "false" }
+  EnableBankTransfer:  { Type: String, Default: "false" }
+  EnableFees:          { Type: String, Default: "false" }
+
+  NextAuthUrl:
+    Type: String
+    Default: ""
+  EnableIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  IngressHostname:
+    Type: String
+    Default: ""
+  IngressScheme:
+    Type: String
+    Default: "internet-facing"
+    AllowedValues: ["internal", "internet-facing"]
+  IngressCertificateArn:
+    Type: String
+    Default: ""
+
+  # GitOps lifecycle (optional)
+  GitOpsRepoUrl:
+    Type: String
+    Default: ""
+  GitOpsBranch:
+    Type: String
+    Default: "main"
+  GitOpsPath:
+    Type: String
+    Default: "environments/production"
+  GitOpsDeployKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+
+  # Ordering hint from the parent (EKS/ALB controller readiness). Consumed in an
+  # Output so the GetAtt dependency the parent wires actually orders this stack.
+  DependencyHint:
+    Type: String
+    Default: ""
+
+Conditions:
+  NeedRDSCond: !Equals [!Ref NeedRDS, "true"]
+  NeedDocumentDBCond: !Equals [!Ref NeedDocumentDB, "true"]
+  NeedElastiCacheCond: !Equals [!Ref NeedElastiCache, "true"]
+  NeedAmazonMQCond: !Equals [!Ref NeedAmazonMQ, "true"]
+  NeedS3Cond: !Equals [!Ref NeedS3, "true"]
+  ShouldDeployApp: !Equals [!Ref DeployApplication, "true"]
+
+Resources:
+  # ===========================================================================
+  # DEDICATED DATA — RDS PostgreSQL
+  # ===========================================================================
+  AppRDSStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: NeedRDSCond
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
+      Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !Ref VpcId
+        VpcCIDR: !Ref VpcCIDR
+        DatabaseSubnetIds: !Ref DatabaseSubnetIds
+        InstanceClass: !Ref RDSInstanceClass
+        AllocatedStorage: !Ref RDSAllocatedStorage
+        MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
+        StorageType: !Ref RDSStorageType
+        Iops: !Ref RDSIops
+        DatabaseName: !Ref RDSDatabaseName
+        MasterUsername: !Ref RDSMasterUsername
+        CreateReadReplica: !Ref CreateReadReplica
+        ForceSSL: !Ref RDSForceSSL
+        MultiAZ: !Ref RDSMultiAZ
+        DeletionProtection: !Ref RDSDeletionProtection
+        BackupRetentionPeriod: !Ref RDSBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ===========================================================================
+  # DEDICATED DATA — DocumentDB
+  # ===========================================================================
+  AppDocumentDBStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: NeedDocumentDBCond
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !Ref VpcId
+        VpcCIDR: !Ref VpcCIDR
+        PrivateSubnetIds: !Ref PrivateSubnetIds
+        InstanceClass: !Ref DocumentDBInstanceClass
+        InstanceCount: !Ref DocumentDBInstanceCount
+        MasterUsername: !Ref DocumentDBMasterUsername
+        DeletionProtection: !Ref DocumentDBDeletionProtection
+        BackupRetentionPeriod: !Ref DocumentDBBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ===========================================================================
+  # DEDICATED DATA — ElastiCache (Valkey)
+  # ===========================================================================
+  AppElastiCacheStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: NeedElastiCacheCond
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !Ref VpcId
+        VpcCIDR: !Ref VpcCIDR
+        CacheSubnetIds: !Ref DatabaseSubnetIds
+        NodeType: !Ref ElastiCacheNodeType
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-elasticache-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ===========================================================================
+  # DEDICATED DATA — AmazonMQ (RabbitMQ)
+  # ===========================================================================
+  AppAmazonMQStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: NeedAmazonMQCond
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !Ref VpcId
+        VpcCIDR: !Ref VpcCIDR
+        PrivateSubnetIds: !Ref PrivateSubnetIds
+        InstanceType: !Ref AmazonMQInstanceType
+        DeploymentMode: !Ref AmazonMQDeploymentMode
+        AdminUsername: !Ref AmazonMQAdminUsername
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-amazonmq-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ===========================================================================
+  # DEDICATED DATA — S3 object storage (reporter / fetcher)
+  # ===========================================================================
+  AppStorageBucket:
+    # checkov:skip=CKV_AWS_18:Access logging optional for this workload bucket
+    # checkov:skip=CKV_AWS_21:Versioning enabled via VersioningConfiguration below
+    Type: AWS::S3::Bucket
+    Condition: NeedS3Cond
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-storage-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-storage"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ===========================================================================
+  # APPLICATION — Helm deployer for THIS app only (OnlyApp=AppKey)
+  # ===========================================================================
+  AppHelmStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployApp
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}helm.yaml"
+      Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        ClusterName: !Ref ClusterName
+        PlatformNamespace: !Ref PlatformNamespace
+        OnlyApp: !Ref AppKey
+        # Endpoints resolved from THIS app's dedicated infra (empty when not needed)
+        RDSEndpoint: !If [NeedRDSCond, !GetAtt AppRDSStack.Outputs.Endpoint, ""]
+        RDSReplicaEndpoint: ""
+        RDSSecretArn: !If [NeedRDSCond, !GetAtt AppRDSStack.Outputs.SecretArn, ""]
+        RDSKMSKeyArn: !If [NeedRDSCond, !GetAtt AppRDSStack.Outputs.KMSKeyArn, ""]
+        DocumentDBEndpoint: !If [NeedDocumentDBCond, !GetAtt AppDocumentDBStack.Outputs.ClusterEndpoint, ""]
+        DocumentDBSecretArn: !If [NeedDocumentDBCond, !GetAtt AppDocumentDBStack.Outputs.SecretArn, ""]
+        DocumentDBKMSKeyArn: !If [NeedDocumentDBCond, !GetAtt AppDocumentDBStack.Outputs.KMSKeyArn, ""]
+        ElastiCacheEndpoint: !If [NeedElastiCacheCond, !GetAtt AppElastiCacheStack.Outputs.PrimaryEndpoint, ""]
+        ElastiCacheSecretArn: !If [NeedElastiCacheCond, !GetAtt AppElastiCacheStack.Outputs.AuthSecretArn, ""]
+        ElastiCacheKMSKeyArn: !If [NeedElastiCacheCond, !GetAtt AppElastiCacheStack.Outputs.KMSKeyArn, ""]
+        AmazonMQEndpoint: !If [NeedAmazonMQCond, !GetAtt AppAmazonMQStack.Outputs.BrokerEndpoint, ""]
+        AmazonMQSecretArn: !If [NeedAmazonMQCond, !GetAtt AppAmazonMQStack.Outputs.SecretArn, ""]
+        AmazonMQKMSKeyArn: !If [NeedAmazonMQCond, !GetAtt AppAmazonMQStack.Outputs.KMSKeyArn, ""]
+        # This app's bucket goes to whichever bucket env its render reads (OnlyApp isolates)
+        ReporterStorageBucketName: !If [NeedS3Cond, !Ref AppStorageBucket, ""]
+        FetcherStorageBucketName: !If [NeedS3Cond, !Ref AppStorageBucket, ""]
+        # Global Enable* flags (cross-app config truth)
+        EnableLedger: !Ref EnableLedger
+        EnableReporter: !Ref EnableReporter
+        EnableTracer: !Ref EnableTracer
+        EnableFetcher: !Ref EnableFetcher
+        EnableConsole: !Ref EnableConsole
+        EnableAccessManager: !Ref EnableAccessManager
+        EnableBankTransfer: !Ref EnableBankTransfer
+        EnableFees: !Ref EnableFees
+        # Console config / ingress
+        NextAuthUrl: !Ref NextAuthUrl
+        EnableIngress: !Ref EnableIngress
+        IngressHostname: !Ref IngressHostname
+        IngressScheme: !Ref IngressScheme
+        IngressCertificateArn: !Ref IngressCertificateArn
+        # GitOps lifecycle (optional)
+        GitOpsRepoUrl: !Ref GitOpsRepoUrl
+        GitOpsBranch: !Ref GitOpsBranch
+        GitOpsPath: !Ref GitOpsPath
+        GitOpsDeployKey: !Ref GitOpsDeployKey
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-app-helm-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  AppKey:
+    Description: Module deployed by this stack
+    Value: !Ref AppKey
+  # Echo the ordering hint so the parent's GetAtt dependency actually orders this stack.
+  DependencyHint:
+    Description: Ordering hint passed by the parent (EKS/ALB readiness)
+    Value: !Ref DependencyHint
+  RDSEndpoint:
+    Condition: NeedRDSCond
+    Description: Dedicated RDS endpoint
+    Value: !GetAtt AppRDSStack.Outputs.Endpoint
+  DocumentDBEndpoint:
+    Condition: NeedDocumentDBCond
+    Description: Dedicated DocumentDB endpoint
+    Value: !GetAtt AppDocumentDBStack.Outputs.ClusterEndpoint
+  StorageBucketName:
+    Condition: NeedS3Cond
+    Description: Dedicated object-storage bucket
+    Value: !Ref AppStorageBucket

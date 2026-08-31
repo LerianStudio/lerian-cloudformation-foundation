@@ -21,6 +21,12 @@
       "complete": "0.2.0",
       "full-stack": "0.1.1"
     },
+    "lerian-platform": {
+      "full-stack": "0.1.0",
+      "helm": "0.1.0",
+      "app-stack": "0.1.0",
+      "application": "0.1.0"
+    },
     "tracer": {
       "infrastructure": "0.1.3"
     },

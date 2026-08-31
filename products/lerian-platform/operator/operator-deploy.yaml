@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lerian-operator
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-operator
+  namespace: lerian-operator
+---
+# PoC: cluster-admin so the operator can manage every module namespace + helm.
+# Production: scope to the module namespaces + the exact verbs the reconciler uses.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: platform-operator
+    namespace: lerian-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-operator
+  namespace: lerian-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: platform-operator }
+  template:
+    metadata:
+      labels: { app: platform-operator }
+    spec:
+      serviceAccountName: platform-operator
+      containers:
+        - name: operator
+          image: python:3.13-slim
+          env:
+            - name: DEPLOYER_PATH
+              value: /app/deployer.py
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "installing tooling (helm, kubectl, kopf)..."
+              apt-get update -qq && apt-get install -y -qq curl bash git >/dev/null
+              curl -sfL https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz | tar xz -C /tmp
+              install -m755 /tmp/linux-amd64/helm /usr/local/bin/helm
+              curl -sfLo /usr/local/bin/kubectl "https://dl.k8s.io/release/v1.33.0/bin/linux/amd64/kubectl"
+              chmod +x /usr/local/bin/kubectl
+              # boto3 is NOT installed: the operator overrides every AWS call
+              # (cloud-agnostic) and deployer.py now guards its boto3 import, so the
+              # AWS-only helpers are never reached in-cluster. Keeps startup fast +
+              # egress-independent.
+              pip install --quiet kopf kubernetes pyyaml
+              echo "starting operator..."
+              exec kopf run /app/operator.py --standalone --all-namespaces --verbose
+          volumeMounts:
+            - name: code
+              mountPath: /app
+      volumes:
+        - name: code
+          configMap:
+            name: platform-operator-code

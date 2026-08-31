@@ -1,0 +1,269 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Lerian Platform - Application Only (AWS Marketplace delivery option)
+  Deploys the enabled Lerian modules (Helm / GitOps seeder) onto an EXISTING
+  cluster + shared data infrastructure, without provisioning any infra. The
+  cluster/RDS/DocumentDB/ElastiCache/AmazonMQ coordinates are imported via
+  Fn::ImportValue from a previously deployed lerian-platform stack (full-stack
+  deployed with DeployApplication=false, or a shared-topology stack),
+  InfrastructureStackName. Use full-stack.yaml for a fresh end-to-end deploy.
+  (c) Lerian Studio - https://lerian.studio
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "AWS Marketplace Configuration"
+        Parameters:
+          - MPS3BucketName
+          - MPS3BucketRegion
+          - MPS3KeyPrefix
+          - MarketplaceAMI
+      - Label:
+          default: "Source Infrastructure"
+        Parameters:
+          - InfrastructureStackName
+          - PermissionsBoundaryArn
+          - PlatformNamespace
+      - Label:
+          default: "Module Activation"
+        Parameters:
+          - EnableLedger
+          - EnableReporter
+          - EnableTracer
+          - EnableFetcher
+          - EnableConsole
+          - EnableAccessManager
+          - EnableBankTransfer
+          - EnableFees
+      - Label:
+          default: "Per-App Object Storage (existing bucket names)"
+        Parameters:
+          - ReporterStorageBucketName
+          - FetcherStorageBucketName
+      - Label:
+          default: "Access Manager"
+        Parameters:
+          - AccessManagerLicenseKey
+          - AccessManagerOrganizationIds
+          - ConsoleAdminPassword
+      - Label:
+          default: "Console / Ingress"
+        Parameters:
+          - NextAuthUrl
+          - EnableIngress
+          - IngressHostname
+          - IngressScheme
+          - IngressCertificateArn
+      - Label:
+          default: "GitOps Lifecycle (optional)"
+        Parameters:
+          - GitOpsRepoUrl
+          - GitOpsBranch
+          - GitOpsPath
+          - GitOpsDeployKey
+
+Parameters:
+  MPS3BucketName:
+    Type: String
+    Default: "lerian-cloudformation-templates"
+    Description: "S3 bucket with the CloudFormation templates (Marketplace-managed)"
+  MPS3BucketRegion:
+    Type: String
+    Default: "sa-east-1"
+    AllowedValues: [sa-east-1]
+    Description: "Region of the template S3 bucket"
+  MPS3KeyPrefix:
+    Type: String
+    Default: "releases/latest/products/lerian-platform/"
+    AllowedPattern: "^[a-zA-Z0-9-_./]*$"
+    Description: "S3 key prefix for the templates"
+  MarketplaceAMI:
+    Type: String
+    Default: "ami-placeholder"
+    Description: "Marketplace AMI placeholder (form-only; EKS uses managed AMIs)"
+
+  InfrastructureStackName:
+    Type: String
+    Description: >-
+      Name of the existing lerian-platform stack (shared topology) whose exports
+      provide the cluster + data endpoints/secrets/KMS.
+    MinLength: 1
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN"
+  PlatformNamespace:
+    Type: String
+    Default: lerian-platform
+    Description: "Base namespace label for platform components"
+
+  EnableLedger:        { Type: String, Default: "true",  AllowedValues: ["true", "false"] }
+  EnableReporter:      { Type: String, Default: "false", AllowedValues: ["true", "false"] }
+  EnableTracer:        { Type: String, Default: "false", AllowedValues: ["true", "false"] }
+  EnableFetcher:       { Type: String, Default: "false", AllowedValues: ["true", "false"] }
+  EnableConsole:       { Type: String, Default: "true",  AllowedValues: ["true", "false"] }
+  EnableAccessManager: { Type: String, Default: "true",  AllowedValues: ["true", "false"] }
+  EnableBankTransfer:  { Type: String, Default: "false", AllowedValues: ["true", "false"] }
+  EnableFees:          { Type: String, Default: "false", AllowedValues: ["true", "false"] }
+
+  ReporterStorageBucketName:
+    Type: String
+    Default: ""
+    Description: "Existing S3 bucket for Reporter object storage (required if EnableReporter=true)"
+  FetcherStorageBucketName:
+    Type: String
+    Default: ""
+    Description: "Existing S3 bucket for Fetcher object storage (required if EnableFetcher=true)"
+
+  AccessManagerLicenseKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Lerian license key for the Access Manager"
+  AccessManagerOrganizationIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated organization IDs for the Access Manager (optional)"
+  ConsoleAdminPassword:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Initial Casdoor admin password (auto-generated if empty)"
+
+  NextAuthUrl:
+    Type: String
+    Default: ""
+    Description: "Full public URL for the product console"
+    AllowedPattern: "^$|^https?://.+$"
+  EnableIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: "Enable ALB Ingress for the product console"
+  IngressHostname:
+    Type: String
+    Default: ""
+    Description: "Hostname for the console Ingress"
+  IngressScheme:
+    Type: String
+    Default: "internet-facing"
+    AllowedValues: ["internal", "internet-facing"]
+    Description: "ALB scheme"
+  IngressCertificateArn:
+    Type: String
+    Default: ""
+    Description: "ACM Certificate ARN for HTTPS (optional)"
+
+  GitOpsRepoUrl:
+    Type: String
+    Default: ""
+    Description: "Git repo URL (SSH) for the GitOps seeder. Empty = helm-install mode."
+  GitOpsBranch:
+    Type: String
+    Default: "main"
+    Description: "Branch to seed (GitOps mode)"
+  GitOpsPath:
+    Type: String
+    Default: "environments/production"
+    Description: "Path within the repo for the seeded manifests (GitOps mode)"
+  GitOpsDeployKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "SSH deploy key (private) with push access (GitOps mode)"
+
+Resources:
+  # =============================================================================
+  # APPLICATION — Helm deployer / GitOps seeder over the imported infrastructure.
+  # =============================================================================
+  PlatformHelmStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}helm.yaml"
+      Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        ProjectName: !Ref AWS::StackName
+        EnvironmentName:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-EnvironmentName"
+        ClusterName:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-EKSClusterName"
+        PlatformNamespace: !Ref PlatformNamespace
+        # Imported shared data connections
+        RDSEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-RDSEndpoint"
+        RDSReplicaEndpoint: ""
+        RDSSecretArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-RDSSecretArn"
+        RDSKMSKeyArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-RDSKMSKeyArn"
+        DocumentDBEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-DocumentDBEndpoint"
+        DocumentDBSecretArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-DocumentDBSecretArn"
+        DocumentDBKMSKeyArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-DocumentDBKMSKeyArn"
+        ElastiCacheEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheEndpoint"
+        ElastiCacheSecretArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheSecretArn"
+        ElastiCacheKMSKeyArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-ElastiCacheKMSKeyArn"
+        AmazonMQEndpoint:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQEndpoint"
+        AmazonMQSecretArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQSecretArn"
+        AmazonMQKMSKeyArn:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-AmazonMQKMSKeyArn"
+        # Per-app object storage (existing bucket names)
+        ReporterStorageBucketName: !Ref ReporterStorageBucketName
+        FetcherStorageBucketName: !Ref FetcherStorageBucketName
+        # Module activation
+        EnableLedger: !Ref EnableLedger
+        EnableReporter: !Ref EnableReporter
+        EnableTracer: !Ref EnableTracer
+        EnableFetcher: !Ref EnableFetcher
+        EnableConsole: !Ref EnableConsole
+        EnableAccessManager: !Ref EnableAccessManager
+        EnableBankTransfer: !Ref EnableBankTransfer
+        EnableFees: !Ref EnableFees
+        # Access Manager
+        AccessManagerLicenseKey: !Ref AccessManagerLicenseKey
+        AccessManagerOrganizationIds: !Ref AccessManagerOrganizationIds
+        ConsoleAdminPassword: !Ref ConsoleAdminPassword
+        # Console / ingress
+        NextAuthUrl: !Ref NextAuthUrl
+        EnableIngress: !Ref EnableIngress
+        IngressHostname: !Ref IngressHostname
+        IngressScheme: !Ref IngressScheme
+        IngressCertificateArn: !Ref IngressCertificateArn
+        # GitOps lifecycle (optional)
+        GitOpsRepoUrl: !Ref GitOpsRepoUrl
+        GitOpsBranch: !Ref GitOpsBranch
+        GitOpsPath: !Ref GitOpsPath
+        GitOpsDeployKey: !Ref GitOpsDeployKey
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-platform-app-stack"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  ApplicationStackName:
+    Description: This application stack name
+    Value: !Ref AWS::StackName
+  InfrastructureStackReference:
+    Description: Source infrastructure stack imported by this application
+    Value: !Ref InfrastructureStackName
+  DeployerFunctionArn:
+    Description: Platform deployer Lambda ARN
+    Value: !GetAtt PlatformHelmStack.Outputs.DeployerFunctionArn
+  Mode:
+    Description: Deployment mode selected at runtime
+    Value: !GetAtt PlatformHelmStack.Outputs.Mode
+  KubectlCommand:
+    Description: Command to configure kubectl against the imported cluster
+    Value: !Sub
+      - "aws eks update-kubeconfig --name ${ClusterName} --region ${AWS::Region}"
+      - ClusterName:
+          Fn::ImportValue: !Sub "${InfrastructureStackName}-EKSClusterName"

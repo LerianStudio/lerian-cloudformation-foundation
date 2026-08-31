@@ -1,0 +1,1361 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Lerian Platform - Application Deployer (Orchestrator mode) (AWS Marketplace Ready)
+  Lambda-backed custom resource that installs the platform-orchestrator Kubernetes
+  controller onto an EKS cluster, then hands off module lifecycle to it declaratively
+  via two CRDs (EnvironmentContract + Platform) instead of looping a helm-install per
+  app in the Lambda (helm.yaml's model). CFN is the "provisioner" for the
+  EnvironmentContract and patches it Ready=True once backing Secrets are written; the
+  operator's own controllers then reconcile continuously as a long-running Deployment.
+  SCOPE CUT: the GitOps-seeder mode from helm.yaml is dropped entirely — this is
+  helm-delivery only (Platform.spec.delivery=helm). See inline comments for details
+  and open assumptions. (c) Lerian Studio - https://lerian.studio
+
+Parameters:
+  # ---------------------------------------------------------------------------
+  # General
+  # ---------------------------------------------------------------------------
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming (usually the parent stack name)
+
+  EnvironmentName:
+    Type: String
+    Description: Environment name for tagging
+
+  ClusterName:
+    Type: String
+    Description: EKS Cluster Name
+
+  PlatformNamespace:
+    Type: String
+    Default: lerian-platform
+    Description: Base namespace label for platform components (per-app namespaces are used for chart compatibility)
+
+  OperatorNamespace:
+    Type: String
+    Default: lerian-operator
+    Description: >-
+      Namespace the platform-orchestrator chart installs into (its own
+      Deployment/ServiceAccount/RBAC), and where this template writes the
+      EnvironmentContract-backing Secrets + the EnvironmentContract/Platform
+      CRs themselves. Matches the chart's own default (values.yaml).
+
+  # ---------------------------------------------------------------------------
+  # Shared data connections (from the full-stack outputs)
+  # ---------------------------------------------------------------------------
+  RDSEndpoint:
+    Type: String
+    Description: RDS PostgreSQL Endpoint
+
+  RDSReplicaEndpoint:
+    Type: String
+    Default: ""
+    Description: RDS Read Replica Endpoint (optional — falls back to primary)
+
+  RDSSecretArn:
+    Type: String
+    Description: RDS Password Secret ARN
+
+  DocumentDBEndpoint:
+    Type: String
+    Description: DocumentDB Cluster Endpoint
+
+  DocumentDBSecretArn:
+    Type: String
+    Description: DocumentDB Password Secret ARN
+
+  ElastiCacheEndpoint:
+    Type: String
+    Description: ElastiCache Primary Endpoint
+
+  ElastiCacheSecretArn:
+    Type: String
+    Default: ""
+    Description: ElastiCache Auth Token Secret ARN (optional)
+
+  AmazonMQEndpoint:
+    Type: String
+    Description: AmazonMQ Broker Endpoint
+
+  AmazonMQSecretArn:
+    Type: String
+    Description: AmazonMQ Password Secret ARN
+
+  MSKClusterArn:
+    Type: String
+    Default: ""
+    Description: MSK Cluster ARN (streaming backbone; empty disables streaming consumers)
+
+  MSKSecretArn:
+    Type: String
+    Default: ""
+    Description: MSK SASL/SCRAM credentials Secret ARN
+
+  MSKKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: MSK KMS Key ARN for SCRAM secret decryption
+
+  RDSKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: RDS KMS Key ARN for secret decryption
+
+  DocumentDBKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: DocumentDB KMS Key ARN for secret decryption
+
+  ElastiCacheKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: ElastiCache KMS Key ARN for secret decryption
+
+  AmazonMQKMSKeyArn:
+    Type: String
+    Default: ""
+    Description: AmazonMQ KMS Key ARN for secret decryption
+
+  # ---------------------------------------------------------------------------
+  # Per-app object storage (empty when the module is disabled)
+  # ---------------------------------------------------------------------------
+  ReporterStorageBucketName:
+    Type: String
+    Default: ""
+    Description: S3 bucket for Reporter object storage
+
+  FetcherStorageBucketName:
+    Type: String
+    Default: ""
+    Description: S3 bucket for Fetcher object storage
+
+  ObjectStorageRoleArn:
+    Type: String
+    Default: ""
+    Description: >-
+      IRSA role ARN reporter/fetcher pods assume for S3 access
+      (full-stack.yaml's ObjectStorageRole). Empty when neither module is
+      enabled.
+
+  # ---------------------------------------------------------------------------
+  # Module activation flags (reused verbatim from helm.yaml so this template is
+  # a drop-in replacement for an existing helm.yaml caller)
+  # ---------------------------------------------------------------------------
+  EnableLedger:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the Ledger (Midaz) module
+
+  EnableReporter:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the Reporter module
+
+  EnableTracer:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the Tracer module
+
+  EnableFetcher:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the Fetcher module
+
+  EnableConsole:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the Product Console
+
+  EnableAccessManager:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the Access Manager (OAuth2/OIDC). Required by other modules for auth.
+
+  EnableBankTransfer:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the BR Bank Transfer plugin
+
+  EnableFees:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Deploy the Plugin Fees module
+
+  # ---------------------------------------------------------------------------
+  # Chart versions — same parameter names as helm.yaml. NOTE: these version
+  # module Helm charts (via the operator's ModuleRelease); the operator chart
+  # itself is versioned separately (OrchestratorChartVersion below).
+  # ---------------------------------------------------------------------------
+  LedgerChartVersion:
+    Type: String
+    # Alpha (helm#1927, feat/midaz-cloud-mask, not yet merged) — matches the
+    # orchestrator catalog's ledger.go Chart.Repo default (oci://.../alpha/
+    # midaz-helm). Must stay in lockstep with the catalog: this tag does not
+    # exist under the non-alpha midaz-helm path.
+    Default: "8.10.0-alpha.202608241922.b43a8eac"
+    Description: midaz-helm chart version
+  ReporterChartVersion:
+    Type: String
+    # Stable (helm#1924, merged) — lerian-common masks adopted.
+    Default: "4.1.0"
+    Description: reporter-helm chart version
+  TracerChartVersion:
+    Type: String
+    # Alpha (helm#1926, feat/tracer-lerian-common, not yet merged) — matches
+    # the orchestrator catalog's tracer.go Chart.Repo default (oci://.../
+    # alpha/tracer-helm). Must stay in lockstep with the catalog: this tag
+    # does not exist under the non-alpha tracer-helm path.
+    Default: "2.1.0-alpha.202608261808.d0152339"
+    Description: tracer-helm chart version
+  FetcherChartVersion:
+    Type: String
+    Default: "3.1.0"
+    Description: fetcher-helm chart version
+  ConsoleChartVersion:
+    Type: String
+    # Stable (helm#1925, merged) — lerian-common masks adopted.
+    Default: "4.0.0"
+    Description: product-console-helm chart version
+  AccessManagerChartVersion:
+    Type: String
+    # Stable (helm#1922, merged) — lerian-common masks adopted.
+    Default: "9.2.0"
+    Description: plugin-access-manager chart version
+  BankTransferChartVersion:
+    Type: String
+    # Stable (matches the orchestrator catalog's bank_transfer.go Chart.Repo,
+    # oci://ghcr.io/lerianstudio/plugin-br-bank-transfer-helm — moved off the
+    # alpha/ prefix; commit acd4ed5). Empty would also work (the catalog's own
+    # DefaultVersion applies), but the version rendered here MUST stay in sync
+    # with whatever repo the catalog's Chart.Repo points at — an alpha tag
+    # against the stable repo (or vice versa) fails the chart pull outright.
+    Default: "2.0.0"
+    Description: plugin-br-bank-transfer-helm chart version
+  FeesChartVersion:
+    Type: String
+    # Stable (helm#1946, merged) — lerian-common masks adopted; CLIENT_ID lives
+    # in the Secret as of 8.0.0 (orchestrator's fees.go SecretMap handles it).
+    Default: "8.0.1"
+    Description: plugin-fees-helm chart version
+
+  # ---------------------------------------------------------------------------
+  # platform-orchestrator itself (the controller, distinct from the modules
+  # it manages)
+  # ---------------------------------------------------------------------------
+  OrchestratorChartRepo:
+    Type: String
+    # RESOLVED (was an open assumption): there was no publish workflow for this
+    # chart, so no stable release exists yet. Manually packaged + pushed an
+    # ALPHA build for this sandbox test — oci://ghcr.io/lerianstudio/alpha/*,
+    # same convention every other alpha chart in this platform uses. This is a
+    # throwaway sandbox pin, NOT a stable release: replace with a real published
+    # version (and drop the /alpha/ path) once charts/platform-orchestrator gets
+    # an actual CI publish pipeline.
+    Default: "oci://ghcr.io/lerianstudio/alpha/platform-orchestrator-helm"
+    Description: >-
+      OCI ref for the platform-orchestrator Helm chart. Currently pinned to a
+      manually-pushed alpha for sandbox testing — see the inline comment above
+      the Default.
+
+  OrchestratorChartVersion:
+    Type: String
+    Default: "0.1.0-alpha.202608311431.46175de7"
+    Description: >-
+      platform-orchestrator chart version. Pinned to the alpha built from
+      commit 46175de (branch feat/operator-e2e-hardening). Pushed to
+      oci://ghcr.io/lerianstudio/alpha/platform-orchestrator-helm for this
+      sandbox test — a PUBLIC package. Manager image
+      ghcr.io/lerianstudio/platform-orchestrator:v0-e2e-21-5ffcb835-amd64 is
+      also real, published, and public. This pin was previously stuck 5
+      fix-commits behind HEAD (at 0c8f640a) — discovered live when a fresh
+      6-module create-stack showed reporter/bank_transfer still hitting bugs
+      already fixed in git but never actually shipped in a chart+image:
+      reporter's Helm release marked "failed" (the chart's own
+      bootstrap-rabbitmq Job silently mis-runs as non-root, replaced upstream
+      by a Go-native RabbitMQ topology-bootstrap hook in commit 4ccf6d7) and
+      bank_transfer's postgres-role-bootstrap Job racing its own delete
+      ("object is being deleted", fixed by waiting for the Job to actually
+      disappear before recreating it in commit 3802277). Also picks up
+      f040a64 (m2m-consumer/pix-indirect-btg-secrets reading the wrong M2M
+      Secret location) and 5ffcb83 (fetcher namespace "fetcher-mt" ->
+      "fetcher"). Everything from the prior pin (0c8f640a) still applies on
+      top of this: real access_manager/ledger/tracer/console/bank_transfer/
+      reporter/fetcher convergence confirmed live end-to-end previously —
+      see git history on commits ae2e0c9, 89f72ac, 94c7d6c, 1948f2b, acd4ed5,
+      0d6e682, e49de1f, e904119 for that earlier chain of live-discovered
+      fixes.
+
+  # ---------------------------------------------------------------------------
+  # Access Manager (Casdoor) — authorizer (mother) credential + admin + license
+  # ---------------------------------------------------------------------------
+  AuthorizerClientId:
+    Type: String
+    Default: "ac56c81d4d6d95c0ac12"
+    Description: >-
+      Access Manager authorizer (platform M2M) client id. Default matches the
+      seeded Casdoor application "app-lerian" (files/init_data.json).
+  AuthorizerClientSecret:
+    Type: String
+    Default: "6add4bc64f394456a77fa85708ad8c9b67e39e4c"
+    NoEcho: true
+    Description: >-
+      Authorizer client secret. Default matches the seeded Casdoor value. Override
+      ONLY together with a custom init_data.json (hardening) — a mismatch breaks auth.
+  AccessManagerLicenseKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Lerian license key for the Access Manager (auth + identity). Required for licensed operation."
+  FetcherLicenseKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Lerian license key for Fetcher. Each licensed plugin has its own key."
+  FeesLicenseKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Lerian license key for the Fees plugin. Each licensed plugin has its own key."
+  BankTransferLicenseKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Lerian license key for the BR Bank Transfer plugin. Each licensed plugin has its own key."
+  AccessManagerOrganizationIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated organization IDs for the Access Manager (optional)."
+  LicenseUseDevGateway:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Validate every *LicenseKey against license.dev.lerian.io instead of the
+      production gateway (license.lerian.io). A license key is issued for ONE
+      specific gateway and is rejected outright (404 "License not found") by
+      the other — this must match how your keys were issued. Leave "false"
+      (the safe default) for real customer keys; only Lerian-internal sandbox
+      testing uses dev-gateway keys.
+
+  # ---------------------------------------------------------------------------
+  # OCI Helm registry auth (optional; for any PRIVATE OCI Helm charts, incl.
+  # the orchestrator chart itself if it ends up private)
+  # ---------------------------------------------------------------------------
+  HelmRegistryHost:
+    Type: String
+    Default: "ghcr.io"
+    Description: "OCI registry host for private Helm charts."
+  HelmRegistryUser:
+    Type: String
+    Default: ""
+    Description: "Registry username (leave empty to skip login — public charts only)."
+  HelmRegistryToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Registry token/password with read:packages (only needed if a chart is private)."
+
+  # ---------------------------------------------------------------------------
+  # Console configuration + ingress (forwarded into Platform.spec.modules.console
+  # valuesOverride — the operator/chart renders these, not this Lambda)
+  # ---------------------------------------------------------------------------
+  NextAuthUrl:
+    Type: String
+    Default: ""
+    Description: Full public URL for the product console (required for console auth)
+
+  EnableIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable ALB Ingress for the product console
+
+  IngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the console Ingress
+
+  IngressScheme:
+    Type: String
+    Default: "internet-facing"
+    AllowedValues: ["internal", "internet-facing"]
+    Description: ALB scheme
+
+  IngressCertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM Certificate ARN for HTTPS (optional)
+
+  # ---------------------------------------------------------------------------
+  # EnvironmentContract TLS — real AWS managed services (RDS/DocumentDB/
+  # ElastiCache/AmazonMQ/MSK) normally enforce in-transit TLS, so this template
+  # defaults TLS.Required=true on every endpoint. RESOLVED (was an open
+  # question): contract.go feeds TLS.CARef DIRECTLY into Inputs.RedisCACertB64
+  # (internal/contract/contract.go) — it is base64 PEM content itself, not a
+  # pointer to another resource. These are PUBLIC AWS CA bundles (no secret,
+  # safe to commit): the RDS/DocumentDB regional truststore
+  # (https://truststore.pki.rds.amazonaws.com/sa-east-1/sa-east-1-bundle.pem —
+  # the REGIONAL bundle, not the ~220KB global one, which overflows the
+  # bootstrap init container's ARG_MAX per an earlier finding) concatenated
+  # with Amazon Root CA 1 (https://www.amazontrust.com/repository/AmazonRootCA1.pem,
+  # which backs ElastiCache/AmazonMQ/MSK TLS) into one combined PEM, base64'd.
+  # One shared bundle applied to every endpoint is fine here — an extra
+  # unrelated CA in the trust chain is harmless. Region-specific: this default
+  # is sa-east-1 (lerian-plat-sbx2); re-fetch the RDS regional bundle for the
+  # target region's truststore path if deploying elsewhere.
+  # ---------------------------------------------------------------------------
+  EnvironmentContractCARef:
+    Type: String
+    Default: ""
+    Description: >-
+      Base64 PEM CA bundle backing EnvironmentContract.spec.<service>.tls.caRef
+      for every endpoint (fed directly into Inputs.*CACertB64 by contract.go).
+      Left empty by default: CloudFormation String Parameters cap at 4096
+      characters (cfn-lint E2011), and this bundle is ~7.7KB base64 — too big
+      for a Parameter. The Lambda body embeds a real, working fallback
+      (DEFAULT_CA_BUNDLE_B64, sa-east-1 RDS/DocumentDB regional truststore +
+      Amazon Root CA 1 — both public AWS CA bundles, no secret) and uses this
+      Parameter only as an override for a different region/bundle.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # Secret presence — in dedicated topology an app may not use every data service.
+  HasRDSSecret: !Not [!Equals [!Ref RDSSecretArn, ""]]
+  HasDocumentDBSecret: !Not [!Equals [!Ref DocumentDBSecretArn, ""]]
+  HasAmazonMQSecret: !Not [!Equals [!Ref AmazonMQSecretArn, ""]]
+  HasElastiCacheSecret: !Not [!Equals [!Ref ElastiCacheSecretArn, ""]]
+  HasElastiCacheKMS: !Not [!Equals [!Ref ElastiCacheKMSKeyArn, ""]]
+  HasMSKCluster: !Not [!Equals [!Ref MSKClusterArn, ""]]
+  HasMSKSecret: !Not [!Equals [!Ref MSKSecretArn, ""]]
+  HasMSKKMS: !Not [!Equals [!Ref MSKKMSKeyArn, ""]]
+  HasKMSKeys: !And
+    - !Not [!Equals [!Ref RDSKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref DocumentDBKMSKeyArn, ""]]
+    - !Not [!Equals [!Ref AmazonMQKMSKeyArn, ""]]
+
+Resources:
+  # ===========================================================================
+  # LAMBDA EXECUTION ROLE (reused as-is from helm.yaml — same EKS access entry
+  # mechanism, same Secrets Manager / KMS / MSK / CloudWatch policy shapes)
+  # ===========================================================================
+  DeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-orchestrator-deployer-role"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EKSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                  - eks:ListClusters
+                Resource: !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !If [HasRDSSecret, !Ref RDSSecretArn, !Ref "AWS::NoValue"]
+                  - !If [HasDocumentDBSecret, !Ref DocumentDBSecretArn, !Ref "AWS::NoValue"]
+                  - !If [HasElastiCacheSecret, !Ref ElastiCacheSecretArn, !Ref "AWS::NoValue"]
+                  - !If [HasAmazonMQSecret, !Ref AmazonMQSecretArn, !Ref "AWS::NoValue"]
+                  - !If [HasMSKSecret, !Ref MSKSecretArn, !Ref "AWS::NoValue"]
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !If
+                  - HasKMSKeys
+                  - - !Ref RDSKMSKeyArn
+                    - !Ref DocumentDBKMSKeyArn
+                    - !Ref AmazonMQKMSKeyArn
+                    - !If [HasElastiCacheKMS, !Ref ElastiCacheKMSKeyArn, !Ref "AWS::NoValue"]
+                    - !If [HasMSKKMS, !Ref MSKKMSKeyArn, !Ref "AWS::NoValue"]
+                  - - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+        - PolicyName: MSKAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kafka:GetBootstrapBrokers
+                Resource: !If [HasMSKCluster, !Ref MSKClusterArn, !Sub "arn:aws:kafka:${AWS::Region}:${AWS::AccountId}:cluster/*"]
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # ===========================================================================
+  # EKS ACCESS ENTRY FOR LAMBDA ROLE (reused as-is — this access mechanism
+  # already works and is not reinvented here)
+  # ===========================================================================
+  DeployerAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt DeployerRole.Arn
+      Type: STANDARD
+      AccessPolicies:
+        - AccessScope:
+            Type: cluster
+          PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+  # ===========================================================================
+  # LAMBDA FUNCTION
+  # ===========================================================================
+  DeployerFunction:
+    # checkov:skip=CKV_AWS_116:Deployer Lambda is one-shot during stack lifecycle, DLQ not applicable
+    # checkov:skip=CKV_AWS_117:Deployer Lambda requires internet access for chart/tool download
+    # checkov:skip=CKV_AWS_173:Environment variables contain non-sensitive references (ARNs, endpoints) only
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-orchestrator-deployer"
+      Description: >-
+        Installs the platform-orchestrator controller onto EKS and hands off
+        module lifecycle to it via the EnvironmentContract + Platform CRDs
+        (replaces helm.yaml's per-app helm-install loop).
+      Runtime: python3.13
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 1024
+      ReservedConcurrentExecutions: 1
+      Role: !GetAtt DeployerRole.Arn
+      Environment:
+        Variables:
+          CLUSTER_NAME: !Ref ClusterName
+          PROJECT_NAME: !Ref ProjectName
+          PLATFORM_NAMESPACE: !Ref PlatformNamespace
+          OPERATOR_NAMESPACE: !Ref OperatorNamespace
+          # AWS_DEFAULT_REGION / AWS_REGION are injected by the Lambda runtime.
+          # Data connections
+          RDS_ENDPOINT: !Ref RDSEndpoint
+          RDS_REPLICA_ENDPOINT: !Ref RDSReplicaEndpoint
+          RDS_SECRET_ARN: !Ref RDSSecretArn
+          DOCUMENTDB_ENDPOINT: !Ref DocumentDBEndpoint
+          DOCUMENTDB_SECRET_ARN: !Ref DocumentDBSecretArn
+          ELASTICACHE_ENDPOINT: !Ref ElastiCacheEndpoint
+          ELASTICACHE_SECRET_ARN: !Ref ElastiCacheSecretArn
+          AMAZONMQ_ENDPOINT: !Ref AmazonMQEndpoint
+          AMAZONMQ_SECRET_ARN: !Ref AmazonMQSecretArn
+          MSK_CLUSTER_ARN: !Ref MSKClusterArn
+          MSK_SECRET_ARN: !Ref MSKSecretArn
+          # Per-app S3
+          REPORTER_S3_BUCKET: !Ref ReporterStorageBucketName
+          FETCHER_S3_BUCKET: !Ref FetcherStorageBucketName
+          OBJECT_STORAGE_ROLE_ARN: !Ref ObjectStorageRoleArn
+          # Flags
+          ENABLE_LEDGER: !Ref EnableLedger
+          ENABLE_REPORTER: !Ref EnableReporter
+          ENABLE_TRACER: !Ref EnableTracer
+          ENABLE_FETCHER: !Ref EnableFetcher
+          ENABLE_CONSOLE: !Ref EnableConsole
+          ENABLE_ACCESS_MANAGER: !Ref EnableAccessManager
+          ENABLE_BANK_TRANSFER: !Ref EnableBankTransfer
+          ENABLE_FEES: !Ref EnableFees
+          # Access Manager (authorizer/license)
+          AUTHORIZER_CLIENT_ID: !Ref AuthorizerClientId
+          AUTHORIZER_CLIENT_SECRET: !Ref AuthorizerClientSecret
+          ACCESS_MANAGER_LICENSE_KEY: !Ref AccessManagerLicenseKey
+          FETCHER_LICENSE_KEY: !Ref FetcherLicenseKey
+          FEES_LICENSE_KEY: !Ref FeesLicenseKey
+          BANK_TRANSFER_LICENSE_KEY: !Ref BankTransferLicenseKey
+          ACCESS_MANAGER_ORGANIZATION_IDS: !Ref AccessManagerOrganizationIds
+          LICENSE_USE_DEV_GATEWAY: !Ref LicenseUseDevGateway
+          # OCI registry auth (private charts)
+          HELM_REGISTRY_HOST: !Ref HelmRegistryHost
+          HELM_REGISTRY_USER: !Ref HelmRegistryUser
+          HELM_REGISTRY_TOKEN: !Ref HelmRegistryToken
+          # Orchestrator chart coordinates
+          ORCHESTRATOR_CHART_REPO: !Ref OrchestratorChartRepo
+          ORCHESTRATOR_CHART_VERSION: !Ref OrchestratorChartVersion
+          # Module chart versions (rendered into Platform.spec.modules.<name>.version)
+          LEDGER_VERSION: !Ref LedgerChartVersion
+          REPORTER_VERSION: !Ref ReporterChartVersion
+          TRACER_VERSION: !Ref TracerChartVersion
+          FETCHER_VERSION: !Ref FetcherChartVersion
+          CONSOLE_VERSION: !Ref ConsoleChartVersion
+          ACCESS_MANAGER_VERSION: !Ref AccessManagerChartVersion
+          BANK_TRANSFER_VERSION: !Ref BankTransferChartVersion
+          FEES_VERSION: !Ref FeesChartVersion
+          # Console / ingress (forwarded as-is; the operator/chart renders them)
+          NEXTAUTH_URL: !Ref NextAuthUrl
+          ENABLE_INGRESS: !Ref EnableIngress
+          INGRESS_HOSTNAME: !Ref IngressHostname
+          INGRESS_SCHEME: !Ref IngressScheme
+          INGRESS_CERTIFICATE_ARN: !Ref IngressCertificateArn
+          # EnvironmentContract TLS
+          ENVIRONMENT_CONTRACT_CA_REF: !Ref EnvironmentContractCARef
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import base64
+          import logging
+          import socket
+          import subprocess
+          import tarfile
+          import stat
+          import time
+          import urllib.request
+
+          import boto3
+
+          # AWS Lambda's (non-VPC) sandbox has no real outbound IPv6 route, but
+          # dl.k8s.io / get.helm.sh are dual-stack and return AAAA records —
+          # urllib's IPv6-first connection attempt then fails fast-ish with
+          # "urlopen error [Errno 99] Cannot assign requested address", which
+          # aborts install_tools() below before it ever reaches kubectl/helm
+          # over IPv4. Force every getaddrinfo() call (urllib goes through
+          # socket under the hood) to IPv4-only so those downloads use the
+          # route that actually works. S3 (ResponseURL) is unaffected either
+          # way since it already resolves IPv4-first for us.
+          _orig_getaddrinfo = socket.getaddrinfo
+          def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+              return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+          socket.getaddrinfo = _ipv4_only_getaddrinfo
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          # sa-east-1 RDS/DocumentDB regional truststore + Amazon Root CA 1,
+          # concatenated, base64'd — public AWS CA bundles, no secret. See
+          # EnvironmentContractCARef's Parameter comment for provenance/URLs.
+          # ENVIRONMENT_CONTRACT_CA_REF overrides this for another region/bundle.
+          DEFAULT_CA_BUNDLE_B64 = (
+              "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUQvakNDQXVhZ0F3SUJBZ0lRZE9DU3VBOXBzQnBRZDhFSTM2OC8wREFOQmdrcWhraUc5dzBCQVFzRkFEQ0IKbHpFTE1Ba0dBMVVFQmhNQ1ZWTXhJakFnQmdOVkJBb01HVUZ0WVhwdmJpQlhaV0lnVTJWeWRtbGpaWE1zSUVsdQpZeTR4RXpBUkJnTlZCQXNNQ2tGdFlYcHZiaUJTUkZNeEN6QUpCZ05WQkFnTUFsZEJNVEF3TGdZRFZRUUREQ2RCCmJXRjZiMjRnVWtSVElITmhMV1ZoYzNRdE1TQlNiMjkwSUVOQklGSlRRVEl3TkRnZ1J6RXhFREFPQmdOVkJBY00KQjFObFlYUjBiR1V3SUJjTk1qRXdOVEU1TVRnd05qSTJXaGdQTWpBMk1UQTFNVGt4T1RBMk1qWmFNSUdYTVFzdwpDUVlEVlFRR0V3SlZVekVpTUNBR0ExVUVDZ3daUVcxaGVtOXVJRmRsWWlCVFpYSjJhV05sY3l3Z1NXNWpMakVUCk1CRUdBMVVFQ3d3S1FXMWhlbTl1SUZKRVV6RUxNQWtHQTFVRUNBd0NWMEV4TURBdUJnTlZCQU1NSjBGdFlYcHYKYmlCU1JGTWdjMkV0WldGemRDMHhJRkp2YjNRZ1EwRWdVbE5CTWpBME9DQkhNVEVRTUE0R0ExVUVCd3dIVTJWaApkSFJzWlRDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTjZmdEw2dzh2M2RCMnlXCkxqQ3hTUDFEN1pzT1RlTFpPU0N6MVp2MEdrZDBYTGhpbDVNZEhPSEJ2d0gvRHJYcUZVMm9HekNSdUF5K2FaaXMKRGFyZEpVNkNoeUlRSWNpWENPMzdmMEsyM2VkaHRwWHVydVRMTHdVd3plRVBkY25MUENYK3NXRW45WTVGUG5WbQpwQ2Q2SjhlZEgySWZTR29hOUxkRXJrcHVFU1hkaWRMeW0vdzB0V0cvTzJCeTRUYWJrTlNtcGRyQ0wwMGNxSStjCnByQThCeDFqWDgvOXNZMGdwQW92dHVGYVJOK0l2ZzNQQW5XdWhxaVNZeVE1bkMycURwYXJPV3VEaU9ocFk1NkUKRWdtVHZqd3FNTWpOdEV4Zll4NlJ2Mk5kdTUwVHJpaU5LRVpCekV0a2Vrd1hJblR1cG1ZVHZjN1U4M1AvOTU5VgpVaVErV1NNQ0F3RUFBYU5DTUVBd0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFRmdRVTR1WUhkSDArCmJVZWg4MUVxMmw1L1JKYlcrdnN3RGdZRFZSMFBBUUgvQkFRREFnR0dNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUIKQVFCaHhjRXhKK3c3NGJ2RGtuclBaRFJnVGVNTFlnYlZKangyRXhINy9BYzVGWlpXY3BVcEZ3V01JSkp4dGV3SQpBbmhyeXpNM3RRWVlkNENHOU8rSXUwK2gvVlZmVzdlNE8zam9XVmt4Tk1iODIwa1FTRXd2WmZBNzhhSXRHd09ZCldTYUZOVlJ5bG9WaWNaUk5KU3liMVVMOUVpSjlsZGh4bTRMVFQwYXgrNG9udEk3elR4Nm42aDhTcjZyL1VPdlgKZDlUNWFVVUVOV2VvNk05akd1cEhObjNCb2J0TDdCWm0yb1M4d1g4SVZZajR0bDBxNVQ4OXpEaTJ4ME14YnNJVgo1Wmp3cUJRNUpXS3Y3QVNHUGIrejI4NlJqUEE5UjJrbkY0bEpWWnJZdU5WOTBySHZJL0VDeXQvSnJEcWVsakdMCkJMbDFXL1VzdlpvNmxkTElwb01iYnJiNQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCi0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLQpNSUlDcmpDQ0FqU2dBd0lCQWdJUkFNblJ4c0tMWXNjSlY4UXY1cFdiTDdzd0NnWUlLb1pJemowRUF3TXdnWll4CkN6QUpCZ05WQkFZVEFsVlRNU0l3SUFZRFZRUUtEQmxCYldGNmIyNGdWMlZpSUZObGNuWnBZMlZ6TENCSmJtTXUKTVJNd0VRWURWUVFMREFwQmJXRjZiMjRnVWtSVE1Rc3dDUVlEVlFRSURBSlhRVEV2TUMwR0ExVUVBd3dtUVcxaAplbTl1SUZKRVV5QnpZUzFsWVhOMExURWdVbTl2ZENCRFFTQkZRME16T0RRZ1J6RXhFREFPQmdOVkJBY01CMU5sCllYUjBiR1V3SUJjTk1qRXdOVEU1TVRneE5qQXhXaGdQTWpFeU1UQTFNVGt4T1RFMk1ERmFNSUdXTVFzd0NRWUQKVlFRR0V3SlZVekVpTUNBR0ExVUVDZ3daUVcxaGVtOXVJRmRsWWlCVFpYSjJhV05sY3l3Z1NXNWpMakVUTUJFRwpBMVVFQ3d3S1FXMWhlbTl1SUZKRVV6RUxNQWtHQTFVRUNBd0NWMEV4THpBdEJnTlZCQU1NSmtGdFlYcHZiaUJTClJGTWdjMkV0WldGemRDMHhJRkp2YjNRZ1EwRWdSVU5ETXpnMElFY3hNUkF3RGdZRFZRUUhEQWRUWldGMGRHeGwKTUhZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUNJRFlnQUVqRk9DWmdUTlZLeExLaFV4ZmZpREV2VExGaHJtSXFkTwpkS3FWZGdEb0VMRXpJSFdEZEMrMTlhRFBpdGJDWXRCVkhsNjVJVHUvOXBuNm1NVWw1aGhVTnRmWnVjNkErSXcxCnNCZTB2MHFJM3k5UTlIZFFZckdnZUhEaDhNNVA3RTJobzBJd1FEQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01CMEcKQTFVZERnUVdCQlM1TDcvOE0wVHpvQlprMzlQczdCa2ZUQjR5SlRBT0JnTlZIUThCQWY4RUJBTUNBWVl3Q2dZSQpLb1pJemowRUF3TURhQUF3WlFJd0k0M08wTnRXS1RnblZ2OXowTE81VU1aWWdTdmU3R3ZHVHdxa3RaWUNNT2JFCnJVSTRRZXJYTTlENkp3THkwOW1xQWpFQXlwZmtkTHlWV3RhRWxWRFV5SEZraWhBUzFJMW9VeGFhRHJ5bkxOUUsKT3UvQXkrbnMrSitHeXZ5RFVqQnBWVlcxCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0KLS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUYvekNDQStlZ0F3SUJBZ0lSQUpHWTlrWklUd2ZTUmFBUy9iU0JPdzh3RFFZSktvWklodmNOQVFFTUJRQXcKZ1pjeEN6QUpCZ05WQkFZVEFsVlRNU0l3SUFZRFZRUUtEQmxCYldGNmIyNGdWMlZpSUZObGNuWnBZMlZ6TENCSgpibU11TVJNd0VRWURWUVFMREFwQmJXRjZiMjRnVWtSVE1Rc3dDUVlEVlFRSURBSlhRVEV3TUM0R0ExVUVBd3duClFXMWhlbTl1SUZKRVV5QnpZUzFsWVhOMExURWdVbTl2ZENCRFFTQlNVMEUwTURrMklFY3hNUkF3RGdZRFZRUUgKREFkVFpXRjBkR3hsTUNBWERUSXhNRFV4T1RFNE1URXlNRm9ZRHpJeE1qRXdOVEU1TVRreE1USXdXakNCbHpFTApNQWtHQTFVRUJoTUNWVk14SWpBZ0JnTlZCQW9NR1VGdFlYcHZiaUJYWldJZ1UyVnlkbWxqWlhNc0lFbHVZeTR4CkV6QVJCZ05WQkFzTUNrRnRZWHB2YmlCU1JGTXhDekFKQmdOVkJBZ01BbGRCTVRBd0xnWURWUVFERENkQmJXRjYKYjI0Z1VrUlRJSE5oTFdWaGMzUXRNU0JTYjI5MElFTkJJRkpUUVRRd09UWWdSekV4RURBT0JnTlZCQWNNQjFObApZWFIwYkdVd2dnSWlNQTBHQ1NxR1NJYjNEUUVCQVFVQUE0SUNEd0F3Z2dJS0FvSUNBUURlMnZsRHA2RW80V1FpCldpMzJZSk9nZFhIaHhURnJMakI5U1J5MjJEWW9NYVdmZ2luSkl3SmNTUjh5c2U4WkRRdW9OaEVSQjlMUmdnQUUKZW5nMjNtaHJmdnRMMXlRa01sWmZCdTR2RzFuT2IyMlhpUEZ6azdYMndxei9XaWdkWU5CQ3FhMWtLM2pyTHFQeApZVXk3amsyb1psZTRHTFZSVE5HdU1mY2lkNlMyaHMzVUNkWGZrSnVNMnoyd2MzV1VsdkhvVk5rMzd2Mi9qelIvCmhTQ0hadjVZSEF0ekwva0xiL2U2NFFrcXhLbGw1UW1LaHlJNmQ3dnQ2THIxQzB6YitEbXd4VW9KaHNlQVMwaEkKZFJrNURrbE1iNEFxcGo2S04wc3MwSEFZcVlFUkdSSVFNN0tLQTQraHhETVVrSm10OEtxV0taa0FsQ1pnZmx6bAptOE5aMzFvMmN2QnpmNmcrVkZIeCs2aVZyU2tvaFZReWRrQ3h4N05KNzQzaVBLc2g4Qnl0U000cVU3eHg0T25ECkgyeU5YY3lwdStENWJablZacjRQeXdxMHcwV3FiVE0yYnBZdGhHOUlDNEplVlV2WjJtRGMwMWxxT2xiTWV5ZlQKb2c1QlJQTERYZFpLOGxhcG83c2UydGVoNjRjSWZYdENtTTJsRFN3bTF3bkgyaVNLK0FXWlZJTTNpRTQ1V1NHYwp2WitkckhmVmdqSko1dTFZck1DV05MNUMydXRGYnlGOU9idzlaQXdtNjFNU2JQUUw5Snd6bmhObENoN0YyQU5XClpIV1FQTmNPQUpxekU0dVZjSkIxWmVWbDI4T1JZWTE2NjhseCtzOXlZZU1YazNRUWRqNHhtZG52b0JGZ2dxUkIKWlI2WjBEN1pvaEFEWGUwMjRSekVvMVR1a3JRZ0tRSURBUUFCbzBJd1FEQVBCZ05WSFJNQkFmOEVCVEFEQVFILwpNQjBHQTFVZERnUVdCQlQ3VnM0WTV1Ry85YVhuWUdOTUVzNnljUFVUM2pBT0JnTlZIUThCQWY4RUJBTUNBWVl3CkRRWUpLb1pJaHZjTkFRRU1CUUFEZ2dJQkFDTjRIdHAyUHZHY1FBMC9zQVMrcVVWV1dKb0FYU3N1OFBnYzZHYXIKN3RLVmxOSi80Vy9hNnBVVjJYby9UejNtc2c0eWlFOHNNRVNwMmsrVVNvc0Q1bjlBbGFpNXM1cXBXRFFqcnFyaAo3NkFHeUYybnp2ZTRrSU4xOUdBcllobTRNei9FS0VHMVFIWXZCREdnWGkza052TC9hMlpieWJwKzNMZXZHK3E3Cnh0eDRTejl5SXlNenVULzZZN2lqdGlNWjlYYnV4R2Y1d2FiOFV0d1QzWHExVXJhZEp5MEtDa3pSSkF6L1d5L1gKSGJUa0V2S1NhWUtFeEg2c0xvMGpxZElqVi9kMklvMzFndDRlMEx5MUVSMndQeUZhK3BjL3N3dTdIQ3pyTitpegpBMlpNNCtLWDluQnZGeWZrSExpeDRyQUxnK1dUWUphL2RJc09iWGtkWjN6OHFQZjVBOVBYbFVMaWFhMW1jUDQrCnJva3c3NEl5TEVZb29ROGlTT2p4dW1YaG5rVFM2OU1BZEd6WFlFNWduSG9rQUJ0R0QrQkI1cUxodEx0NGZxQXAKOEF5SHBRV015VjQyTTlTSkx6UStpT3o3a0FnSk9CT2FWdEpJM0ZWL2lBZy9lcVdWbTN5THVVVFdEeFNIckt1TApOMTkrcFNqRjZUTnZVU0ZYd0VhMkxKa2ZEcUlPQ0UzMmlPdXk4NVFZLy8zTnNnclNRRjZVa1NQYTk1ZUpyU0dJCjNoVFJZWWgzVXAyR2hCR2wxS1V5Ny9vMGszS1JaVGs0czM4ZnlsWThiWjNUYWtVT0g1aUlHb0h5RlZWY3AzNjEKUHl5MjVTekZTbU5hbFdvUWQ5d1pWYy9DcHMybGR4aGN0dE0rV0xrRk56cHJkMFZKYThxVHo4dll0SFAwb3VETgpuV1MwCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0KLS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURRVENDQWltZ0F3SUJBZ0lUQm15Zno1bS9qQW81NHZCNGlrUG1salpieWpBTkJna3Foa2lHOXcwQkFRc0YKQURBNU1Rc3dDUVlEVlFRR0V3SlZVekVQTUEwR0ExVUVDaE1HUVcxaGVtOXVNUmt3RndZRFZRUURFeEJCYldGNgpiMjRnVW05dmRDQkRRU0F4TUI0WERURTFNRFV5TmpBd01EQXdNRm9YRFRNNE1ERXhOekF3TURBd01Gb3dPVEVMCk1Ba0dBMVVFQmhNQ1ZWTXhEekFOQmdOVkJBb1RCa0Z0WVhwdmJqRVpNQmNHQTFVRUF4TVFRVzFoZW05dUlGSnYKYjNRZ1EwRWdNVENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFMSjRnSEhLZU5YagpjYTlIZ0ZCMGZXN1kxNGgyOUpsbzkxZ2hZUGwwaEFFdnJBSXRodE9nUTNwT3NxVFFOcm9Cdm8zYlNNZ0hGelpNCjlPNklJOGMrNnpmMXRSbjRTV2l3M3RlNWRqZ2RZWjZrL29JMnBlVktWdVJGNGZuOXRCYjZkTnFjbXpVNUwvcXcKSUZBR2JIclFnTEttK2Evc1J4bVBVRGdIM0tLSE9WajR1dFdwK1Vobk1KYnVsSGhlYjRtalVjQXdobWFoUldhNgpWT3VqdzVINVNOei8wZWd3TFgwdGRIQTExNGdrOTU3RVdXNjdjNGNYOGpKR0tMaEQrcmNkcXNxMDhwOGtEaTFMCjkzRmNYbW4vNnBVQ3l6aUtybEE0Yjl2N0xXSWJ4Y2NlVk9GMzRHZklENXlISTlZL1FDQi9JSURFZ0V3K095UW0KamdTdWJKcklxZzBDQXdFQUFhTkNNRUF3RHdZRFZSMFRBUUgvQkFVd0F3RUIvekFPQmdOVkhROEJBZjhFQkFNQwpBWVl3SFFZRFZSME9CQllFRklRWXpJVTA3THdNbEpRdUNGbWN4N0lRVGdvSU1BMEdDU3FHU0liM0RRRUJDd1VBCkE0SUJBUUNZOGpkYVFaQ2hHc1YyVVNnZ05pTU9ydVlvdTZyNGxLNUlwREIvRy93a2pVdTB5S0dYOXJieGVuREkKVTVQTUNDamptQ1hQSTZUNTNpSFRmSVVKclU2YWRUckNDMnFKZUhaRVJ4aGxiSTFCamp0L21zdjB0YWRRMXdVcwpOK2dEUzYzcFlhQUNidlh5OE1XeTdWdTMzUHFVWEhlZUU2Vi9VcTJWOHZpVE85NkxYRnZLV2xKYllLOFU5MHZ2Cm8vdWZRSlZ0TVZUOFF0UEhSaDhqcmRrUFNIQ2EyWFY0Y2RGeVF6UjFibGRad2dKY0ptQXB6eU1aRm82SVE2WFUKNU1zSSt5TVJRK2hES1hKaW9hbGRYZ2pVa0s2NDJNNFV3dEJWOG9iMnhKTkRkMlpod0xub1FkZVhlR0FEYmtweQpycVhSZmJvUW5vWnNHNHE1V1RQNDY4U1F2dkc1Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+          )
+
+          # ---------------------------------------------------------------------
+          # Module catalog. Mirrors helm.yaml's REGISTRY 1:1 (same release names /
+          # namespaces / chart repos), confirmed against platform-orchestrator's
+          # internal/modules/catalog/*.go (module Name fields match these keys
+          # exactly: access_manager, ledger, tracer, fetcher, reporter, fees,
+          # bank_transfer, console). Unlike helm.yaml, this dict is used only to
+          # render Platform.spec.modules — the operator does the actual helm
+          # install/upgrade per module, not this Lambda.
+          # ---------------------------------------------------------------------
+          # bucket_env: the S3 bucket env var this module's ModuleSpec.bucket
+          # field should be populated from (None for modules with no object-
+          # storage need). Absent/unset here left `spec.modules.<X>.bucket`
+          # permanently empty regardless of EnableReporter/EnableFetcher or
+          # the ReporterStorageBucket/FetcherStorageBucket CFN resources
+          # actually existing — confirmed live: reporter/fetcher pods crashed
+          # with "bucket name is required" — see render_platform below.
+          # namespace: mirrors each module's hardcoded Namespace field in its
+          # platform-orchestrator catalog entry (internal/modules/catalog/*.go)
+          # — needed by purge_module_helm_releases() below, since the Lambda
+          # itself never renders per-module namespaces into the Platform CR
+          # (that assignment is entirely internal to the Go operator).
+          REGISTRY = {
+              "access_manager": {"enable": "ENABLE_ACCESS_MANAGER", "version_env": "ACCESS_MANAGER_VERSION",
+                                  "license_env": "ACCESS_MANAGER_LICENSE_KEY", "bucket_env": None,
+                                  "namespace": "plugin-access-manager"},
+              "ledger": {"enable": "ENABLE_LEDGER", "version_env": "LEDGER_VERSION", "license_env": None,
+                         "bucket_env": None, "namespace": "midaz"},
+              "tracer": {"enable": "ENABLE_TRACER", "version_env": "TRACER_VERSION", "license_env": None,
+                         "bucket_env": None, "namespace": "tracer"},
+              "fetcher": {"enable": "ENABLE_FETCHER", "version_env": "FETCHER_VERSION",
+                          "license_env": "FETCHER_LICENSE_KEY", "bucket_env": "FETCHER_S3_BUCKET",
+                          "namespace": "fetcher"},
+              "reporter": {"enable": "ENABLE_REPORTER", "version_env": "REPORTER_VERSION", "license_env": None,
+                           "bucket_env": "REPORTER_S3_BUCKET", "namespace": "reporter"},
+              "fees": {"enable": "ENABLE_FEES", "version_env": "FEES_VERSION", "license_env": "FEES_LICENSE_KEY",
+                       "bucket_env": None, "namespace": "plugin-fees"},
+              "bank_transfer": {"enable": "ENABLE_BANK_TRANSFER", "version_env": "BANK_TRANSFER_VERSION",
+                                 "license_env": "BANK_TRANSFER_LICENSE_KEY", "bucket_env": None,
+                                 "namespace": "plugin-br-bank-transfer"},
+              "console": {"enable": "ENABLE_CONSOLE", "version_env": "CONSOLE_VERSION", "license_env": None,
+                          "bucket_env": None, "namespace": "product-console"},
+          }
+
+          def purge_module_helm_releases():
+              # On Delete, this Lambda is the ONLY installer of these module
+              # releases in this delivery model — no GitOps consumes it (that's
+              # an aspirational future model, not how this CFN product works
+              # today). Leaving releases behind on every teardown means the
+              # NEXT create-stack, or CFN's own internal "delete the failed
+              # resource, then retry create" cycle on a failed attempt, collides
+              # on Helm ownership metadata with a release CFN itself orphaned.
+              # Confirmed live: reporter/console/ledger/tracer all failed
+              # "invalid ownership metadata" against a still-there prior
+              # attempt's release after nothing but a plain create-then-retry.
+              seen_ns = set()
+              for app, m in REGISTRY.items():
+                  enabled = os.environ.get(m['enable'], 'false').lower() == 'true'
+                  ns = m.get('namespace')
+                  if not enabled or not ns or ns in seen_ns:
+                      continue
+                  seen_ns.add(ns)
+                  out = run(['helm', 'list', '-n', ns, '-o', 'json'], check=False)
+                  try:
+                      releases = json.loads(out or '[]')
+                  except json.JSONDecodeError:
+                      releases = []
+                  for rel in releases:
+                      name = rel.get('name', '')
+                      if name.startswith('lp-'):
+                          run(['helm', 'uninstall', name, '-n', ns], check=False)
+
+          # =====================================================================
+          # CloudFormation response
+          # =====================================================================
+          def send_response(event, context, status, data=None, reason=None):
+              body = {
+                  'Status': status,
+                  'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',
+                  'PhysicalResourceId': event.get('PhysicalResourceId', context.log_stream_name),
+                  'StackId': event['StackId'], 'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'], 'Data': data or {},
+              }
+              raw = json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(event['ResponseURL'], data=raw, method='PUT')
+              req.add_header('Content-Type', '')
+              req.add_header('Content-Length', str(len(raw)))
+              try:
+                  urllib.request.urlopen(req)
+                  logger.info(f"Response sent: {status}")
+              except Exception as e:
+                  logger.error(f"Failed to send response: {e}")
+
+          # =====================================================================
+          # Tooling / cluster access — REUSED VERBATIM from helm.yaml's Lambda
+          # (install_tools / eks_token / setup_kubeconfig). No git layer needed
+          # here: this template drops the GitOps-seeder mode entirely, so the
+          # `install_git` path from helm.yaml is intentionally NOT carried over.
+          # =====================================================================
+          def run(cmd, check=True, env=None, input_text=None):
+              logger.info("Running: " + " ".join(cmd))
+              r = subprocess.run(cmd, capture_output=True, text=True, env=env or os.environ,
+                                 input=input_text)
+              if r.stdout:
+                  logger.info(r.stdout[-4000:])
+              if r.returncode != 0:
+                  logger.error(r.stderr[-4000:])
+                  if check:
+                      raise Exception(f"Command failed: {' '.join(cmd)}: {r.stderr[-500:]}")
+              return r.stdout
+
+          def install_tools():
+              tmp = '/tmp'
+              os.environ['HOME'] = tmp
+              for d in ('cache', 'config', 'data'):
+                  os.makedirs(f'{tmp}/.helm/{d}', exist_ok=True)
+              os.environ['HELM_CACHE_HOME'] = f'{tmp}/.helm/cache'
+              os.environ['HELM_CONFIG_HOME'] = f'{tmp}/.helm/config'
+              os.environ['HELM_DATA_HOME'] = f'{tmp}/.helm/data'
+
+              def retrieve_with_retry(url, dest, attempts=4):
+                  # Public CDN hosts (dl.k8s.io / get.helm.sh) occasionally
+                  # black-hole this Lambda's shared egress IP for a stretch —
+                  # observed live as both "Cannot assign requested address"
+                  # (IPv6-preferred attempt, no local IPv6 route) and, after
+                  # forcing IPv4 above, "Connection timed out" (~15-17s, the
+                  # DNS/connect timeout) on a genuinely fresh cold start. Both
+                  # are transient per-attempt, not systemic — retry with
+                  # short backoff instead of failing the whole bootstrap.
+                  last_err = None
+                  for attempt in range(1, attempts + 1):
+                      try:
+                          urllib.request.urlretrieve(url, dest)
+                          return
+                      except Exception as e:
+                          last_err = e
+                          logger.warning(f"download attempt {attempt}/{attempts} failed for {url}: {e}")
+                          if attempt < attempts:
+                              time.sleep(3 * attempt)
+                  raise last_err
+
+              kubectl = f'{tmp}/kubectl'
+              if not os.path.exists(kubectl):
+                  retrieve_with_retry(
+                      'https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl', kubectl)
+                  os.chmod(kubectl, os.stat(kubectl).st_mode | stat.S_IEXEC)
+              helm = f'{tmp}/helm'
+              if not os.path.exists(helm):
+                  tgz = f'{tmp}/helm.tar.gz'
+                  retrieve_with_retry('https://get.helm.sh/helm-v3.14.0-linux-amd64.tar.gz', tgz)
+                  with tarfile.open(tgz, 'r:gz') as t:
+                      t.extractall(tmp)
+                  os.rename(f'{tmp}/linux-amd64/helm', helm)
+                  os.chmod(helm, os.stat(helm).st_mode | stat.S_IEXEC)
+              os.environ['PATH'] = f"{tmp}:{os.environ.get('PATH', '')}"
+
+          def eks_token(cluster_name):
+              from botocore.signers import RequestSigner
+              from botocore.model import ServiceId
+              sess = boto3.Session()
+              region = sess.region_name
+              signer = RequestSigner(ServiceId('sts'), region, 'sts', 'v4',
+                                     sess.get_credentials(), sess.events)
+              url = signer.generate_presigned_url(
+                  {'method': 'GET',
+                   'url': f'https://sts.{region}.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15',
+                   'body': {}, 'headers': {'x-k8s-aws-id': cluster_name}, 'context': {}},
+                  region_name=region, expires_in=60, operation_name='')
+              return 'k8s-aws-v1.' + base64.urlsafe_b64encode(url.encode()).decode().rstrip('=')
+
+          def setup_kubeconfig():
+              name = os.environ['CLUSTER_NAME']
+              c = boto3.client('eks').describe_cluster(name=name)['cluster']
+              kubeconfig = f'''apiVersion: v1
+          kind: Config
+          clusters:
+          - name: {name}
+            cluster:
+              server: {c['endpoint']}
+              certificate-authority-data: {c['certificateAuthority']['data']}
+          contexts:
+          - name: {name}
+            context:
+              cluster: {name}
+              user: aws
+          current-context: {name}
+          users:
+          - name: aws
+            user:
+              token: {eks_token(name)}
+          '''
+              path = '/tmp/kubeconfig'
+              with open(path, 'w') as f:
+                  f.write(kubeconfig)
+              os.environ['KUBECONFIG'] = path
+
+          def kubectl_apply(manifest):
+              path = '/tmp/manifest.yaml'
+              with open(path, 'w') as f:
+                  f.write(manifest)
+              run(['kubectl', 'apply', '-f', path])
+
+          def ensure_ns(ns):
+              run(['kubectl', 'create', 'namespace', ns], check=False)
+
+          def helm_registry_login():
+              user = os.environ.get('HELM_REGISTRY_USER', '').strip()
+              token = os.environ.get('HELM_REGISTRY_TOKEN', '').strip()
+              host = os.environ.get('HELM_REGISTRY_HOST', 'ghcr.io').strip()
+              if user and token:
+                  run(['helm', 'registry', 'login', host, '-u', user, '--password-stdin'],
+                      check=False, input_text=token)
+                  logger.info(f"helm registry login: {host} as {user}")
+
+          def get_secret(arn):
+              # Tolerant of empty ARN (a data service may not be provisioned).
+              if not arn:
+                  return {}
+              return json.loads(boto3.client('secretsmanager').get_secret_value(SecretId=arn)['SecretString'])
+
+          def get_redis_password():
+              arn = os.environ.get('ELASTICACHE_SECRET_ARN', '')
+              if not arn:
+                  return ''
+              try:
+                  return boto3.client('secretsmanager').get_secret_value(SecretId=arn)['SecretString']
+              except Exception as e:
+                  logger.warning(f"ElastiCache secret fetch failed: {e}")
+                  return ''
+
+          def get_msk_password():
+              arn = os.environ.get('MSK_SECRET_ARN', '')
+              return get_secret(arn).get('password', '') if arn else ''
+
+          def get_msk_username():
+              arn = os.environ.get('MSK_SECRET_ARN', '')
+              return get_secret(arn).get('username', '') if arn else ''
+
+          def get_msk_brokers():
+              # SASL/SCRAM (TLS) broker string — matches the SCRAM-SHA-512
+              # mechanism this contract always sets for kafka.mechanism below.
+              # The Lambda already carries kafka:GetBootstrapBrokers IAM
+              # permission (see DeployerRole's MSKAccess policy) for exactly
+              # this call; it was granted but never used, leaving
+              # kafka.brokers permanently empty — confirmed live: the
+              # operator's contract.go reads kafka.brokers VERBATIM, with NO
+              # runtime GetBootstrapBrokers resolution of its own (the
+              # previous "resolved by the caller/operator at runtime" comment
+              # here was incorrect).
+              arn = os.environ.get('MSK_CLUSTER_ARN', '')
+              if not arn:
+                  return ''
+              try:
+                  return boto3.client('kafka').get_bootstrap_brokers(ClusterArn=arn) \
+                      .get('BootstrapBrokerStringSaslScram', '')
+              except Exception as e:
+                  logger.warning(f"MSK bootstrap brokers fetch failed: {e}")
+                  return ''
+
+          def host_only(endpoint):
+              if not endpoint:
+                  return ''
+              e = endpoint.split('://')[-1]
+              return e.split(':')[0]
+
+          # =====================================================================
+          # Step 1 — install the platform-orchestrator controller itself.
+          # =====================================================================
+          def install_orchestrator():
+              helm_registry_login()
+              ns = os.environ['OPERATOR_NAMESPACE']
+              ensure_ns(ns)
+              repo = os.environ['ORCHESTRATOR_CHART_REPO']
+              version = os.environ['ORCHESTRATOR_CHART_VERSION']
+              # ASSUMPTION: repo/version above are UNVERIFIED (see the
+              # OrchestratorChartRepo parameter comment) — flagged prominently in
+              # the deploy report. The chart's own crds/ directory (confirmed
+              # present: platform.lerian.io_platforms.yaml, _modulereleases.yaml,
+              # _platformreleases.yaml, _environmentcontracts.yaml,
+              # _bootstrapoperations.yaml) is installed automatically by
+              # `helm install` — Helm always applies charts/<name>/crds/* before
+              # templates, so NO separate `kubectl apply` step for CRDs is needed.
+              run(['helm', 'upgrade', '--install', 'platform-orchestrator', repo,
+                   '--version', version, '--namespace', ns, '--create-namespace',
+                   '--wait', '--timeout', '10m'])
+
+          # =====================================================================
+          # Step 2 — resolve each configured Secrets Manager ARN and write a
+          # plain-value Kubernetes Secret per data service, shaped exactly as
+          # EnvironmentContract.spec.<service>.secretRef expects: keys
+          # "username"/"password" (PostgresEndpoint/MongoEndpoint/RedisEndpoint/
+          # AmqpEndpoint all reference a "<namespace>/<name>" Secret with those
+          # keys per api/v1alpha1/environmentcontract_types.go).
+          # =====================================================================
+          def secret_manifest(name, ns, data):
+              lines = "\n".join(f'  {k}: "{v}"' for k, v in data.items()) or '  {}: ""'
+              return (f"apiVersion: v1\nkind: Secret\n"
+                      f"metadata:\n  name: {name}\n  namespace: {ns}\n"
+                      f"type: Opaque\nstringData:\n{lines}\n")
+
+          def write_contract_secrets(ns):
+              rds = get_secret(os.environ.get('RDS_SECRET_ARN', ''))
+              docdb = get_secret(os.environ.get('DOCUMENTDB_SECRET_ARN', ''))
+              mq = get_secret(os.environ.get('AMAZONMQ_SECRET_ARN', ''))
+              redis_pw = get_redis_password()
+              msk_u, msk_p = get_msk_username(), get_msk_password()
+
+              refs = {}
+              if rds:
+                  kubectl_apply(secret_manifest("contract-postgres", ns,
+                      {"username": rds.get('username', ''), "password": rds.get('password', '')}))
+                  refs['postgres'] = f"{ns}/contract-postgres"
+              if docdb:
+                  kubectl_apply(secret_manifest("contract-mongo", ns,
+                      {"username": docdb.get('username', ''), "password": docdb.get('password', '')}))
+                  refs['mongo'] = f"{ns}/contract-mongo"
+              # RedisEndpoint's secretRef contract only documents username/password
+              # keys (no dedicated auth-token shape); ElastiCache auth is a single
+              # token, so it is written under both keys — same tolerant pattern
+              # helm.yaml already uses for REDIS_PASSWORD (username left empty).
+              if redis_pw:
+                  kubectl_apply(secret_manifest("contract-redis", ns,
+                      {"username": "", "password": redis_pw}))
+                  refs['redis'] = f"{ns}/contract-redis"
+              if mq:
+                  kubectl_apply(secret_manifest("contract-amqp", ns,
+                      {"username": mq.get('username', ''), "password": mq.get('password', '')}))
+                  refs['amqp'] = f"{ns}/contract-amqp"
+              if msk_u or msk_p:
+                  kubectl_apply(secret_manifest("contract-kafka", ns,
+                      {"username": msk_u, "password": msk_p}))
+                  refs['kafka'] = f"{ns}/contract-kafka"
+              return refs
+
+          # =====================================================================
+          # Step 3 — render + apply ONE EnvironmentContract from the infra env
+          # vars, secretRef pointing at the Secrets just created.
+          # TLS.Required=true by default (RDS/DocumentDB/ElastiCache/AmazonMQ/MSK
+          # all enforce in-transit TLS in this bundle's topology, mirroring
+          # helm.yaml's REDIS_TLS/DB_SSLMODE=require defaults). TLS.CARef comes
+          # from ENVIRONMENT_CONTRACT_CA_REF, which defaults to a real, public
+          # AWS CA bundle (RDS/DocumentDB regional truststore + Amazon Root CA 1,
+          # see the Parameter's own comment) — not a fabricated value.
+          # =====================================================================
+          def render_environment_contract(name, ns, refs):
+              region = os.environ.get('AWS_DEFAULT_REGION', 'sa-east-1')
+              ca_ref = os.environ.get('ENVIRONMENT_CONTRACT_CA_REF', '') or DEFAULT_CA_BUNDLE_B64
+              tls_block = f'\n      caRef: "{ca_ref}"' if ca_ref else ''
+
+              spec = ["apiVersion: platform.lerian.io/v1alpha1", "kind: EnvironmentContract",
+                      "metadata:", f"  name: {name}", f"  namespace: {ns}",
+                      "spec:", "  contractVersion: v1alpha1", f"  region: \"{region}\""]
+
+              if 'postgres' in refs:
+                  spec += [
+                      "  postgres:",
+                      f"    host: \"{host_only(os.environ['RDS_ENDPOINT'])}\"",
+                      "    port: \"5432\"",
+                      f"    secretRef: \"{refs['postgres']}\"",
+                      "    tls:",
+                      "      required: true" + tls_block,
+                  ]
+              if 'mongo' in refs:
+                  spec += [
+                      "  mongo:",
+                      f"    host: \"{host_only(os.environ['DOCUMENTDB_ENDPOINT'])}\"",
+                      "    port: \"27017\"",
+                      f"    secretRef: \"{refs['mongo']}\"",
+                      # Unlike postgres.ssl, the engine composes the Mongo URI's
+                      # params VERBATIM from this field (never synthesizes
+                      # cloud-specific query keys — see satisfiers.go's
+                      # composeMongoURI doc comment); DocumentDB enforces TLS
+                      # in-transit, so a Mongo driver without tls=true in the
+                      # connection string hangs with a server-selection timeout
+                      # instead of a clean rejection. Caught live: crm/ledger
+                      # "mongo ping failed: server selection error: context
+                      # deadline exceeded" against a genuinely `available`
+                      # DocumentDB cluster with a correct security group.
+                      # authSource=admin is also required: the connection uses
+                      # DocumentDB's master user (DocumentDBMasterUsername),
+                      # which only authenticates against the admin database.
+                      # tlsInsecure=true (standard Mongo driver flag) because
+                      # ledger/crm's own ALLOW_INSECURE_TLS app-level bypass did
+                      # NOT prevent full certificate-chain verification against
+                      # DocumentDB's own CA — caught live: "tls: failed to
+                      # verify certificate: x509: certificate signed by unknown
+                      # authority", even with ALLOW_INSECURE_TLS=true set. This
+                      # bundle has no CA distribution story yet (see
+                      # OrchestratorChartRepo's own "not a stable release"
+                      # caveat below); tlsInsecure=true is a sandbox-only
+                      # stand-in for a real tlsCAFile.
+                      "    params: \"tls=true&tlsInsecure=true&authSource=admin\"",
+                      "    tls:",
+                      "      required: true" + tls_block,
+                  ]
+              if 'redis' in refs:
+                  spec += [
+                      "  redis:",
+                      f"    host: \"{host_only(os.environ['ELASTICACHE_ENDPOINT'])}\"",
+                      "    port: \"6379\"",
+                      f"    secretRef: \"{refs['redis']}\"",
+                      "    tls:",
+                      "      required: true" + tls_block,
+                  ]
+              if 'amqp' in refs:
+                  spec += [
+                      "  amqp:",
+                      f"    host: \"{host_only(os.environ['AMAZONMQ_ENDPOINT'])}\"",
+                      f"    secretRef: \"{refs['amqp']}\"",
+                      "    tls:",
+                      "      required: true" + tls_block,
+                  ]
+              if 'kafka' in refs:
+                  spec += [
+                      "  kafka:",
+                      f"    brokers: \"{get_msk_brokers()}\"",
+                      f"    secretRef: \"{refs['kafka']}\"",
+                      "    mechanism: \"SCRAM-SHA-512\"",
+                      "    tls:",
+                      "      required: true" + tls_block,
+                  ]
+              # objectStorage: reporter/fetcher's S3 access (IRSA — no static
+              # keys). Was entirely absent from this function; the bucket
+              # names/role ARN reached the Lambda as env vars but nothing
+              # rendered them into the contract, so internal/modules/
+              # satisfiers.go's CapObjectStorage always resolved empty
+              # (confirmed live: reporter/fetcher pods crashed with "bucket
+              # name is required" / no S3 permissions). Emitted whenever the
+              # IRSA role exists — region alone is harmless with no bucket
+              # enabled; render_platform below is what actually gates a given
+              # module's bucket field on ITS OWN bucket env var being set.
+              role_arn = os.environ.get('OBJECT_STORAGE_ROLE_ARN', '')
+              if role_arn:
+                  spec += [
+                      "  objectStorage:",
+                      f"    region: \"{region}\"",
+                      "    serviceAccountMetadata:",
+                      "      type: \"irsa\"",
+                      f"      roleArn: \"{role_arn}\"",
+                  ]
+              return "\n".join(spec) + "\n"
+
+          # =====================================================================
+          # Step 4 — render + apply ONE Platform: spec.modules.<name> for each of
+          # the 8 apps + spec.authorizer, reusing the ENABLE_*/ *_VERSION /
+          # *_LICENSE_KEY parameter names verbatim (drop-in for helm.yaml callers).
+          # NOTE: spec.profile is intentionally left unset — resolvePlatformReleaseSpec
+          # (internal/controller/helpers.go) derives the module set from
+          # spec.modules[*].enabled, not from a catalog profile; profile only
+          # feeds the BOM-hash identity string. Confirmed by reading that function.
+          # =====================================================================
+          def render_platform(name, ns, contract_name, license_secrets):
+              authz_id = os.environ.get('AUTHORIZER_CLIENT_ID', '')
+              authz_secret = os.environ.get('AUTHORIZER_CLIENT_SECRET', '')
+              org_ids = os.environ.get('ACCESS_MANAGER_ORGANIZATION_IDS', '')
+
+              lines = [
+                  "apiVersion: platform.lerian.io/v1alpha1", "kind: Platform",
+                  "metadata:", f"  name: {name}", f"  namespace: {ns}",
+                  "spec:",
+                  f"  environmentContractRef: {contract_name}",
+                  "  delivery: helm",
+                  "  authorizer:",
+                  f"    clientId: \"{authz_id}\"",
+                  f"    clientSecret: \"{authz_secret}\"",
+                  f"    organizationIds: \"{org_ids}\"",
+                  "  modules:",
+              ]
+              for app, m in REGISTRY.items():
+                  enabled = os.environ.get(m['enable'], 'false').lower() == 'true'
+                  version = os.environ.get(m['version_env'], '')
+                  lines.append(f"    {app}:")
+                  lines.append(f"      enabled: {'true' if enabled else 'false'}")
+                  lines.append(f"      version: \"{version}\"")
+                  lic_ref = license_secrets.get(app, '')
+                  if lic_ref:
+                      lines.append(f"      licenseSecretRef: \"{lic_ref}\"")
+                  bucket_env = m.get('bucket_env')
+                  bucket = os.environ.get(bucket_env, '') if bucket_env else ''
+                  if bucket:
+                      lines.append(f"      bucket: \"{bucket}\"")
+              return "\n".join(lines) + "\n"
+
+          def write_license_secrets(ns):
+              # licenseSecretRef points at "<namespace>/<name>" with key LICENSE_KEY
+              # (api/v1alpha1/platform_types.go ModuleSpec.LicenseSecretRef).
+              refs = {}
+              for app, m in REGISTRY.items():
+                  if not m['license_env']:
+                      continue
+                  key = os.environ.get(m['license_env'], '')
+                  if not key:
+                      continue
+                  # K8s object names are RFC 1123 (lowercase alnum + '-' only);
+                  # REGISTRY keys like "access_manager"/"bank_transfer" use '_'
+                  # (they mirror the Go module names), so sanitize before using
+                  # one as a Secret name.
+                  name = f"{app.replace('_', '-')}-license"
+                  # IS_DEVELOPMENT is co-located with the key it applies to (a key
+                  # is issued against one specific gateway, dev or prod) — the
+                  # customer's own input via LicenseUseDevGateway, never a
+                  # hardcoded literal (a key issued for one gateway 404s outright
+                  # on the other; internal/contract/contract.go reads this same
+                  # key alongside LICENSE_KEY).
+                  dev_gateway = os.environ.get('LICENSE_USE_DEV_GATEWAY', 'false')
+                  kubectl_apply(secret_manifest(name, ns,
+                      {"LICENSE_KEY": key, "IS_DEVELOPMENT": dev_gateway}))
+                  refs[app] = f"{ns}/{name}"
+              return refs
+
+          # =====================================================================
+          # Step 5 — CFN is the "provisioner" here: patch EnvironmentContract's
+          # status to Ready=True once the Secrets + spec above are applied. This
+          # mirrors exactly the hand-patch used during in-cluster testing of the
+          # orchestrator (Contract.Status is provisioner-owned; the operator only
+          # reads it — api/v1alpha1/environmentcontract_types.go).
+          # =====================================================================
+          def patch_contract_ready(name, ns):
+              now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+              patch = {
+                  "status": {
+                      "conditions": [{
+                          "type": "Ready", "status": "True",
+                          "reason": "ProvisionerReported", "lastTransitionTime": now,
+                          "message": "Infra coordinates resolved by the CloudFormation provisioner",
+                      }],
+                      "observedContractVersion": "v1alpha1",
+                  }
+              }
+              path = '/tmp/contract-status-patch.json'
+              with open(path, 'w') as f:
+                  json.dump(patch, f)
+              run(['kubectl', '-n', ns, 'patch', 'environmentcontract', name,
+                   '--type=merge', '--subresource=status', '--patch-file', path])
+
+          # =====================================================================
+          # Step 6 — poll Platform.status.conditions[type=Ready] (exact condition
+          # type/reason strings confirmed from internal/controller/platform_controller.go:
+          # Ready=True/reason="Ready" once all enabled modules' ModuleReleases
+          # report Ready=True; Ready=False/reason="Progressing" while waiting;
+          # Ready=False/reason in {"ContractNotReady","ChartResolveFailed",
+          # "IncompatibleOverride"} on gate/resolve failure). Bounded by the
+          # Lambda's own 900s ceiling (same as helm.yaml).
+          # =====================================================================
+          def poll_platform_ready(name, ns, deadline_epoch):
+              while time.time() < deadline_epoch:
+                  out = run(['kubectl', '-n', ns, 'get', 'platform', name, '-o', 'json'], check=False)
+                  try:
+                      conds = json.loads(out).get('status', {}).get('conditions', []) if out else []
+                  except Exception:
+                      conds = []
+                  ready = next((c for c in conds if c.get('type') == 'Ready'), None)
+                  if ready and ready.get('status') == 'True':
+                      return True, "platform converged", conds
+                  if ready and ready.get('reason') in ('ChartResolveFailed', 'IncompatibleOverride'):
+                      # Terminal per the controller's own classification — stop polling.
+                      return False, ready.get('message', ready.get('reason')), conds
+                  time.sleep(15)
+              try:
+                  out = run(['kubectl', '-n', ns, 'get', 'platform', name, '-o', 'json'], check=False)
+                  conds = json.loads(out).get('status', {}).get('conditions', []) if out else []
+              except Exception:
+                  conds = []
+              return False, "timed out waiting for Platform Ready=True", conds
+
+          # =====================================================================
+          # Handler
+          # =====================================================================
+          def handler(event, context):
+              logger.info(f"Event: {json.dumps({k: v for k, v in event.items() if k != 'ResourceProperties'})}")
+              try:
+                  req = event['RequestType']
+                  ns = os.environ['OPERATOR_NAMESPACE']
+                  project = os.environ['PROJECT_NAME']
+                  contract_name = f"{project}-contract"
+                  platform_name = f"{project}-platform"
+
+                  install_tools()
+                  setup_kubeconfig()
+
+                  if req == 'Delete':
+                      # The operator's own reconcileDelete is DISOWN-by-design
+                      # (internal/controller/platform_controller.go): deleting
+                      # the Platform CR deletes its ModuleRelease/PlatformRelease
+                      # bookkeeping CRs, but never uninstalls the module Helm
+                      # releases — that's correct for the operator's real,
+                      # aspirational GitOps-owns-day-2 model. This Lambda is
+                      # NOT that model, though: nothing else installs or owns
+                      # these releases in the CFN-orchestrator delivery path, so
+                      # this Lambda actively purges them on Delete — both for a
+                      # real teardown AND for CFN's own internal "delete the
+                      # failed resource, then retry create" cycle, which
+                      # otherwise leaves an orphaned release behind that the
+                      # next attempt's Helm install then collides with on
+                      # ownership metadata (confirmed live).
+                      purge_module_helm_releases()
+                      run(['kubectl', '-n', ns, 'delete', 'platform', platform_name,
+                           '--ignore-not-found', '--wait=false'], check=False)
+                      run(['kubectl', '-n', ns, 'delete', 'environmentcontract', contract_name,
+                           '--ignore-not-found', '--wait=false'], check=False)
+                      run(['helm', 'uninstall', 'platform-orchestrator', '-n', ns], check=False)
+                      send_response(event, context, 'SUCCESS', {
+                          'Message': 'Platform/EnvironmentContract CRs deleted, module Helm releases '
+                                     'purged, and platform-orchestrator uninstalled.'
+                      })
+                      return
+
+                  ensure_ns(ns)
+                  install_orchestrator()
+
+                  refs = write_contract_secrets(ns)
+                  kubectl_apply(render_environment_contract(contract_name, ns, refs))
+                  patch_contract_ready(contract_name, ns)
+
+                  license_secrets = write_license_secrets(ns)
+                  kubectl_apply(render_platform(platform_name, ns, contract_name, license_secrets))
+
+                  deadline = time.time() + 840  # leave margin under the 900s Lambda timeout
+                  ok, message, conds = poll_platform_ready(platform_name, ns, deadline)
+                  data = {
+                      "Mode": "orchestrator",
+                      "Platform": platform_name,
+                      "EnvironmentContract": contract_name,
+                      "Conditions": json.dumps(conds),
+                  }
+                  if ok:
+                      send_response(event, context, 'SUCCESS', data)
+                  else:
+                      # Report which modules did not converge, per condition type/reason
+                      # already confirmed above, rather than a bare timeout.
+                      send_response(event, context, 'FAILED', data, reason=message[:1000])
+              except Exception as e:
+                  logger.error(f"Error: {e}")
+                  send_response(event, context, 'FAILED', reason=str(e)[:1000])
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-orchestrator-deployer"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ===========================================================================
+  # CUSTOM RESOURCE
+  # ===========================================================================
+  PlatformDeployment:
+    Type: AWS::CloudFormation::CustomResource
+    # DeployerFunction dependency is implied by the ServiceToken GetAtt below.
+    DependsOn:
+      - DeployerAccessEntry
+    Properties:
+      ServiceToken: !GetAtt DeployerFunction.Arn
+      # ConfigHash forces the custom resource to re-run when any relevant input
+      # changes. Built with Fn::Join of !Refs (not one large Fn::Sub) — a single
+      # Sub with this many variables triggers catastrophic backtracking in
+      # cfn-lint's Sub validation (same rationale as helm.yaml).
+      ConfigHash: !Base64
+        Fn::Join:
+          - "-"
+          - - !Ref EnableLedger
+            - !Ref EnableReporter
+            - !Ref EnableTracer
+            - !Ref EnableFetcher
+            - !Ref EnableConsole
+            - !Ref EnableAccessManager
+            - !Ref EnableBankTransfer
+            - !Ref EnableFees
+            - !Ref AuthorizerClientId
+            - !Ref LedgerChartVersion
+            - !Ref ReporterChartVersion
+            - !Ref TracerChartVersion
+            - !Ref FetcherChartVersion
+            - !Ref ConsoleChartVersion
+            - !Ref AccessManagerChartVersion
+            - !Ref BankTransferChartVersion
+            - !Ref FeesChartVersion
+            - !Ref OrchestratorChartRepo
+            - !Ref OrchestratorChartVersion
+            - !Ref RDSEndpoint
+            - !Ref DocumentDBEndpoint
+            - !Ref ElastiCacheEndpoint
+            - !Ref AmazonMQEndpoint
+            - !Ref NextAuthUrl
+            - !Ref EnableIngress
+            - !Ref IngressHostname
+            - !Ref EnvironmentContractCARef
+            - "v1"
+
+Outputs:
+  DeployerFunctionArn:
+    Description: Orchestrator deployer Lambda ARN
+    Value: !GetAtt DeployerFunction.Arn
+
+  DeployerLogGroup:
+    Description: CloudWatch Log Group for the deployer
+    Value: !Sub "/aws/lambda/${ProjectName}-orchestrator-deployer"
+
+  Mode:
+    Description: Deployment mode selected at runtime
+    Value: "orchestrator"

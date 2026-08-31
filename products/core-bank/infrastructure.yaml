@@ -1,0 +1,872 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Core Bank Infrastructure Stack
+  Deploys RDS, DocumentDB, ElastiCache, AmazonMQ, and S3 for the Core Bank product.
+  Requires a Foundation stack (VPC + EKS) to be deployed first.
+  Use core-bank-application.yaml to deploy the Core Bank application after this stack completes.
+  (c) Lerian Studio - https://lerian.studio
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "AWS Marketplace Configuration"
+        Parameters:
+          - MPS3BucketName
+          - MPS3BucketRegion
+          - MPS3KeyPrefix
+          - MPS3ProductKeyPrefix
+          - MarketplaceAMI
+      - Label:
+          default: "General Configuration"
+        Parameters:
+          - EnvironmentName
+          - ProjectName
+          - PermissionsBoundaryArn
+      - Label:
+          default: "Foundation Stack"
+        Parameters:
+          - FoundationStackName
+      - Label:
+          default: "Override Foundation Values (optional)"
+        Parameters:
+          - ExistingVpcId
+          - ExistingVpcCIDR
+          - ExistingPrivateSubnetIds
+          - ExistingDatabaseSubnetIds
+          - ExistingClusterName
+          - ExistingOIDCProviderArn
+      - Label:
+          default: "RDS PostgreSQL Configuration"
+        Parameters:
+          - RDSInstanceClass
+          - RDSAllocatedStorage
+          - RDSMaxAllocatedStorage
+          - RDSStorageType
+          - RDSIops
+          - RDSDatabaseName
+          - RDSMasterUsername
+          - CreateReadReplica
+          - RDSForceSSL
+          - RDSMultiAZ
+          - RDSDeletionProtection
+          - RDSBackupRetentionPeriod
+      - Label:
+          default: "DocumentDB Configuration"
+        Parameters:
+          - DocumentDBInstanceClass
+          - DocumentDBInstanceCount
+          - DocumentDBMasterUsername
+          - DocumentDBDeletionProtection
+          - DocumentDBBackupRetentionPeriod
+      - Label:
+          default: "ElastiCache (Valkey/Redis) Configuration"
+        Parameters:
+          - ElastiCacheNodeType
+      - Label:
+          default: "AmazonMQ (RabbitMQ) Configuration"
+        Parameters:
+          - AmazonMQInstanceType
+          - AmazonMQDeploymentMode
+          - AmazonMQAdminUsername
+      - Label:
+          default: "Additional Network Access"
+        Parameters:
+          - AdditionalIngressCIDR1
+          - AdditionalIngressCIDR2
+          - AdditionalIngressCIDR3
+    ParameterLabels:
+      MPS3BucketName:
+        default: "Template S3 Bucket Name"
+      MPS3BucketRegion:
+        default: "Template S3 Bucket Region"
+      MPS3KeyPrefix:
+        default: "Template S3 Key Prefix"
+      MPS3ProductKeyPrefix:
+        default: "Product Templates S3 Key Prefix"
+      MarketplaceAMI:
+        default: "Marketplace AMI ID"
+      EnvironmentName:
+        default: "Environment"
+      ProjectName:
+        default: "Project Name"
+      PermissionsBoundaryArn:
+        default: "IAM Permissions Boundary ARN"
+      FoundationStackName:
+        default: "Foundation Stack Name"
+      ExistingVpcId:
+        default: "VPC ID (override)"
+      ExistingVpcCIDR:
+        default: "VPC CIDR Block (override)"
+      ExistingPrivateSubnetIds:
+        default: "Private Subnet IDs (override)"
+      ExistingDatabaseSubnetIds:
+        default: "Database Subnet IDs (override)"
+      ExistingClusterName:
+        default: "EKS Cluster Name (override)"
+      ExistingOIDCProviderArn:
+        default: "OIDC Provider ARN (override)"
+      RDSInstanceClass:
+        default: "RDS Instance Class"
+      RDSAllocatedStorage:
+        default: "Initial Storage (GB)"
+      RDSMaxAllocatedStorage:
+        default: "Maximum Storage (GB)"
+      RDSStorageType:
+        default: "Storage Type"
+      RDSIops:
+        default: "Provisioned IOPS"
+      RDSDatabaseName:
+        default: "Database RDS Name"
+      RDSMasterUsername:
+        default: "Master Username"
+      CreateReadReplica:
+        default: "Create Read Replica"
+      RDSForceSSL:
+        default: "Force SSL Connections"
+      RDSMultiAZ:
+        default: "Multi-AZ Deployment"
+      RDSDeletionProtection:
+        default: "Deletion Protection"
+      RDSBackupRetentionPeriod:
+        default: "Backup Retention (Days)"
+      DocumentDBInstanceClass:
+        default: "DocumentDB Instance Class"
+      DocumentDBInstanceCount:
+        default: "Number of Instances"
+      DocumentDBMasterUsername:
+        default: "Master Username"
+      DocumentDBDeletionProtection:
+        default: "Deletion Protection"
+      DocumentDBBackupRetentionPeriod:
+        default: "Backup Retention (Days)"
+      ElastiCacheNodeType:
+        default: "Cache Node Type"
+      AmazonMQInstanceType:
+        default: "Broker Instance Type"
+      AmazonMQDeploymentMode:
+        default: "Deployment Mode"
+      AmazonMQAdminUsername:
+        default: "Admin Username"
+      AdditionalIngressCIDR1:
+        default: "Additional CIDR 1"
+      AdditionalIngressCIDR2:
+        default: "Additional CIDR 2"
+      AdditionalIngressCIDR3:
+        default: "Additional CIDR 3"
+
+Parameters:
+  # =============================================================================
+  # AWS MARKETPLACE PARAMETERS (Required for Nested Stacks)
+  # =============================================================================
+  MPS3BucketName:
+    Type: String
+    Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
+    Default: "lerian-cloudformation-templates"
+
+  MPS3BucketRegion:
+    Type: String
+    Description: "AWS Region where the S3 bucket is located (fixed to sa-east-1)"
+    Default: "sa-east-1"
+    AllowedValues:
+      - sa-east-1
+
+  MPS3KeyPrefix:
+    Type: String
+    Description: "S3 key prefix for the shared CloudFormation templates"
+    Default: "releases/latest/"
+    AllowedPattern: "^[a-zA-Z0-9-_./]*$"
+    ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
+
+  MPS3ProductKeyPrefix:
+    Type: String
+    Description: "S3 key prefix for the product-specific CloudFormation templates (application.yaml)"
+    Default: "releases/latest/products/core-bank/"
+    AllowedPattern: "^[a-zA-Z0-9-_./]*$"
+    ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
+
+  MarketplaceAMI:
+    Type: String
+    Description: "AWS Marketplace AMI ID (required by Marketplace form only, EKS uses managed AMIs)"
+    Default: "ami-placeholder"
+
+  # =============================================================================
+  # GENERAL CONFIGURATION
+  # =============================================================================
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Applied to all IAM roles created by this stack. Leave empty to skip."
+
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Environment name for resource tagging
+
+  ProjectName:
+    Type: String
+    Default: core-bank
+    Description: Project name used for resource naming
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]*$"
+    MinLength: 3
+    MaxLength: 128
+    ConstraintDescription: "Must begin with a letter, contain only letters, numbers, and hyphens, and be 3-128 characters long"
+
+  # =============================================================================
+  # FOUNDATION STACK
+  # =============================================================================
+  FoundationStackName:
+    Type: String
+    Default: "lerian-foundation"
+    Description: "Name of the Foundation stack to import VPC/EKS configuration from."
+
+  # =============================================================================
+  # OVERRIDE FOUNDATION VALUES (optional)
+  # =============================================================================
+  ExistingVpcId:
+    Type: String
+    Default: ""
+    Description: "VPC ID. Leave empty to import from Foundation stack."
+
+  ExistingVpcCIDR:
+    Type: String
+    Default: ""
+    Description: "VPC CIDR block. Leave empty to import from Foundation stack."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+
+  ExistingPrivateSubnetIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated list of private subnet IDs. Leave empty to import from Foundation stack."
+
+  ExistingDatabaseSubnetIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated list of database subnet IDs (isolated subnets). Leave empty to import from Foundation stack."
+
+  ExistingClusterName:
+    Type: String
+    Default: ""
+    Description: "EKS cluster name. Leave empty to import from Foundation stack."
+
+  ExistingOIDCProviderArn:
+    Type: String
+    Default: ""
+    Description: "OIDC Provider ARN. Leave empty to import from Foundation stack."
+
+  # =============================================================================
+  # RDS POSTGRESQL CONFIGURATION
+  # =============================================================================
+  RDSInstanceClass:
+    Type: String
+    Default: db.t3.medium
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t3.large
+      - db.m7g.large
+      - db.m7g.xlarge
+      - db.r7g.large
+      - db.r7g.xlarge
+      - db.r7g.2xlarge
+      - db.r7g.4xlarge
+      - db.r7g.8xlarge
+      - db.r7g.12xlarge
+      - db.r7g.16xlarge
+    Description: RDS instance class (used by ledger and tracer)
+
+  RDSAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 65536
+    Description: Initial storage allocation in GB
+
+  RDSMaxAllocatedStorage:
+    Type: Number
+    Default: 100
+    MinValue: 20
+    MaxValue: 65536
+    Description: Maximum storage for autoscaling in GB
+
+  RDSStorageType:
+    Type: String
+    Default: gp3
+    AllowedValues:
+      - gp3
+      - io1
+      - io2
+    Description: Storage type for RDS instance
+
+  RDSIops:
+    Type: Number
+    Default: 3000
+    MinValue: 3000
+    MaxValue: 64000
+    Description: Provisioned IOPS for RDS storage
+
+  RDSDatabaseName:
+    Type: String
+    Default: midaz
+    Description: Name of the initial database
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 64
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  RDSMasterUsername:
+    Type: String
+    NoEcho: true
+    Description: Master username for RDS (required, no default for security)
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 63
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  CreateReadReplica:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Create a read replica for RDS
+
+  RDSForceSSL:
+    Type: String
+    Default: "0"
+    AllowedValues:
+      - "0"
+      - "1"
+    Description: Force SSL/TLS connections to RDS (1 = enabled, 0 = disabled)
+
+  RDSMultiAZ:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Multi-AZ deployment for high availability
+
+  RDSDeletionProtection:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable deletion protection to prevent accidental database deletion
+
+  RDSBackupRetentionPeriod:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+    Description: Number of days to retain automated backups (1-35)
+
+  # =============================================================================
+  # DOCUMENTDB CONFIGURATION
+  # =============================================================================
+  DocumentDBInstanceClass:
+    Type: String
+    Default: db.t3.medium
+    AllowedValues:
+      - db.t3.medium
+      - db.r6g.large
+      - db.r6g.xlarge
+      - db.r6g.2xlarge
+      - db.r6g.4xlarge
+      - db.r6g.8xlarge
+      - db.r6g.12xlarge
+    Description: DocumentDB instance class (shared by ledger, reporter, console, plugin-fees)
+
+  DocumentDBInstanceCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Number of DocumentDB instances
+
+  DocumentDBMasterUsername:
+    Type: String
+    NoEcho: true
+    Description: Master username for DocumentDB (required, no default for security)
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 63
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  DocumentDBDeletionProtection:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable deletion protection to prevent accidental cluster deletion
+
+  DocumentDBBackupRetentionPeriod:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+    Description: Number of days to retain automated backups (1-35)
+
+  # =============================================================================
+  # ELASTICACHE CONFIGURATION
+  # =============================================================================
+  ElastiCacheNodeType:
+    Type: String
+    Default: cache.m7g.large
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+      - cache.m7g.large
+      - cache.m7g.xlarge
+      - cache.r7g.large
+      - cache.r7g.xlarge
+    Description: ElastiCache node type (shared by ledger and reporter)
+
+  # =============================================================================
+  # AMAZONMQ CONFIGURATION
+  # =============================================================================
+  AmazonMQInstanceType:
+    Type: String
+    Default: mq.t3.micro
+    AllowedValues:
+      - mq.t3.micro
+      - mq.m5.large
+      - mq.m5.xlarge
+      - mq.m5.2xlarge
+      - mq.m5.4xlarge
+      - mq.m7g.large
+      - mq.m7g.xlarge
+      - mq.m7g.2xlarge
+      - mq.m7g.4xlarge
+      - mq.m7g.8xlarge
+      - mq.m7g.12xlarge
+      - mq.m7g.16xlarge
+    Description: AmazonMQ broker instance type (shared by ledger and reporter)
+
+  AmazonMQDeploymentMode:
+    Type: String
+    Default: SINGLE_INSTANCE
+    AllowedValues:
+      - SINGLE_INSTANCE
+      - CLUSTER_MULTI_AZ
+    Description: Broker deployment mode
+
+  AmazonMQAdminUsername:
+    Type: String
+    NoEcho: true
+    Description: Admin username for AmazonMQ (required, no default for security)
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+    MinLength: 1
+    MaxLength: 100
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
+
+  # =============================================================================
+  # ADDITIONAL NETWORK ACCESS
+  # =============================================================================
+  AdditionalIngressCIDR1:
+    Type: String
+    Default: ""
+    Description: "Additional CIDR block for resource access. Leave empty to skip."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block or empty"
+
+  AdditionalIngressCIDR2:
+    Type: String
+    Default: ""
+    Description: "Additional CIDR block for resource access. Leave empty to skip."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block or empty"
+
+  AdditionalIngressCIDR3:
+    Type: String
+    Default: ""
+    Description: "Additional CIDR block for resource access. Leave empty to skip."
+    AllowedPattern: "^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/([0-9]|[1-2][0-9]|3[0-2]))$"
+    ConstraintDescription: "Must be a valid CIDR block or empty"
+
+Conditions:
+  CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
+  HasExplicitVpcId: !Not [!Equals [!Ref ExistingVpcId, ""]]
+  HasExplicitVpcCIDR: !Not [!Equals [!Ref ExistingVpcCIDR, ""]]
+  HasExplicitPrivateSubnets: !Not [!Equals [!Ref ExistingPrivateSubnetIds, ""]]
+  HasExplicitDatabaseSubnets: !Not [!Equals [!Ref ExistingDatabaseSubnetIds, ""]]
+  HasExplicitClusterName: !Not [!Equals [!Ref ExistingClusterName, ""]]
+  HasExplicitOIDCArn: !Not [!Equals [!Ref ExistingOIDCProviderArn, ""]]
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+Resources:
+  # =============================================================================
+  # RDS STACK (used by ledger + tracer)
+  # =============================================================================
+  RDSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
+      Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        DatabaseSubnetIds: !If
+          - HasExplicitDatabaseSubnets
+          - !Ref ExistingDatabaseSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-DatabaseSubnetIds"
+        InstanceClass: !Ref RDSInstanceClass
+        AllocatedStorage: !Ref RDSAllocatedStorage
+        MaxAllocatedStorage: !Ref RDSMaxAllocatedStorage
+        StorageType: !Ref RDSStorageType
+        Iops: !Ref RDSIops
+        DatabaseName: !Ref RDSDatabaseName
+        MasterUsername: !Ref RDSMasterUsername
+        CreateReadReplica: !Ref CreateReadReplica
+        ForceSSL: !Ref RDSForceSSL
+        MultiAZ: !Ref RDSMultiAZ
+        DeletionProtection: !Ref RDSDeletionProtection
+        BackupRetentionPeriod: !Ref RDSBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =============================================================================
+  # DOCUMENTDB STACK (shared: ledger, reporter, console, plugin-fees)
+  # =============================================================================
+  DocumentDBStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}documentdb.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        PrivateSubnetIds: !If
+          - HasExplicitPrivateSubnets
+          - !Ref ExistingPrivateSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-PrivateSubnetIds"
+        InstanceClass: !Ref DocumentDBInstanceClass
+        InstanceCount: !Ref DocumentDBInstanceCount
+        MasterUsername: !Ref DocumentDBMasterUsername
+        DeletionProtection: !Ref DocumentDBDeletionProtection
+        BackupRetentionPeriod: !Ref DocumentDBBackupRetentionPeriod
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-documentdb-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =============================================================================
+  # ELASTICACHE STACK (shared: ledger + reporter)
+  # =============================================================================
+  ElastiCacheStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}elasticache.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        CacheSubnetIds: !If
+          - HasExplicitDatabaseSubnets
+          - !Ref ExistingDatabaseSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-DatabaseSubnetIds"
+        NodeType: !Ref ElastiCacheNodeType
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-elasticache-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =============================================================================
+  # AMAZONMQ STACK (shared: ledger + reporter)
+  # =============================================================================
+  AmazonMQStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}amazonmq.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        PrivateSubnetIds: !If
+          - HasExplicitPrivateSubnets
+          - !Ref ExistingPrivateSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-PrivateSubnetIds"
+        InstanceType: !Ref AmazonMQInstanceType
+        DeploymentMode: !Ref AmazonMQDeploymentMode
+        AdminUsername: !Ref AmazonMQAdminUsername
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-amazonmq-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # =============================================================================
+  # S3 BUCKET (reporter object storage — PDF reports)
+  # =============================================================================
+  ReporterStorageBucket:
+    # checkov:skip=CKV_AWS_18:Access logging optional for this workload bucket
+    # checkov:skip=CKV_AWS_21:Versioning enabled via VersioningConfiguration below
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-reporter-storage-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-reporter-storage"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  # =============================================================================
+  # STACK METADATA
+  # =============================================================================
+  ProjectName:
+    Description: Project name used in this deployment
+    Value: !Ref AWS::StackName
+    Export:
+      Name: !Sub "${AWS::StackName}-ProjectName"
+
+  EnvironmentName:
+    Description: Environment name
+    Value: !Ref EnvironmentName
+    Export:
+      Name: !Sub "${AWS::StackName}-EnvironmentName"
+
+  # =============================================================================
+  # VPC/EKS PASS-THROUGH OUTPUTS
+  # =============================================================================
+  VpcId:
+    Description: VPC ID
+    Value: !If
+      - HasExplicitVpcId
+      - !Ref ExistingVpcId
+      - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+
+  PrivateSubnetIds:
+    Description: Private Subnet IDs
+    Value: !If
+      - HasExplicitPrivateSubnets
+      - !Ref ExistingPrivateSubnetIds
+      - Fn::ImportValue: !Sub "${FoundationStackName}-PrivateSubnetIds"
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetIds"
+
+  EKSClusterName:
+    Description: EKS Cluster Name
+    Value: !If
+      - HasExplicitClusterName
+      - !Ref ExistingClusterName
+      - Fn::ImportValue: !Sub "${FoundationStackName}-EKSClusterName"
+    Export:
+      Name: !Sub "${AWS::StackName}-EKSClusterName"
+
+  OIDCProviderArn:
+    Description: EKS OIDC Provider ARN
+    Value: !If
+      - HasExplicitOIDCArn
+      - !Ref ExistingOIDCProviderArn
+      - Fn::ImportValue: !Sub "${FoundationStackName}-OIDCProviderArn"
+    Export:
+      Name: !Sub "${AWS::StackName}-OIDCProviderArn"
+
+  # =============================================================================
+  # RDS OUTPUTS
+  # =============================================================================
+  RDSEndpoint:
+    Description: RDS Primary Endpoint
+    Value: !GetAtt RDSStack.Outputs.Endpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSEndpoint"
+
+  RDSReplicaEndpoint:
+    Condition: CreateRDSReplica
+    Description: RDS Read Replica Endpoint
+    Value: !GetAtt RDSStack.Outputs.ReplicaEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSReplicaEndpoint"
+
+  RDSSecretArn:
+    Description: RDS Password Secret ARN
+    Value: !GetAtt RDSStack.Outputs.SecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSSecretArn"
+
+  RDSKMSKeyArn:
+    Description: RDS KMS Key ARN
+    Value: !GetAtt RDSStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-RDSKMSKeyArn"
+
+  # =============================================================================
+  # DOCUMENTDB OUTPUTS
+  # =============================================================================
+  DocumentDBEndpoint:
+    Description: DocumentDB Cluster Endpoint
+    Value: !GetAtt DocumentDBStack.Outputs.ClusterEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-DocumentDBEndpoint"
+
+  DocumentDBSecretArn:
+    Description: DocumentDB Password Secret ARN
+    Value: !GetAtt DocumentDBStack.Outputs.SecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-DocumentDBSecretArn"
+
+  DocumentDBKMSKeyArn:
+    Description: DocumentDB KMS Key ARN
+    Value: !GetAtt DocumentDBStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-DocumentDBKMSKeyArn"
+
+  # =============================================================================
+  # ELASTICACHE OUTPUTS
+  # =============================================================================
+  ElastiCacheEndpoint:
+    Description: ElastiCache Primary Endpoint
+    Value: !GetAtt ElastiCacheStack.Outputs.PrimaryEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-ElastiCacheEndpoint"
+
+  ElastiCacheSecretArn:
+    Description: ElastiCache Auth Token Secret ARN
+    Value: !GetAtt ElastiCacheStack.Outputs.AuthSecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ElastiCacheSecretArn"
+
+  ElastiCacheKMSKeyArn:
+    Description: ElastiCache KMS Key ARN
+    Value: !GetAtt ElastiCacheStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ElastiCacheKMSKeyArn"
+
+  # =============================================================================
+  # AMAZONMQ OUTPUTS
+  # =============================================================================
+  AmazonMQEndpoint:
+    Description: AmazonMQ Broker Endpoint
+    Value: !GetAtt AmazonMQStack.Outputs.BrokerEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-AmazonMQEndpoint"
+
+  AmazonMQSecretArn:
+    Description: AmazonMQ Password Secret ARN
+    Value: !GetAtt AmazonMQStack.Outputs.SecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-AmazonMQSecretArn"
+
+  AmazonMQKMSKeyArn:
+    Description: AmazonMQ KMS Key ARN
+    Value: !GetAtt AmazonMQStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-AmazonMQKMSKeyArn"
+
+  # =============================================================================
+  # S3 OUTPUTS (reporter storage)
+  # =============================================================================
+  ReporterStorageBucketName:
+    Description: S3 bucket name for reporter PDF storage
+    Value: !Ref ReporterStorageBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ReporterStorageBucketName"
+
+  ReporterStorageBucketArn:
+    Description: S3 bucket ARN for reporter PDF storage
+    Value: !GetAtt ReporterStorageBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ReporterStorageBucketArn"
+
+  # =============================================================================
+  # UTILITY COMMANDS
+  # =============================================================================
+  DeployApplicationCommand:
+    Description: Command to deploy the Core Bank application
+    Value: !Sub |
+      aws cloudformation deploy \
+        --stack-name ${AWS::StackName}-app \
+        --template-url https://${MPS3BucketName}.s3.${MPS3BucketRegion}.amazonaws.com/${MPS3ProductKeyPrefix}application.yaml \
+        --parameter-overrides \
+          InfrastructureStackName=${AWS::StackName} \
+          MPS3BucketName=${MPS3BucketName} \
+          MPS3KeyPrefix=${MPS3ProductKeyPrefix} \
+          PermissionsBoundaryArn=${PermissionsBoundaryArn} \
+        --capabilities CAPABILITY_IAM \
+        --region ${AWS::Region}

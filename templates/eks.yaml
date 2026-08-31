@@ -65,6 +65,17 @@ Parameters:
       - m6g.xlarge
     Default: c7g.large
 
+  NodeAmiType:
+    Type: String
+    Description: >-
+      EKS node AMI type. Must match NodeInstanceType architecture:
+      AL2023_x86_64_STANDARD for x86 (c6i.*) — required for amd64-only container images;
+      AL2023_ARM_64_STANDARD for Graviton (c7g/m7g/r7g/c6g/m6g).
+    Default: AL2023_x86_64_STANDARD
+    AllowedValues:
+      - AL2023_x86_64_STANDARD
+      - AL2023_ARM_64_STANDARD
+
   NodeGroupMinSize:
     Type: Number
     Description: Minimum number of worker nodes
@@ -242,7 +253,7 @@ Resources:
         DesiredSize: !Ref NodeGroupDesiredSize
       InstanceTypes:
         - !Ref NodeInstanceType
-      AmiType: AL2023_ARM_64_STANDARD
+      AmiType: !Ref NodeAmiType
       CapacityType: ON_DEMAND
       Labels:
         Environment: !Ref EnvironmentName
@@ -357,6 +368,15 @@ Outputs:
   OIDCProviderArn:
     Description: OIDC Provider ARN
     Value: !GetAtt OIDCProvider.Arn
+
+  OIDCProviderHost:
+    Description: >-
+      OIDC issuer host (no scheme) — the same derivation EBSCSIDriverRole's
+      own trust policy uses inline (!Select [1, !Split ["//", ...]]) on
+      EKSCluster.OpenIdConnectIssuerUrl. Exposed so callers OUTSIDE this
+      template (e.g. full-stack.yaml's per-module IRSA roles) can build a
+      trust policy without re-deriving it from OIDCProviderArn's ARN string.
+    Value: !Select [1, !Split ["//", !GetAtt EKSCluster.OpenIdConnectIssuerUrl]]
 
   NodeGroupName:
     Description: EKS Node Group Name

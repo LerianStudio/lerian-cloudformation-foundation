@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Amazon MSK (Managed Streaming for Apache Kafka) Stack for Midaz Platform
+Description: Amazon MSK (Kafka) Stack for Lerian Platform — streaming backbone (SASL/SCRAM over TLS)
 
 Parameters:
   ProjectName:
@@ -28,12 +28,12 @@ Parameters:
 
   PrivateSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Private subnet IDs — one per broker AZ (typically 3). NumberOfBrokerNodes must be a multiple of this count.
+    Description: Private subnet IDs. MSK spreads brokers across the first N (= NumberOfBrokerNodes) subnets, each in a distinct AZ.
 
   InstanceType:
     Type: String
     Description: MSK broker instance type
-    Default: kafka.t3.small
+    Default: kafka.m5.large
     AllowedValues:
       - kafka.t3.small
       - kafka.m5.large
@@ -44,58 +44,34 @@ Parameters:
       - kafka.m7g.xlarge
       - kafka.m7g.2xlarge
       - kafka.m7g.4xlarge
-      - kafka.m7g.8xlarge
-      - kafka.m7g.12xlarge
-      - kafka.m7g.16xlarge
 
   KafkaVersion:
     Type: String
-    Description: Apache Kafka version (use the tiered "3.9.x" for KRaft + automatic minor upgrades)
-    Default: "3.9.x"
+    Description: Apache Kafka version
+    Default: "3.6.0"
 
   NumberOfBrokerNodes:
     Type: Number
-    Description: Total number of broker nodes. Must be a multiple of the number of PrivateSubnetIds (AZs).
-    Default: 3
-    MinValue: 2
-    MaxValue: 15
+    Description: Number of broker nodes (must equal the number of ClientSubnets used; 2 for two AZs).
+    Default: 2
+    AllowedValues: [2, 3]
 
-  BrokerEbsVolumeSize:
+  BrokerStorageGB:
     Type: Number
-    Description: EBS storage (GiB) per broker
-    Default: 64
-    MinValue: 1
+    Description: EBS storage per broker (GiB)
+    Default: 20
+    MinValue: 10
     MaxValue: 16384
 
-  BrokerServerProperties:
+  SASLUsername:
     Type: String
-    Description: >-
-      MSK broker configuration (server.properties, one directive per line).
-      Default mirrors shared-stg-msk. Override to disable auto topic creation or
-      add directives (e.g. default.replication.factor, min.insync.replicas).
-    Default: "auto.create.topics.enable = true"
-
-  AdminUsername:
-    Type: String
-    Description: SASL/SCRAM admin username (sensitive). Ignored when EnableScram=false.
-    Default: admin
+    Description: SASL/SCRAM username (sensitive)
     NoEcho: true
-    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_-]*$"
+    Default: lerian_streaming
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
     MinLength: 1
     MaxLength: 100
-    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters, underscores, and hyphens"
-
-  EnableScram:
-    Type: String
-    Description: Enable SASL/SCRAM authentication (creates the AmazonMSK_ secret + association)
-    Default: "true"
-    AllowedValues: ["true", "false"]
-
-  EnableIam:
-    Type: String
-    Description: Enable IAM authentication
-    Default: "true"
-    AllowedValues: ["true", "false"]
+    ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
 
   AdditionalIngressCIDR1:
     Type: String
@@ -119,8 +95,7 @@ Parameters:
     ConstraintDescription: "Must be a valid CIDR block or empty"
 
 Conditions:
-  ScramEnabled: !Equals [!Ref EnableScram, "true"]
-  IamEnabled: !Equals [!Ref EnableIam, "true"]
+  IsThreeBroker: !Equals [!Ref NumberOfBrokerNodes, 3]
   HasAdditionalCIDR1: !And
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, !Ref VpcCIDR]]
@@ -134,25 +109,14 @@ Conditions:
     - !Not [!Equals [!Ref AdditionalIngressCIDR3, !Ref AdditionalIngressCIDR1]]
     - !Not [!Equals [!Ref AdditionalIngressCIDR3, !Ref AdditionalIngressCIDR2]]
 
-Rules:
-  # MSK requires at least one authentication method: with both SASL mechanisms
-  # off and Unauthenticated disabled, the cluster config is invalid and CREATE
-  # fails. Reject the combination at template-validation time with a clear message.
-  AtLeastOneAuthMethod:
-    Assertions:
-      - Assert: !Or
-          - !Equals [!Ref EnableScram, "true"]
-          - !Equals [!Ref EnableIam, "true"]
-        AssertDescription: "At least one of EnableScram or EnableIam must be 'true' (Unauthenticated access is disabled)."
-
 Resources:
   # =============================================================================
-  # KMS KEY (encryption at rest + SCRAM secret encryption)
+  # KMS KEY (storage-at-rest encryption + SASL/SCRAM secret encryption)
   # =============================================================================
   MSKKMSKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: KMS key for MSK data-volume encryption and SASL/SCRAM secret
+      Description: KMS key for MSK storage + SASL/SCRAM secret encryption
       EnableKeyRotation: true
       KeyPolicy:
         Version: '2012-10-17'
@@ -163,34 +127,14 @@ Resources:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
             Action: kms:*
             Resource: '*'
-          - Sid: Allow CloudWatch Logs
+          - Sid: Allow MSK to use the key for SCRAM secret decryption
             Effect: Allow
             Principal:
-              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
+              Service: kafka.amazonaws.com
             Action:
-              - kms:Encrypt
               - kms:Decrypt
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: '*'
-            Condition:
-              ArnLike:
-                kms:EncryptionContext:aws:logs:arn: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/msk/${ProjectName}"
-          - Sid: Allow SecretsManager for SCRAM
-            Effect: Allow
-            Principal:
-              Service: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
-            Action:
-              - kms:Encrypt
-              - kms:Decrypt
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:DescribeKey
-            Resource: '*'
-            Condition:
-              StringEquals:
-                kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-msk-kms"
@@ -204,19 +148,22 @@ Resources:
       TargetKeyId: !Ref MSKKMSKey
 
   # =============================================================================
-  # SASL/SCRAM SECRET (name MUST start with "AmazonMSK_"; CMK-encrypted)
+  # SASL/SCRAM SECRET
+  # MSK requires the secret name to start with "AmazonMSK_" and be encrypted
+  # with a customer-managed KMS key (never the default aws/secretsmanager key).
   # =============================================================================
   MSKScramSecret:
     Type: AWS::SecretsManager::Secret
-    Condition: ScramEnabled
     Properties:
-      Name: !Sub "AmazonMSK_${ProjectName}_admin"
-      Description: MSK SASL/SCRAM admin credentials
+      Name: !Sub "AmazonMSK_${ProjectName}_streaming"
+      Description: MSK SASL/SCRAM credentials for the Lerian streaming backbone
       KmsKeyId: !GetAtt MSKKMSKey.Arn
       GenerateSecretString:
-        SecretStringTemplate: !Sub '{"username": "${AdminUsername}"}'
+        SecretStringTemplate: !Sub '{"username": "${SASLUsername}"}'
         GenerateStringKey: password
-        PasswordLength: 24
+        PasswordLength: 32
+        # Alphanumeric: SASL passwords flow through connection strings/clients that
+        # do not universally escape punctuation.
         ExcludePunctuation: true
       Tags:
         - Key: Name
@@ -224,23 +171,9 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
-  MSKScramSecretPolicy:
-    Type: AWS::SecretsManager::ResourcePolicy
-    Condition: ScramEnabled
-    Properties:
-      SecretId: !Ref MSKScramSecret
-      ResourcePolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AllowMSKAccess
-            Effect: Allow
-            Principal:
-              Service: kafka.amazonaws.com
-            Action: secretsmanager:GetSecretValue
-            Resource: '*'
-
   # =============================================================================
-  # SECURITY GROUP (TLS 9094 / SASL-SCRAM 9096 / IAM 9098)
+  # SECURITY GROUP
+  # 9096 = SASL/SCRAM over TLS (client), 9094 = TLS (client), 2182 = TLS ZooKeeper.
   # =============================================================================
   MSKSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -250,20 +183,20 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
+          FromPort: 9096
+          ToPort: 9096
+          CidrIp: !Ref VpcCIDR
+          Description: Kafka SASL/SCRAM over TLS from VPC
+        - IpProtocol: tcp
           FromPort: 9094
           ToPort: 9094
           CidrIp: !Ref VpcCIDR
           Description: Kafka TLS from VPC
         - IpProtocol: tcp
-          FromPort: 9096
-          ToPort: 9096
+          FromPort: 2182
+          ToPort: 2182
           CidrIp: !Ref VpcCIDR
-          Description: Kafka SASL/SCRAM from VPC
-        - IpProtocol: tcp
-          FromPort: 9098
-          ToPort: 9098
-          CidrIp: !Ref VpcCIDR
-          Description: Kafka IAM from VPC
+          Description: TLS ZooKeeper from VPC
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-msk-sg"
@@ -271,23 +204,9 @@ Resources:
           Value: !Ref EnvironmentName
 
   # =============================================================================
-  # ADDITIONAL NETWORK ACCESS (Conditional — broker ports 9094-9098)
+  # ADDITIONAL NETWORK ACCESS (Conditional) — SASL/SCRAM port 9096
   # =============================================================================
-  # Discrete broker ports (9094 TLS / 9096 SASL-SCRAM / 9098 IAM) — same three
-  # ports the VPC-CIDR rules open, rather than the 9094-9098 range (which also
-  # exposed the unused 9095/9097).
-  AdditionalIngressBroker1Tls:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: HasAdditionalCIDR1
-    Properties:
-      GroupId: !Ref MSKSecurityGroup
-      IpProtocol: tcp
-      FromPort: 9094
-      ToPort: 9094
-      CidrIp: !Ref AdditionalIngressCIDR1
-      Description: "Additional broker access 1 — Kafka TLS"
-
-  AdditionalIngressBroker1Scram:
+  AdditionalIngressSasl1:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasAdditionalCIDR1
     Properties:
@@ -296,31 +215,9 @@ Resources:
       FromPort: 9096
       ToPort: 9096
       CidrIp: !Ref AdditionalIngressCIDR1
-      Description: "Additional broker access 1 — Kafka SASL/SCRAM"
+      Description: "Additional SASL/SCRAM access 1"
 
-  AdditionalIngressBroker1Iam:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: HasAdditionalCIDR1
-    Properties:
-      GroupId: !Ref MSKSecurityGroup
-      IpProtocol: tcp
-      FromPort: 9098
-      ToPort: 9098
-      CidrIp: !Ref AdditionalIngressCIDR1
-      Description: "Additional broker access 1 — Kafka IAM"
-
-  AdditionalIngressBroker2Tls:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: HasAdditionalCIDR2
-    Properties:
-      GroupId: !Ref MSKSecurityGroup
-      IpProtocol: tcp
-      FromPort: 9094
-      ToPort: 9094
-      CidrIp: !Ref AdditionalIngressCIDR2
-      Description: "Additional broker access 2 — Kafka TLS"
-
-  AdditionalIngressBroker2Scram:
+  AdditionalIngressSasl2:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasAdditionalCIDR2
     Properties:
@@ -329,31 +226,9 @@ Resources:
       FromPort: 9096
       ToPort: 9096
       CidrIp: !Ref AdditionalIngressCIDR2
-      Description: "Additional broker access 2 — Kafka SASL/SCRAM"
+      Description: "Additional SASL/SCRAM access 2"
 
-  AdditionalIngressBroker2Iam:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: HasAdditionalCIDR2
-    Properties:
-      GroupId: !Ref MSKSecurityGroup
-      IpProtocol: tcp
-      FromPort: 9098
-      ToPort: 9098
-      CidrIp: !Ref AdditionalIngressCIDR2
-      Description: "Additional broker access 2 — Kafka IAM"
-
-  AdditionalIngressBroker3Tls:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: HasAdditionalCIDR3
-    Properties:
-      GroupId: !Ref MSKSecurityGroup
-      IpProtocol: tcp
-      FromPort: 9094
-      ToPort: 9094
-      CidrIp: !Ref AdditionalIngressCIDR3
-      Description: "Additional broker access 3 — Kafka TLS"
-
-  AdditionalIngressBroker3Scram:
+  AdditionalIngressSasl3:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: HasAdditionalCIDR3
     Properties:
@@ -362,38 +237,7 @@ Resources:
       FromPort: 9096
       ToPort: 9096
       CidrIp: !Ref AdditionalIngressCIDR3
-      Description: "Additional broker access 3 — Kafka SASL/SCRAM"
-
-  AdditionalIngressBroker3Iam:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: HasAdditionalCIDR3
-    Properties:
-      GroupId: !Ref MSKSecurityGroup
-      IpProtocol: tcp
-      FromPort: 9098
-      ToPort: 9098
-      CidrIp: !Ref AdditionalIngressCIDR3
-      Description: "Additional broker access 3 — Kafka IAM"
-
-  # =============================================================================
-  # CLOUDWATCH LOG GROUP
-  # =============================================================================
-  MSKLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/msk/${ProjectName}"
-      RetentionInDays: 30
-      KmsKeyId: !GetAtt MSKKMSKey.Arn
-
-  # =============================================================================
-  # MSK CONFIGURATION (server.properties)
-  # =============================================================================
-  MSKConfiguration:
-    Type: AWS::MSK::Configuration
-    Properties:
-      Name: !Sub "${ProjectName}-msk-config"
-      Description: !Sub "Broker configuration for ${ProjectName} MSK"
-      ServerProperties: !Ref BrokerServerProperties
+      Description: "Additional SASL/SCRAM access 3"
 
   # =============================================================================
   # MSK CLUSTER
@@ -404,21 +248,20 @@ Resources:
       ClusterName: !Sub "${ProjectName}-msk"
       KafkaVersion: !Ref KafkaVersion
       NumberOfBrokerNodes: !Ref NumberOfBrokerNodes
-      EnhancedMonitoring: DEFAULT
       BrokerNodeGroupInfo:
         InstanceType: !Ref InstanceType
-        ClientSubnets: !Ref PrivateSubnetIds
+        ClientSubnets: !If
+          - IsThreeBroker
+          - - !Select [0, !Ref PrivateSubnetIds]
+            - !Select [1, !Ref PrivateSubnetIds]
+            - !Select [2, !Ref PrivateSubnetIds]
+          - - !Select [0, !Ref PrivateSubnetIds]
+            - !Select [1, !Ref PrivateSubnetIds]
         SecurityGroups:
           - !Ref MSKSecurityGroup
         StorageInfo:
           EBSStorageInfo:
-            VolumeSize: !Ref BrokerEbsVolumeSize
-        ConnectivityInfo:
-          PublicAccess:
-            Type: DISABLED
-      ConfigurationInfo:
-        Arn: !Ref MSKConfiguration
-        Revision: !GetAtt MSKConfiguration.LatestRevision.Revision
+            VolumeSize: !Ref BrokerStorageGB
       EncryptionInfo:
         EncryptionAtRest:
           DataVolumeKMSKeyId: !Ref MSKKMSKey
@@ -428,163 +271,31 @@ Resources:
       ClientAuthentication:
         Sasl:
           Scram:
-            Enabled: !If [ScramEnabled, true, false]
-          Iam:
-            Enabled: !If [IamEnabled, true, false]
-        Unauthenticated:
-          Enabled: false
-      LoggingInfo:
-        BrokerLogs:
-          CloudWatchLogs:
             Enabled: true
-            LogGroup: !Ref MSKLogGroup
+      EnhancedMonitoring: PER_BROKER
       Tags:
         Name: !Sub "${ProjectName}-msk"
         Environment: !Ref EnvironmentName
         ManagedBy: CloudFormation
 
-  # =============================================================================
-  # SCRAM SECRET ASSOCIATION
-  # =============================================================================
-  MSKBatchScramSecret:
+  # Associate the SASL/SCRAM secret with the cluster so the credentials are valid.
+  MSKScramSecretAssociation:
     Type: AWS::MSK::BatchScramSecret
-    Condition: ScramEnabled
     Properties:
       ClusterArn: !Ref MSKCluster
       SecretArnList:
         - !Ref MSKScramSecret
 
-  # =============================================================================
-  # BOOTSTRAP BROKERS (custom resource — AWS::MSK::Cluster does not expose the
-  # broker connection strings via GetAtt, so we resolve them at deploy time)
-  # =============================================================================
-  BootstrapBrokersRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${ProjectName}-msk-bootstrap-role"
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: get-bootstrap-brokers
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: kafka:GetBootstrapBrokers
-                Resource: !Ref MSKCluster
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-msk-bootstrap-role"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-
-  BootstrapBrokersFunction:
-    Type: AWS::Lambda::Function
-    Metadata:
-      checkov:
-        skip:
-          - id: CKV_AWS_116
-            comment: "Synchronous CloudFormation custom resource (invoked by CFN, never asynchronously); a Dead Letter Queue does not apply."
-          - id: CKV_AWS_117
-            comment: "Control-plane helper that only calls kafka:GetBootstrapBrokers; it needs no VPC/broker network access, and placing it in private subnets would break egress to the AWS API."
-    Properties:
-      FunctionName: !Sub "${ProjectName}-msk-bootstrap"
-      Runtime: python3.12
-      Handler: index.handler
-      Timeout: 60
-      ReservedConcurrentExecutions: 1
-      Role: !GetAtt BootstrapBrokersRole.Arn
-      Code:
-        # Self-contained CloudFormation response helper (urllib, stdlib) instead of
-        # the injected `cfnresponse` module — that module is not reliably bundled in
-        # the python3.12 inline (ZipFile) runtime, and a missing import would fail the
-        # custom resource on every stack deploy. urllib.request is always available.
-        ZipFile: |
-          import json, urllib.request, boto3
-
-          def send(event, context, status, data, physical_id=None):
-              pid = physical_id or event.get('PhysicalResourceId') or context.log_stream_name
-              body = json.dumps({
-                  'Status': status,
-                  'Reason': f"See CloudWatch Log Stream: {context.log_stream_name}",
-                  'PhysicalResourceId': pid,
-                  'StackId': event['StackId'],
-                  'RequestId': event['RequestId'],
-                  'LogicalResourceId': event['LogicalResourceId'],
-                  'Data': data,
-              }).encode('utf-8')
-              req = urllib.request.Request(
-                  event['ResponseURL'], data=body, method='PUT',
-                  headers={'content-type': '', 'content-length': str(len(body))})
-              urllib.request.urlopen(req)
-
-          def handler(event, context):
-              try:
-                  if event['RequestType'] == 'Delete':
-                      send(event, context, 'SUCCESS', {})
-                      return
-                  arn = event['ResourceProperties']['ClusterArn']
-                  r = boto3.client('kafka').get_bootstrap_brokers(ClusterArn=arn)
-                  data = {
-                      'BootstrapBrokerStringTls': r.get('BootstrapBrokerStringTls', ''),
-                      'BootstrapBrokerStringSaslScram': r.get('BootstrapBrokerStringSaslScram', ''),
-                      'BootstrapBrokerStringSaslIam': r.get('BootstrapBrokerStringSaslIam', ''),
-                  }
-                  send(event, context, 'SUCCESS', data, arn)
-              except Exception as e:
-                  send(event, context, 'FAILED', {'Error': str(e)})
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-msk-bootstrap"
-        - Key: Environment
-          Value: !Ref EnvironmentName
-
-  BootstrapBrokers:
-    Type: AWS::CloudFormation::CustomResource
-    Properties:
-      ServiceToken: !GetAtt BootstrapBrokersFunction.Arn
-      ClusterArn: !Ref MSKCluster
-      # ClusterArn is immutable and MSK::Cluster exposes only Arn via GetAtt, so the
-      # custom resource would never re-run and the bootstrap-broker outputs would go
-      # stale after a cluster change. Pass the inputs that actually change the broker
-      # connection strings — node count and the auth mechanisms (which add/remove the
-      # SASL_SCRAM / SASL_IAM endpoints) — so any change re-invokes the Lambda.
-      NumberOfBrokerNodes: !Ref NumberOfBrokerNodes
-      EnableScram: !Ref EnableScram
-      EnableIam: !Ref EnableIam
-
 Outputs:
   ClusterArn:
-    Description: MSK Cluster ARN
+    Description: MSK Cluster ARN (deployer calls kafka:GetBootstrapBrokers on it)
     Value: !Ref MSKCluster
 
   ClusterName:
     Description: MSK Cluster name
     Value: !Sub "${ProjectName}-msk"
 
-  BootstrapBrokersTls:
-    Description: TLS bootstrap broker connection string (port 9094)
-    Value: !GetAtt BootstrapBrokers.BootstrapBrokerStringTls
-
-  BootstrapBrokersSaslScram:
-    Condition: ScramEnabled
-    Description: SASL/SCRAM bootstrap broker connection string (port 9096)
-    Value: !GetAtt BootstrapBrokers.BootstrapBrokerStringSaslScram
-
-  BootstrapBrokersSaslIam:
-    Condition: IamEnabled
-    Description: SASL/IAM bootstrap broker connection string (port 9098)
-    Value: !GetAtt BootstrapBrokers.BootstrapBrokerStringSaslIam
-
-  ScramSecretArn:
-    Condition: ScramEnabled
+  SecretArn:
     Description: MSK SASL/SCRAM credentials Secret ARN
     Value: !Ref MSKScramSecret
 
@@ -593,9 +304,5 @@ Outputs:
     Value: !Ref MSKSecurityGroup
 
   KMSKeyArn:
-    Description: MSK KMS Key ARN for encryption
+    Description: MSK KMS Key ARN
     Value: !GetAtt MSKKMSKey.Arn
-
-  ConfigurationArn:
-    Description: MSK Configuration ARN
-    Value: !Ref MSKConfiguration
