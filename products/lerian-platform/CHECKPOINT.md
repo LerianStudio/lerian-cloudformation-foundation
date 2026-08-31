@@ -7,40 +7,57 @@ teammate for a dev/internal deploy. **Not** the full AWS Marketplace
 submission bar (ECR migration, multi-region, CI/CD, admission webhooks —
 those are a later phase, listed at the bottom as "post-v0").
 
-Status as of this checkpoint: **6 of 9 catalog modules validated live**
+Status as of this update: **7 of 9 catalog modules validated live**
 end-to-end against a real AWS sandbox account (`524121347244`, `sa-east-1`),
-via a real `create-stack` (not manual `kubectl` patches) —
+via a real `create-stack`/`update-stack` (not manual `kubectl` patches) —
 `access_manager`, `ledger`, `tracer`, `console`, `bank_transfer`,
-`reporter`, `fetcher`. `fees` and `pix_indirect_btg` are untested.
+`reporter`, `fetcher` all reached `Platform.status.Ready=True` together in
+one run, S3/IRSA confirmed clean for reporter/fetcher with zero manual
+intervention. `fees` and `pix_indirect_btg` are still untested. The stack
+was deliberately torn down afterward (data-layer teardown, no app-layer
+workaround) to test the DELETE-path fix below on a real run.
 
 Repos involved:
 - `platform-orchestrator` (Go operator + Helm chart + module catalog) —
-  branch `feat/operator-e2e-hardening`, PR #2, HEAD `46175de` at checkpoint
-  time. All fixes below are committed + pushed there unless noted.
+  branch `feat/operator-e2e-hardening`, HEAD `46175de` at this update.
+  Separately, PR #1 (`ci/adopt-github-workflows`) adopts the shared
+  LerianStudio CI/security pipelines (go-release/go-pr-validation/
+  go-security) — lint now passes; still blocked on (a) `DOCKERHUB_IMAGE_
+  PULL_TOKEN`/`_PUSH_TOKEN` org secrets not scoped to this repo (needs an
+  org admin, not fixable from the repo) and (b) 40 real govulncheck
+  findings in the helm.sh/helm/v3 OCI-registry/containerd dependency
+  chain (deferred, needs its own dependency-bump investigation).
 - `lerian-cloudformation-foundation` — `products/lerian-platform/*.yaml`
-  (the CFN templates + bootstrap Lambda) and `templates/eks.yaml`. **Neither
-  is committed to git** — see blocker #1.
+  (the CFN templates + bootstrap Lambda) and the `templates/eks.yaml`/
+  `rds.yaml`/`documentdb.yaml`/`msk.yaml`/`ci.yml` diffs. **Now committed**
+  on branch `feat/lerian-platform-cfn-fixes` (commit `05db1a3`) — blocker
+  #1 below is resolved, push to origin pending.
 
 ---
 
 ## Blockers (must fix before calling this "v0 publishable")
 
-### 1. `products/lerian-platform/` and the `templates/eks.yaml` diff are not in git
-Everything that makes the live stack work today — the S3/IRSA fix, the MSK
-brokers fix, the license-secret naming fix, the `OIDCProviderHost` output —
-exists only as local files on one machine + whatever was last uploaded to
-the S3 templates bucket. Nothing is reproducible from `git clone`. This is
-the actual first blocker: fix this before anything else, or every other fix
-below is only as durable as one laptop's disk.
-- Action: `git add` + commit `products/lerian-platform/` (decide the fate of
-  the legacy `helm.yaml`/`app-stack.yaml`/`application.yaml` — keep as a
-  documented fallback, or delete once `orchestrator.yaml` fully replaces
-  them) and the `templates/eks.yaml` diff (`OIDCProviderHost` output).
+### 1. ~~`products/lerian-platform/` and the `templates/eks.yaml` diff are not in git~~ RESOLVED
+Committed on branch `feat/lerian-platform-cfn-fixes` (commit `05db1a3`):
+`products/lerian-platform/` in full (including the legacy `helm.yaml`/
+`app-stack.yaml`/`application.yaml` — kept as-is, fate undecided, not
+blocking), the `templates/eks.yaml` (`NodeAmiType` param + `OIDCProviderHost`
+output), `rds.yaml`/`documentdb.yaml` (alphanumeric-only generated
+passwords — punctuation was breaking postgres/mongodb URL parsing for
+downstream consumers), `msk.yaml`, `ci.yml`, and `template-versions.json`
+diffs. Not yet pushed to `origin` — an automated credential-leak check
+flagged two lines for manual review before push (both confirmed false
+positives: a literal `...` placeholder SSH key in a docs example, and an
+explicit `"RedisP@ss-1"` mock value in the local test harness, sitting
+right next to `FAKE-CA`). Push once confirmed.
 
 ### 2. Chart/image are alpha test builds, not a real release
 - `charts/platform-orchestrator` has never been tagged/pushed as a real
-  version — every alpha this session was `0.1.0-alpha.<timestamp>.<sha>`,
-  and `OrchestratorChartVersion`'s CFN default still points at one of those.
+  version. `OrchestratorChartVersion`'s CFN default now points at
+  `0.1.0-alpha.202608311431.46175de7` (bumped from a stale pin 5
+  fix-commits behind HEAD — the stale pin was itself a live-discovered bug:
+  reporter/bank_transfer failed with bugs already fixed in git but never
+  shipped in a chart+image; see "Already validated" below).
 - The manager image is `v0-e2e-21-5ffcb835-amd64` — a single-arch (amd64),
   manually-built-and-pushed tag from this session's live debugging, not a
   release artifact.
@@ -128,13 +145,20 @@ These don't block a "publishable in dev, one-click" v0 — they block the
   into ~9 keys of the `midaz-secrets` Secret — the dedicated-role bootstrap
   mechanism (`postgres-role-bootstrap`, already used by `access_manager`/
   `bank_transfer`/`pix_indirect_btg`) exists and isn't applied to `ledger`.
-- **Stack DELETE is not clean**: consistent with the operator's
-  install-once/disown model, deleting the stack removes the CRs and the
-  operator itself but NOT the module Helm releases — ALB/ENI/EBS resources
-  those releases created can orphan and block VPC teardown (this session hit
-  the ENI-orphan variant of this twice, manually unstuck both times). A
-  "best-effort teardown" step in the custom resource's Delete path (only
-  when the stack owns the cluster) would close this.
+- ~~**Stack DELETE is not clean**~~ FIXED: the Lambda's Delete handler now
+  calls `purge_module_helm_releases()` before deleting the Platform CR,
+  uninstalling every enabled module's Helm release (discovered live via
+  `helm list` per namespace, not reconstructed hash names). This was found
+  because CFN's own internal "delete the failed resource, then retry
+  create" cycle on a failed attempt was leaving an orphaned release behind
+  that the next attempt's Helm install then collided with on ownership
+  metadata (`invalid ownership metadata; ... current value is
+  lp-<module>-<old-hash>`) — confirmed live across reporter/console/ledger/
+  tracer in the same run. ALB/ENI/EBS-orphan-blocking-VPC-teardown risk is
+  reduced accordingly but not exhaustively re-tested past one full delete
+  cycle (which used the OLD Lambda code, pre-fix — the fix itself has not
+  yet been exercised by a real CFN retry or delete; validate on the next
+  create-stack).
 - **`bank_transfer` ships `JD_SANDBOX_MODE=true`/`ENV_NAME=development`
   defaults** — correct for a v0-dev checkpoint, wrong defaults to carry into
   a real Marketplace listing without a loud "this is a rails sandbox" flag.
@@ -151,13 +175,28 @@ These don't block a "publishable in dev, one-click" v0 — they block the
 
 ## Already validated (do not re-litigate, just keep regression-testing)
 
-- `Platform.status.Ready=True` end-to-end from a **fresh `create-stack`**
-  (not `kubectl` patches) with `access_manager`, `ledger`, `tracer`,
-  `console`, `bank_transfer`, `reporter`, `fetcher` all enabled via real CFN
-  parameters (`Enable*=true`), including the S3/IRSA fix for reporter/
-  fetcher — confirmed live at checkpoint time (`ObjectStorageRole`,
-  `ReporterStorageBucket`, `FetcherStorageBucket` all `CREATE_COMPLETE`
-  in the same run).
+- **All 7 tested modules reached `Platform.status.Ready=True` together**
+  in one run (`access_manager`, `ledger`, `tracer`, `console`,
+  `bank_transfer`, `reporter`, `fetcher`), via real CFN
+  `create-stack`/`update-stack` calls (not `kubectl` patches), with the S3/
+  IRSA fix for reporter/fetcher confirmed clean (`"Storage initialized"`
+  log lines with the correct bucket name, correct `eks.amazonaws.com/
+  role-arn` SA annotations, zero manual intervention).
+- Root-caused and fixed live in this same run, all now in
+  `orchestrator.yaml`: (a) `full-stack.yaml` passing 5 stale GitOps/
+  `ConsoleAdminPassword` params to a template that never declared them;
+  (b) the Lambda's `install_tools()` hitting `EADDRNOTAVAIL` downloading
+  kubectl/helm — non-VPC Lambda has no real IPv6 egress, dl.k8s.io/
+  get.helm.sh are dual-stack — fixed by forcing IPv4-only DNS resolution,
+  plus retry-with-backoff for the separate `Connection timed out` failure
+  mode (a shared-egress-IP transient block, distinct from the IPv6 issue);
+  (c) `OrchestratorChartVersion` pinned 5 fix-commits behind
+  `platform-orchestrator` HEAD — the CFN default silently kept shipping
+  bugs (RabbitMQ topology bootstrap, postgres-role-bootstrap Job race)
+  that were already fixed in git but never actually built into a
+  chart+image; (d) CFN's delete-then-recreate retry model orphaning Helm
+  releases that then blocked the next attempt on ownership metadata (see
+  "known limitations" DELETE fix above).
 - `access_manager`'s license validates against the dev gateway via
   `LicenseUseDevGateway` (a real CFN parameter now, not a hardcoded
   literal — was the very first thing fixed this session and stayed fixed
@@ -198,11 +237,14 @@ These don't block a "publishable in dev, one-click" v0 — they block the
 
 ## Suggested sequence to close the gap
 
-1. **Commit** (`products/lerian-platform/` + `templates/eks.yaml` diff) —
-   closes blocker #1, everything else becomes reviewable/reproducible.
+1. ~~**Commit**~~ DONE (`feat/lerian-platform-cfn-fixes`, commit `05db1a3`) —
+   push to origin once the two flagged lines are confirmed (see blocker #1).
 2. **Cut a real `v0.1.0`** chart+image tag, point `OrchestratorChartVersion`
    at it — closes blocker #2's acute half (alpha-tag-in-prod-default); the
-   ledger/tracer alpha-chart dependency stays a documented limitation.
+   ledger/tracer alpha-chart dependency stays a documented limitation. Also
+   unblocks PR #1's CI (`platform-orchestrator`, `ci/adopt-github-workflows`)
+   which still needs an org admin for the DockerHub secret scoping and a
+   separate pass on the 40 govulncheck findings.
 3. **Write the README** (mirror `products/midaz/README.md`'s Launch Stack
    table), publish templates to a public bucket, scope `fees`/
    `pix_indirect_btg` OUT (`Enable*=false` defaults, called out as
