@@ -46,63 +46,78 @@ Metadata:
           - AmazonMQKMSKeyArn
           - MSKKMSKeyArn
       - Label:
-          default: "Object Storage"
+          default: "Licensing — Global"
         Parameters:
-          - ReporterStorageBucketName
-          - FetcherStorageBucketName
-          - ObjectStorageRoleArn
+          - LicenseUseDevGateway
       - Label:
-          default: "Modules — Enable/Disable"
+          default: "Module: Access Manager (Casdoor)"
         Parameters:
           - EnableAccessManager
-          - EnableLedger
-          - EnableReporter
-          - EnableTracer
-          - EnableFetcher
-          - EnableConsole
-          - EnableBankTransfer
-          - EnableFees
-      - Label:
-          default: "Modules — Chart Versions"
-        Parameters:
           - AccessManagerChartVersion
+          - AuthorizerClientId
+          - AuthorizerClientSecret
+          - AccessManagerOrganizationIds
+          - AccessManagerLicenseKey
+      - Label:
+          default: "Module: Ledger (Midaz)"
+        Parameters:
+          - EnableLedger
           - LedgerChartVersion
+      - Label:
+          default: "Module: Reporter"
+        Parameters:
+          - EnableReporter
           - ReporterChartVersion
+          - ReporterStorageBucketName
+      - Label:
+          default: "Module: Tracer"
+        Parameters:
+          - EnableTracer
           - TracerChartVersion
+      - Label:
+          default: "Module: Fetcher"
+        Parameters:
+          - EnableFetcher
           - FetcherChartVersion
+          - FetcherStorageBucketName
+          - FetcherLicenseKey
+      - Label:
+          default: "Module: Product Console"
+        Parameters:
+          - EnableConsole
           - ConsoleChartVersion
+          - NextAuthUrl
+          - EnableIngress
+          - IngressHostname
+          - IngressScheme
+          - IngressCertificateArn
+      - Label:
+          default: "Module: BR Bank Transfer"
+        Parameters:
+          - EnableBankTransfer
           - BankTransferChartVersion
+          - BankTransferLicenseKey
+      - Label:
+          default: "Module: Fees Plugin"
+        Parameters:
+          - EnableFees
           - FeesChartVersion
+          - FeesLicenseKey
+      - Label:
+          default: "Object Storage — Shared"
+        Parameters:
+          - ObjectStorageRoleArn
       - Label:
           default: "platform-orchestrator (controller)"
         Parameters:
           - OrchestratorChartRepo
           - OrchestratorChartVersion
       - Label:
-          default: "Access Manager — Authorizer & Licensing"
-        Parameters:
-          - AuthorizerClientId
-          - AuthorizerClientSecret
-          - AccessManagerOrganizationIds
-          - LicenseUseDevGateway
-          - AccessManagerLicenseKey
-          - FetcherLicenseKey
-          - FeesLicenseKey
-          - BankTransferLicenseKey
-      - Label:
           default: "OCI Helm Registry (private charts only)"
         Parameters:
           - HelmRegistryHost
           - HelmRegistryUser
           - HelmRegistryToken
-      - Label:
-          default: "Console & Ingress"
-        Parameters:
-          - NextAuthUrl
-          - EnableIngress
-          - IngressHostname
-          - IngressScheme
-          - IngressCertificateArn
       - Label:
           default: "Advanced"
         Parameters:
