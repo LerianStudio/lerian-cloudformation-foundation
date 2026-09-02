@@ -11,6 +11,224 @@ Description: |
   helm-delivery only (Platform.spec.delivery=helm). See inline comments for details
   and open assumptions. (c) Lerian Studio - https://lerian.studio
 
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "General Configuration"
+        Parameters:
+          - ProjectName
+          - EnvironmentName
+          - ClusterName
+          - PlatformNamespace
+          - OperatorNamespace
+          - PermissionsBoundaryArn
+      - Label:
+          default: "Data Layer — Endpoints & Secrets"
+        Parameters:
+          - RDSEndpoint
+          - RDSReplicaEndpoint
+          - RDSSecretArn
+          - DocumentDBEndpoint
+          - DocumentDBSecretArn
+          - ElastiCacheEndpoint
+          - ElastiCacheSecretArn
+          - AmazonMQEndpoint
+          - AmazonMQSecretArn
+          - MSKClusterArn
+          - MSKSecretArn
+      - Label:
+          default: "Data Layer — Encryption (KMS)"
+        Parameters:
+          - RDSKMSKeyArn
+          - DocumentDBKMSKeyArn
+          - ElastiCacheKMSKeyArn
+          - AmazonMQKMSKeyArn
+          - MSKKMSKeyArn
+      - Label:
+          default: "Object Storage"
+        Parameters:
+          - ReporterStorageBucketName
+          - FetcherStorageBucketName
+          - ObjectStorageRoleArn
+      - Label:
+          default: "Modules — Enable/Disable"
+        Parameters:
+          - EnableAccessManager
+          - EnableLedger
+          - EnableReporter
+          - EnableTracer
+          - EnableFetcher
+          - EnableConsole
+          - EnableBankTransfer
+          - EnableFees
+      - Label:
+          default: "Modules — Chart Versions"
+        Parameters:
+          - AccessManagerChartVersion
+          - LedgerChartVersion
+          - ReporterChartVersion
+          - TracerChartVersion
+          - FetcherChartVersion
+          - ConsoleChartVersion
+          - BankTransferChartVersion
+          - FeesChartVersion
+      - Label:
+          default: "platform-orchestrator (controller)"
+        Parameters:
+          - OrchestratorChartRepo
+          - OrchestratorChartVersion
+      - Label:
+          default: "Access Manager — Authorizer & Licensing"
+        Parameters:
+          - AuthorizerClientId
+          - AuthorizerClientSecret
+          - AccessManagerOrganizationIds
+          - LicenseUseDevGateway
+          - AccessManagerLicenseKey
+          - FetcherLicenseKey
+          - FeesLicenseKey
+          - BankTransferLicenseKey
+      - Label:
+          default: "OCI Helm Registry (private charts only)"
+        Parameters:
+          - HelmRegistryHost
+          - HelmRegistryUser
+          - HelmRegistryToken
+      - Label:
+          default: "Console & Ingress"
+        Parameters:
+          - NextAuthUrl
+          - EnableIngress
+          - IngressHostname
+          - IngressScheme
+          - IngressCertificateArn
+      - Label:
+          default: "Advanced"
+        Parameters:
+          - EnvironmentContractCARef
+    ParameterLabels:
+      ProjectName:
+        default: "Project Name"
+      EnvironmentName:
+        default: "Environment Name"
+      ClusterName:
+        default: "EKS Cluster Name"
+      PlatformNamespace:
+        default: "Platform Namespace"
+      OperatorNamespace:
+        default: "Operator Namespace"
+      PermissionsBoundaryArn:
+        default: "IAM Permissions Boundary ARN"
+      RDSEndpoint:
+        default: "RDS PostgreSQL Endpoint"
+      RDSReplicaEndpoint:
+        default: "RDS Read Replica Endpoint"
+      RDSSecretArn:
+        default: "RDS Secret ARN"
+      DocumentDBEndpoint:
+        default: "DocumentDB Endpoint"
+      DocumentDBSecretArn:
+        default: "DocumentDB Secret ARN"
+      ElastiCacheEndpoint:
+        default: "ElastiCache Endpoint"
+      ElastiCacheSecretArn:
+        default: "ElastiCache Auth Token Secret ARN"
+      AmazonMQEndpoint:
+        default: "AmazonMQ Broker Endpoint"
+      AmazonMQSecretArn:
+        default: "AmazonMQ Secret ARN"
+      MSKClusterArn:
+        default: "MSK Cluster ARN"
+      MSKSecretArn:
+        default: "MSK SASL/SCRAM Secret ARN"
+      RDSKMSKeyArn:
+        default: "RDS KMS Key ARN"
+      DocumentDBKMSKeyArn:
+        default: "DocumentDB KMS Key ARN"
+      ElastiCacheKMSKeyArn:
+        default: "ElastiCache KMS Key ARN"
+      AmazonMQKMSKeyArn:
+        default: "AmazonMQ KMS Key ARN"
+      MSKKMSKeyArn:
+        default: "MSK KMS Key ARN"
+      ReporterStorageBucketName:
+        default: "Reporter S3 Bucket"
+      FetcherStorageBucketName:
+        default: "Fetcher S3 Bucket"
+      ObjectStorageRoleArn:
+        default: "Object Storage IRSA Role ARN"
+      EnableAccessManager:
+        default: "Deploy Access Manager"
+      EnableLedger:
+        default: "Deploy Ledger (Midaz)"
+      EnableReporter:
+        default: "Deploy Reporter"
+      EnableTracer:
+        default: "Deploy Tracer"
+      EnableFetcher:
+        default: "Deploy Fetcher"
+      EnableConsole:
+        default: "Deploy Product Console"
+      EnableBankTransfer:
+        default: "Deploy BR Bank Transfer"
+      EnableFees:
+        default: "Deploy Fees Plugin"
+      AccessManagerChartVersion:
+        default: "Access Manager Chart Version"
+      LedgerChartVersion:
+        default: "Ledger (Midaz) Chart Version"
+      ReporterChartVersion:
+        default: "Reporter Chart Version"
+      TracerChartVersion:
+        default: "Tracer Chart Version"
+      FetcherChartVersion:
+        default: "Fetcher Chart Version"
+      ConsoleChartVersion:
+        default: "Console Chart Version"
+      BankTransferChartVersion:
+        default: "BR Bank Transfer Chart Version"
+      FeesChartVersion:
+        default: "Fees Plugin Chart Version"
+      OrchestratorChartRepo:
+        default: "Orchestrator Chart Repo (OCI)"
+      OrchestratorChartVersion:
+        default: "Orchestrator Chart Version"
+      AuthorizerClientId:
+        default: "Authorizer Client ID"
+      AuthorizerClientSecret:
+        default: "Authorizer Client Secret"
+      AccessManagerOrganizationIds:
+        default: "Organization IDs (optional)"
+      LicenseUseDevGateway:
+        default: "Use Dev License Gateway"
+      AccessManagerLicenseKey:
+        default: "Access Manager License Key"
+      FetcherLicenseKey:
+        default: "Fetcher License Key"
+      FeesLicenseKey:
+        default: "Fees License Key"
+      BankTransferLicenseKey:
+        default: "BR Bank Transfer License Key"
+      HelmRegistryHost:
+        default: "OCI Registry Host"
+      HelmRegistryUser:
+        default: "Registry Username"
+      HelmRegistryToken:
+        default: "Registry Token"
+      NextAuthUrl:
+        default: "Console Public URL"
+      EnableIngress:
+        default: "Enable ALB Ingress"
+      IngressHostname:
+        default: "Ingress Hostname"
+      IngressScheme:
+        default: "ALB Scheme"
+      IngressCertificateArn:
+        default: "ACM Certificate ARN"
+      EnvironmentContractCARef:
+        default: "Custom CA Bundle (base64 PEM, advanced)"
+
 Parameters:
   # ---------------------------------------------------------------------------
   # General
