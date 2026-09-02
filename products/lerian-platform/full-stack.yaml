@@ -454,15 +454,24 @@ Parameters:
 
   NodeInstanceType:
     Type: String
-    # x86_64, NOT the inherited ARM64/Graviton default (foundation.yaml's own
-    # default is c7g.large) — the pinned platform-orchestrator manager image
-    # (OrchestratorChartVersion's Default in orchestrator.yaml,
-    # v0.1.0-e2e-479ebfb-amd64) is single-arch amd64, the only architecture
-    # actually live-validated end-to-end (c6i.xlarge, per CHECKPOINT.md). A
-    # Graviton default here puts the operator pod in ImagePullBackOff/exec
-    # format error on day one.
-    Default: c6i.xlarge
+    # ARM64/Graviton, matching FoundationStack's own default. The shared
+    # foundation.yaml this template nests (releases/latest/foundation.yaml)
+    # is Graviton-only — its AllowedValues dropped the x86_64 c6i.* family
+    # entirely (AL2023 ARM64 managed AMI), so an x86_64 default here fails
+    # CREATE_FAILED instantly with "Parameter 'NodeInstanceType' must be one
+    # of AllowedValues" before the nested stack even starts. The prior
+    # x86_64 default (c6i.xlarge) was set because the platform-orchestrator
+    # manager image was single-arch amd64 — that's no longer true as of
+    # OrchestratorChartVersion 0.1.0-e2e.37a282a-multiarch, which ships a
+    # linux/amd64+linux/arm64 manifest list, so Graviton is correct on both
+    # counts now: it's what the shared foundation.yaml requires, and the
+    # operator image runs on it natively.
+    Default: c7g.large
     AllowedValues:
+      # Trimmed to exactly the live foundation.yaml's AllowedValues set
+      # (verified against releases/latest/foundation.yaml on S3) — the
+      # x86_64 c6i.* entries were removed since the nested FoundationStack
+      # rejects them regardless of what this outer template allows.
       - c7g.medium
       - c7g.large
       - c7g.xlarge
@@ -478,9 +487,6 @@ Parameters:
       - c6g.large
       - c6g.xlarge
       - c6g.2xlarge
-      - c6i.large
-      - c6i.xlarge
-      - c6i.2xlarge
       - m6g.medium
       - m6g.large
       - m6g.xlarge
@@ -983,12 +989,14 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.0-e2e.37a282a"
+    Default: "0.1.0-e2e.37a282a-multiarch"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of
-      this pin — this bump consolidates Tracer into the Ledger module
-      (no more standalone EnableTracer/TracerChartVersion parameters).
+      this pin — this bump rebuilds the manager image as genuine multi-arch
+      (linux/amd64 + linux/arm64) so it runs on the Graviton-only nodes the
+      shared foundation.yaml now requires (see this file's NodeInstanceType
+      comment above).
 
   # ===========================================================================
   # OCI HELM REGISTRY (private charts only)

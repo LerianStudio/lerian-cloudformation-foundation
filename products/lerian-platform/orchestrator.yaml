@@ -532,47 +532,53 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.0-e2e.37a282a"
+    Default: "0.1.0-e2e.37a282a-multiarch"
     Description: >-
-      platform-orchestrator chart version. Pinned to the build from commit
-      37a282a (branch feat/operator-e2e-hardening) — one commit past the
-      previously-published 479ebfb build, consolidating the catalog's
-      standalone `tracer` ModuleDefinition (own chart/release/namespace)
-      into the `ledger` descriptor instead: midaz-helm v9.1.0/helm#1926
-      folded Tracer directly into the SAME chart Ledger already installs
-      (templates/tracer/*.yaml, gated by tracer.enabled — ledger.go now
-      sets it unconditionally, same posture as crm.enabled). There is no
-      more standalone EnableTracer/TracerChartVersion parameter pair in
-      this template as of this bump (see LedgerChartVersion above and the
-      Tracer note in the README) — Tracer deploys and versions together
-      with Ledger from here on. No other catalog/reconcile behavior
-      changed versus 479ebfb.
-      Pushed to oci://ghcr.io/lerianstudio/alpha/platform-orchestrator-helm
-      for this sandbox test — a PUBLIC package, still an alpha (no CI/CD
-      publish pipeline exists yet for this chart; every build to date has
-      been pushed by hand). Manager image
-      ghcr.io/lerianstudio/platform-orchestrator:v0.1.0-e2e-37a282a-amd64 is
-      also real, published, and public (single-arch amd64, matching the
-      sandbox EKS node type — not multi-arch). Chart content is
-      byte-equivalent to the 41f3ee9 chart (sourced from
-      LerianStudio/helm-internal, branch feat/add-platform-orchestrator-chart,
-      commit 57a4873, which additionally drops the now-orphaned
-      platform.modules.tracer convenience entry from this chart's OWN
-      values.yaml — the platform.enabled=true self-managed path, distinct
-      from this CFN template's REGISTRY dict); only Chart.yaml's
-      version/appVersion and that values.yaml trim changed versus 479ebfb's
-      pin. Everything from the prior pin still applies on top of this: real
+      platform-orchestrator chart version. Still built from manager commit
+      37a282a (branch feat/operator-e2e-hardening) — this bump does NOT
+      change any catalog/reconcile code versus the 0.1.0-e2e.37a282a pin.
+      What changed: a live create-stack attempt against this exact pin
+      failed instantly with "Parameter 'NodeInstanceType' must be one of
+      AllowedValues", because the shared releases/latest/foundation.yaml
+      this product nests (FoundationStack in full-stack.yaml) turned out to
+      be a newer, ARM64/Graviton-only build (AL2023 ARM64 managed AMI) —
+      it dropped the x86_64 c6i.* family from NodeInstanceType entirely.
+      The manager image was single-arch amd64
+      (ghcr.io/lerianstudio/platform-orchestrator:v0.1.0-e2e-37a282a-amd64),
+      so there was no Graviton-capable image to fall back to. Rather than
+      pin full-stack.yaml to a private/forked copy of foundation.yaml, the
+      manager image was rebuilt as genuine multi-arch: same source (commit
+      37a282a, cross-compiled via the Dockerfile's existing
+      TARGETOS/TARGETARCH build-args — no Dockerfile changes were needed)
+      but pushed as ONE manifest-list tag covering both platforms:
+      ghcr.io/lerianstudio/platform-orchestrator:v0.1.0-e2e-37a282a-multiarch
+      (linux/amd64 + linux/arm64, verified via `docker buildx imagetools
+      inspect`). Chart content is otherwise byte-equivalent to the 57a4873
+      chart (LerianStudio/helm-internal, branch
+      feat/add-platform-orchestrator-chart) — only Chart.yaml's
+      version/appVersion moved to point at the multiarch image tag
+      (commit e4d0df4). Pushed to
+      oci://ghcr.io/lerianstudio/alpha/platform-orchestrator-helm — a
+      PUBLIC package, still an alpha (no CI/CD publish pipeline exists yet
+      for this chart; every build to date has been pushed by hand).
+      full-stack.yaml's NodeInstanceType Default/AllowedValues were
+      reverted to Graviton (matching foundation.yaml's own default,
+      c7g.large) in the same fix — Graviton is now correct on both counts:
+      it's what the live shared foundation.yaml requires, and the operator
+      image runs on it natively. Everything from the prior pin still
+      applies on top of this: real
       access_manager/ledger/tracer/console/bank_transfer/reporter/fetcher
       convergence confirmed live end-to-end previously — see git history on
       commits ae2e0c9, 89f72ac, 94c7d6c, 1948f2b, acd4ed5, 0d6e682, e49de1f,
       e904119, ae2e0c9, 4ccf6d7, 3802277, f040a64, 5ffcb83 for that earlier
-      chain of live-discovered fixes. This specific build (37a282a image +
-      0.1.0-e2e.37a282a chart) has NOT itself been re-run through a live
-      create-stack as of this commit — that is a separate, already-paused
-      task another agent owns, specifically to confirm the ledger module
-      (with tracer now bundled in) reaches Ready. Everything else in this
-      build beyond the tracer consolidation is unchanged from the 479ebfb
-      build and inherits its validation status as described above.
+      chain of live-discovered fixes. This specific build (37a282a image,
+      multiarch + 0.1.0-e2e.37a282a-multiarch chart) has NOT itself been
+      re-run through a live create-stack as of this commit — that is a
+      separate task, owned by the user, who will run it directly (this
+      fix's own trigger was the NodeInstanceType CREATE_FAILED from that
+      earlier attempt). Everything else in this build beyond the multiarch
+      rebuild is unchanged from the 37a282a build and inherits its
+      validation status as described above.
 
   # ---------------------------------------------------------------------------
   # Access Manager (Casdoor) — authorizer (mother) credential + admin + license
