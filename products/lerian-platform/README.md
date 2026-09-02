@@ -15,7 +15,7 @@ sandbox account via real `create-stack`/`update-stack` calls.
 
 There are two supported deployment paths:
 
-- **`one-click.yaml`** — **Full Stack**: a single stack that provisions VPC,
+- **`full-stack.yaml`** — **Full Stack**: a single stack that provisions VPC,
   EKS, RDS, DocumentDB, ElastiCache, and AmazonMQ (nesting
   `templates/foundation.yaml` and `products/midaz/infrastructure.yaml`),
   then nests `orchestrator.yaml` as the Application layer and wires every
@@ -27,14 +27,15 @@ There are two supported deployment paths:
   Requires you to already have RDS/DocumentDB/ElastiCache/AmazonMQ (and
   their Secrets Manager ARNs) on hand — see Prerequisites below.
 
-`full-stack.yaml`, `app-stack.yaml`, `application.yaml`, and `helm.yaml` are
-earlier iterations kept in this directory for reference — they are **not**
-the deployment path described here; do not launch them expecting this
-behavior.
+`app-stack.yaml`, `application.yaml`, and `helm.yaml` are earlier iterations
+kept in this directory for reference — they are **not** the deployment path
+described here; do not launch them expecting this behavior. (The previous
+`full-stack.yaml` occupying this name was one of those legacy iterations;
+it has been replaced by the nested-stack template described above.)
 
 ## Prerequisites
 
-**Full Stack (`one-click.yaml`)** — none. It provisions the EKS cluster and
+**Full Stack (`full-stack.yaml`)** — none. It provisions the EKS cluster and
 the entire data layer itself; you only need an AWS account and the
 `sa-east-1` region (see below).
 
@@ -46,7 +47,7 @@ AmazonMQ (RabbitMQ), and MSK, with their endpoints/Secrets Manager ARNs/KMS
 key ARNs on hand to pass in as stack parameters. Midaz's own
 `foundation.yaml` + `infrastructure.yaml` templates in this repo provision
 that same infra shape and are a reasonable way to stand it up first if you
-don't already have it — or just launch `one-click.yaml` instead, which does
+don't already have it — or just launch `full-stack.yaml` instead, which does
 this composition for you.
 
 ## ⚠️ Region: `sa-east-1` only
@@ -99,7 +100,7 @@ Everything else in the catalog (`ledger`, `tracer`, `access_manager`,
 | **Full Stack** | VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and the platform-orchestrator + module set — all from scratch, single click | [![Launch][img]][lerian-platform-full-sa-east-1] |
 | **Orchestrator (Application only)** | Installs `platform-orchestrator` onto an **existing** EKS cluster and reconciles the enabled module set — requires the data layer already provisioned (see Prerequisites) | [![Launch][img]][lerian-platform-orchestrator-sa-east-1] |
 
-[lerian-platform-full-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/one-click.yaml&stackName=lerian-platform
+[lerian-platform-full-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/full-stack.yaml&stackName=lerian-platform
 
 [lerian-platform-orchestrator-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/orchestrator.yaml&stackName=lerian-platform
 
@@ -117,7 +118,7 @@ Prerequisites). Everything else has a working default.
 live-validated build — see the parameter's inline description in
 `orchestrator.yaml` for exactly which commit and what was validated on it.
 
-`one-click.yaml` (Full Stack) drops that list to just **3** required
+`full-stack.yaml` (Full Stack) drops that list to just **3** required
 parameters — `RDSMasterUsername`, `DocumentDBMasterUsername`,
 `AmazonMQAdminUsername` — since it provisions `ProjectName`/
 `EnvironmentName`/`ClusterName` and every data-layer endpoint/secret ARN
