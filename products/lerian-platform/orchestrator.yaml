@@ -488,8 +488,28 @@ Parameters:
   # ---------------------------------------------------------------------------
   AccessManagerValuesOverride:
     Type: String
-    Default: ""
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. See the comment above this section for the exact shape expected."
+    # Non-empty default (unlike every other module's ValuesOverride, which
+    # default to ""): plugin-access-manager's chart hardcodes
+    # ghcr.io/lerianstudio/caradhras-user-init:3.2.0-beta.67 as the fallback
+    # for its auth-init-user Job (charts/plugin-access-manager/templates/
+    # auth/init_user.yaml on LerianStudio/helm main, chart 9.2.1 — same
+    # broken default as our pinned 9.2.0) and that tag is single-arch amd64
+    # only (confirmed via docker buildx imagetools inspect — no arm64
+    # manifest). Since this template's shared foundation.yaml is ARM64/
+    # Graviton-only (see NodeInstanceType's comment), the default init-user
+    # Job would ImagePullBackOff forever without this override. 3.3.0/3.3.1
+    # are the first stable tags actually published multi-arch (amd64+arm64,
+    # confirmed the same way) — pin 3.3.1. Every other image this template's
+    # 6 enabled modules pull (ledger/ledger-migrations/crm/tracer/tracer-
+    # migrations, plugin-identity/plugin-auth/caradhras, product-console,
+    # plugin-br-bank-transfer, reporter-manager/worker, fetcher-manager/
+    # worker) was individually verified multi-arch already — this was the
+    # only exception found.
+    Default: |
+      auth:
+        initUser:
+          image: "ghcr.io/lerianstudio/caradhras-user-init:3.3.1"
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to pinning auth-init-user's image to a multi-arch tag (see comment above) — override only if you need something different."
   LedgerValuesOverride:
     Type: String
     Default: ""
@@ -613,8 +633,15 @@ Parameters:
     Description: "Lerian license key for the BR Bank Transfer plugin. Each licensed plugin has its own key."
   AccessManagerOrganizationIds:
     Type: String
-    Default: ""
-    Description: "Comma-separated organization IDs for the Access Manager (optional)."
+    # NOT actually optional despite the old description below — confirmed
+    # live: plugin-access-manager-auth panics on boot ("Invalid
+    # configuration: at least one organization ID is required" -> "panic:
+    # LicenseClient is nil, cannot create middleware") when this is empty.
+    # Defaulted to a placeholder UUID so the one-click path doesn't crash
+    # out of the box; override with a real organization ID for anything
+    # beyond a smoke test.
+    Default: "11111111-1111-1111-1111-111111111111"
+    Description: "Comma-separated organization IDs for the Access Manager. NOT optional in practice — auth panics on boot without at least one (see comment above); defaulted to a placeholder UUID."
   LicenseUseDevGateway:
     Type: String
     Default: "false"

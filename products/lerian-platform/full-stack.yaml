@@ -827,8 +827,12 @@ Parameters:
 
   AccessManagerOrganizationIds:
     Type: String
-    Default: ""
-    Description: "Comma-separated organization IDs for the Access Manager (optional)."
+    # NOT actually optional — see orchestrator.yaml's own Parameter comment
+    # (plugin-access-manager-auth panics on boot without at least one org
+    # ID). Defaulted to a placeholder UUID so the one-click path doesn't
+    # crash out of the box.
+    Default: "11111111-1111-1111-1111-111111111111"
+    Description: "Comma-separated organization IDs for the Access Manager. NOT optional in practice — see orchestrator.yaml's own Parameter description."
 
   AccessManagerLicenseKey:
     Type: String
@@ -838,8 +842,18 @@ Parameters:
 
   AccessManagerValuesOverride:
     Type: String
-    Default: ""
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. See orchestrator.yaml's own Parameter description for the exact shape expected."
+    # Non-empty default — see orchestrator.yaml's own Parameter comment.
+    # plugin-access-manager's auth-init-user Job defaults to a single-arch
+    # amd64-only image (ghcr.io/lerianstudio/caradhras-user-init:
+    # 3.2.0-beta.67); this shared foundation.yaml is ARM64/Graviton-only, so
+    # without this override that Job ImagePullBackOffs forever. 3.3.1 is the
+    # first stable multi-arch tag (confirmed via docker buildx imagetools
+    # inspect).
+    Default: |
+      auth:
+        initUser:
+          image: "ghcr.io/lerianstudio/caradhras-user-init:3.3.1"
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to pinning auth-init-user's image to a multi-arch tag — see orchestrator.yaml's own Parameter description for details."
 
   # ===========================================================================
   # MODULE: LEDGER (MIDAZ)
