@@ -462,7 +462,7 @@ Parameters:
     # x86_64, NOT the inherited ARM64/Graviton default (foundation.yaml's own
     # default is c7g.large) — the pinned platform-orchestrator manager image
     # (OrchestratorChartVersion's Default in orchestrator.yaml,
-    # v0.1.0-e2e-9952caa-amd64) is single-arch amd64, the only architecture
+    # v0.1.0-e2e-479ebfb-amd64) is single-arch amd64, the only architecture
     # actually live-validated end-to-end (c6i.xlarge, per CHECKPOINT.md). A
     # Graviton default here puts the operator pod in ImagePullBackOff/exec
     # format error on day one.
@@ -836,8 +836,8 @@ Parameters:
 
   LedgerChartVersion:
     Type: String
-    Default: "8.10.0-alpha.202608241922.b43a8eac"
-    Description: midaz-helm chart version
+    Default: "9.1.0"
+    Description: midaz-helm chart version. See orchestrator.yaml's own Parameter description for the compatibility check behind this pin.
 
   # ===========================================================================
   # MODULE: REPORTER
@@ -994,7 +994,7 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.0-e2e.9952caa"
+    Default: "0.1.0-e2e.479ebfb"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of

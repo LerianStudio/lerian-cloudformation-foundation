@@ -435,11 +435,20 @@ Parameters:
   # ---------------------------------------------------------------------------
   LedgerChartVersion:
     Type: String
-    # Alpha (helm#1927, feat/midaz-cloud-mask, not yet merged) — matches the
-    # orchestrator catalog's ledger.go Chart.Repo default (oci://.../alpha/
-    # midaz-helm). Must stay in lockstep with the catalog: this tag does not
-    # exist under the non-alpha midaz-helm path.
-    Default: "8.10.0-alpha.202608241922.b43a8eac"
+    # STABLE as of platform-orchestrator commit 479ebfb (branch
+    # feat/operator-e2e-hardening): the orchestrator catalog's ledger.go
+    # Chart.Repo default moved OFF oci://.../alpha/midaz-helm onto the
+    # released oci://ghcr.io/lerianstudio/midaz-helm path — helm#1927's
+    # REDIS_HOST datastore-mask work merged into LerianStudio/helm main and
+    # shipped in the 9.1.0 release. Verified (via gh api against helm main):
+    # charts/midaz/templates/ledger/configmap.yaml's REDIS_HOST combining
+    # logic and every values shape the catalog's ledger.go ValueMap relies on
+    # (global.datastores.* masks, global.auth, global.multiTenant,
+    # global.externalPostgresDefinitions.*, subchart enabled toggles,
+    # ledger.configmap.* open dict) are unchanged from the alpha pin. Must
+    # stay in lockstep with the catalog: this tag does not exist under the
+    # alpha/midaz-helm path anymore.
+    Default: "9.1.0"
     Description: midaz-helm chart version
   ReporterChartVersion:
     Type: String
@@ -506,25 +515,29 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.0-e2e.9952caa"
+    Default: "0.1.0-e2e.479ebfb"
     Description: >-
       platform-orchestrator chart version. Pinned to the build from commit
-      9952caa (branch feat/operator-e2e-hardening) — a superset of 46175de,
-      the last commit live-validated end-to-end (7 of 9 catalog modules
-      reached Platform.status.Ready=True via real create-stack against the
-      AWS sandbox). The commits between 46175de and 9952caa are CI/dependency
-      hygiene only (CVE fixes in oras-go/helm.sh/containerd, deprecated
-      controller-runtime scheme.Builder replacement, Dockerfile base bump to
-      golang:1.26) — no functional/behavioral change to the operator's
-      reconcile logic, so the 46175de live-validation still applies to this
-      build. Pushed to oci://ghcr.io/lerianstudio/alpha/platform-orchestrator-helm
+      479ebfb (branch feat/operator-e2e-hardening) — one commit past the
+      previously-published 9952caa build, moving the catalog's `ledger`
+      module off its alpha midaz-helm pin onto the stable, released
+      midaz-helm v9.1.0 (see LedgerChartVersion above for the compatibility
+      check performed against LerianStudio/helm main before this bump). No
+      other catalog/reconcile behavior changed versus 9952caa, which was
+      itself a superset of 46175de, the last commit live-validated
+      end-to-end (7 of 9 catalog modules reached Platform.status.Ready=True
+      via real create-stack against the AWS sandbox) — the commits between
+      46175de and 9952caa were CI/dependency hygiene only (CVE fixes in
+      oras-go/helm.sh/containerd, deprecated controller-runtime
+      scheme.Builder replacement, Dockerfile base bump to golang:1.26).
+      Pushed to oci://ghcr.io/lerianstudio/alpha/platform-orchestrator-helm
       for this sandbox test — a PUBLIC package, still an alpha (no CI/CD
       publish pipeline exists yet for this chart; every build to date has
       been pushed by hand). Manager image
-      ghcr.io/lerianstudio/platform-orchestrator:v0.1.0-e2e-9952caa-amd64 is
+      ghcr.io/lerianstudio/platform-orchestrator:v0.1.0-e2e-479ebfb-amd64 is
       also real, published, and public (single-arch amd64, matching the
       sandbox EKS node type — not multi-arch). Chart content is
-      byte-equivalent to the last live-validated chart (sourced from
+      byte-equivalent to the 9952caa chart (sourced from
       LerianStudio/helm-internal, branch feat/add-platform-orchestrator-chart,
       commit 41f3ee9); only Chart.yaml's version/appVersion changed to point
       at this build. Everything from the prior pin (0c8f640a) still applies
@@ -533,10 +546,13 @@ Parameters:
       see git history on commits ae2e0c9, 89f72ac, 94c7d6c, 1948f2b, acd4ed5,
       0d6e682, e49de1f, e904119, ae2e0c9, 4ccf6d7, 3802277, f040a64, 5ffcb83
       for that earlier chain of live-discovered fixes. This specific build
-      (9952caa image + 0.1.0-e2e.9952caa chart) has NOT itself been re-run
-      through a live create-stack — the CI/dependency-hygiene commits since
-      46175de are believed behavior-neutral but that belief is untested on
-      this exact artifact pair.
+      (479ebfb image + 0.1.0-e2e.479ebfb chart) has NOT itself been re-run
+      through a live create-stack as of this commit — that is the next step
+      in this session, specifically to confirm the ledger module reaches
+      Ready on midaz-helm v9.1.0 (not just that the chart pulls/renders).
+      Everything else in this build beyond the ledger version bump is
+      unchanged from the 9952caa build and inherits its validation status as
+      described above.
 
   # ---------------------------------------------------------------------------
   # Access Manager (Casdoor) — authorizer (mother) credential + admin + license
