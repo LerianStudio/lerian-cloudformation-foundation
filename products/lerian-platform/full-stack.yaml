@@ -98,7 +98,6 @@ Metadata:
         Parameters:
           - EnableReporter
           - ReporterChartVersion
-          - ReporterStorageBucketName
       - Label:
           default: "Module: Tracer"
         Parameters:
@@ -109,7 +108,6 @@ Metadata:
         Parameters:
           - EnableFetcher
           - FetcherChartVersion
-          - FetcherStorageBucketName
           - FetcherLicenseKey
       - Label:
           default: "Module: Product Console"
@@ -133,10 +131,6 @@ Metadata:
           - EnableFees
           - FeesChartVersion
           - FeesLicenseKey
-      - Label:
-          default: "Object Storage — Shared"
-        Parameters:
-          - ObjectStorageRoleArn
       - Label:
           default: "platform-orchestrator (controller)"
         Parameters:
@@ -277,8 +271,6 @@ Metadata:
         default: "Deploy Reporter"
       ReporterChartVersion:
         default: "Reporter Chart Version"
-      ReporterStorageBucketName:
-        default: "Reporter S3 Bucket (optional, advanced)"
       # Module: Tracer
       EnableTracer:
         default: "Deploy Tracer"
@@ -289,8 +281,6 @@ Metadata:
         default: "Deploy Fetcher"
       FetcherChartVersion:
         default: "Fetcher Chart Version"
-      FetcherStorageBucketName:
-        default: "Fetcher S3 Bucket (optional, advanced)"
       FetcherLicenseKey:
         default: "Fetcher License Key"
       # Module: Product Console
@@ -322,9 +312,6 @@ Metadata:
         default: "Fees Plugin Chart Version"
       FeesLicenseKey:
         default: "Fees License Key"
-      # Object Storage — Shared
-      ObjectStorageRoleArn:
-        default: "Object Storage IRSA Role ARN (optional, advanced)"
       # platform-orchestrator (controller)
       PlatformNamespace:
         default: "Platform Namespace"
@@ -866,14 +853,6 @@ Parameters:
     Default: "4.1.0"
     Description: reporter-helm chart version
 
-  ReporterStorageBucketName:
-    Type: String
-    Default: ""
-    Description: >-
-      S3 bucket for Reporter object storage. This template does not
-      provision S3/IRSA — leave empty unless Reporter is enabled AND you are
-      providing your own bucket/role out of band (see Object Storage below).
-
   # ===========================================================================
   # MODULE: TRACER
   # ===========================================================================
@@ -901,14 +880,6 @@ Parameters:
     Type: String
     Default: "3.1.0"
     Description: fetcher-helm chart version
-
-  FetcherStorageBucketName:
-    Type: String
-    Default: ""
-    Description: >-
-      S3 bucket for Fetcher object storage. This template does not
-      provision S3/IRSA — leave empty unless Fetcher is enabled AND you are
-      providing your own bucket/role out of band (see Object Storage below).
 
   FetcherLicenseKey:
     Type: String
@@ -1000,16 +971,6 @@ Parameters:
     Description: "Lerian license key for the Fees plugin. Each licensed plugin has its own key."
 
   # ===========================================================================
-  # OBJECT STORAGE — SHARED
-  # ===========================================================================
-  ObjectStorageRoleArn:
-    Type: String
-    Default: ""
-    Description: >-
-      IRSA role ARN reporter/fetcher pods assume for S3 access. Empty when
-      neither module is enabled. This template does not provision S3/IRSA.
-
-  # ===========================================================================
   # PLATFORM-ORCHESTRATOR (CONTROLLER)
   # ===========================================================================
   PlatformNamespace:
@@ -1076,8 +1037,154 @@ Rules:
 
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # S3 buckets + IRSA role for reporter/fetcher object storage — ported from
+  # the legacy full-stack.yaml this template replaced (that one already had
+  # this working, confirmed live: without it, reporter/fetcher pods crash
+  # with "bucket name is required" the moment either module is enabled,
+  # since orchestrator.yaml itself intentionally does not provision S3/IRSA
+  # — it only accepts a bucket name + role ARN as parameters).
+  EnableReporterCond: !Equals [!Ref EnableReporter, "true"]
+  EnableFetcherCond: !Equals [!Ref EnableFetcher, "true"]
+  HasObjectStorageBucket: !Or [!Condition EnableReporterCond, !Condition EnableFetcherCond]
+  BothStorageBuckets: !And [!Condition EnableReporterCond, !Condition EnableFetcherCond]
 
 Resources:
+  # ===========================================================================
+  # OBJECT STORAGE — S3 buckets + IRSA role (reporter + fetcher)
+  # ===========================================================================
+  ReporterStorageBucket:
+    # checkov:skip=CKV_AWS_18:Access logging optional for this workload bucket
+    # checkov:skip=CKV_AWS_21:Versioning enabled via VersioningConfiguration below
+    Type: AWS::S3::Bucket
+    Condition: EnableReporterCond
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-reporter-storage-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-reporter-storage"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  FetcherStorageBucket:
+    # checkov:skip=CKV_AWS_18:Access logging optional for this workload bucket
+    # checkov:skip=CKV_AWS_21:Versioning enabled via VersioningConfiguration below
+    Type: AWS::S3::Bucket
+    Condition: EnableFetcherCond
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-fetcher-storage-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-fetcher-storage"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ObjectStorageRole:
+    Type: AWS::IAM::Role
+    Condition: HasObjectStorageBucket
+    Properties:
+      # RoleName omitted (CFN auto-generates it) — an explicit name can
+      # overflow IAM's 64-char limit for long ProjectNames.
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OIDCProviderHost}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OIDCProviderHost}:aud": "sts.amazonaws.com"
+                    },
+                    "StringLike": {
+                      "${OIDCProviderHost}:sub": [
+                        "system:serviceaccount:reporter:reporter-*",
+                        "system:serviceaccount:fetcher:fetcher-*"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          - OIDCProviderHost: !Select [1, !Split ["oidc-provider/", !GetAtt FoundationStack.Outputs.OIDCProviderArn]]
+      Policies:
+        - PolicyName: ObjectStorageAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                # CFN has no list-concatenation intrinsic, so the "both
+                # buckets enabled" case is spelled out explicitly rather
+                # than combining two conditional lists. HasObjectStorageBucket
+                # (this resource's own Condition) already guarantees at
+                # least one of EnableReporterCond/EnableFetcherCond is true,
+                # so the innermost else can safely assume EnableFetcherCond.
+                Resource: !If
+                  - BothStorageBuckets
+                  - - !GetAtt ReporterStorageBucket.Arn
+                    - !Sub "${ReporterStorageBucket.Arn}/*"
+                    - !GetAtt FetcherStorageBucket.Arn
+                    - !Sub "${FetcherStorageBucket.Arn}/*"
+                  - !If
+                    - EnableReporterCond
+                    - - !GetAtt ReporterStorageBucket.Arn
+                      - !Sub "${ReporterStorageBucket.Arn}/*"
+                    - - !GetAtt FetcherStorageBucket.Arn
+                      - !Sub "${FetcherStorageBucket.Arn}/*"
+
   # ===========================================================================
   # FOUNDATION STACK (VPC + EKS + optional Route53/ALB Controller/ExternalDNS)
   # ===========================================================================
@@ -1207,10 +1314,12 @@ Resources:
         DocumentDBKMSKeyArn: !GetAtt InfrastructureStack.Outputs.DocumentDBKMSKeyArn
         ElastiCacheKMSKeyArn: !GetAtt InfrastructureStack.Outputs.ElastiCacheKMSKeyArn
         AmazonMQKMSKeyArn: !GetAtt InfrastructureStack.Outputs.AmazonMQKMSKeyArn
-        # Per-app object storage — not provisioned by this composition
-        ReporterStorageBucketName: !Ref ReporterStorageBucketName
-        FetcherStorageBucketName: !Ref FetcherStorageBucketName
-        ObjectStorageRoleArn: !Ref ObjectStorageRoleArn
+        # Per-app object storage — provisioned above (ReporterStorageBucket/
+        # FetcherStorageBucket/ObjectStorageRole), conditionally on the
+        # matching module being enabled.
+        ReporterStorageBucketName: !If [EnableReporterCond, !Ref ReporterStorageBucket, ""]
+        FetcherStorageBucketName: !If [EnableFetcherCond, !Ref FetcherStorageBucket, ""]
+        ObjectStorageRoleArn: !If [HasObjectStorageBucket, !GetAtt ObjectStorageRole.Arn, ""]
         # Module enable/disable
         EnableLedger: !Ref EnableLedger
         EnableReporter: !Ref EnableReporter
@@ -1262,6 +1371,24 @@ Resources:
           Value: CloudFormation
 
 Outputs:
+  # ===========================================================================
+  # OBJECT STORAGE
+  # ===========================================================================
+  ReporterStorageBucketName:
+    Condition: EnableReporterCond
+    Description: S3 bucket provisioned for Reporter object storage
+    Value: !Ref ReporterStorageBucket
+
+  FetcherStorageBucketName:
+    Condition: EnableFetcherCond
+    Description: S3 bucket provisioned for Fetcher object storage
+    Value: !Ref FetcherStorageBucket
+
+  ObjectStorageRoleArn:
+    Condition: HasObjectStorageBucket
+    Description: IRSA role ARN reporter/fetcher pods assume for S3 access
+    Value: !GetAtt ObjectStorageRole.Arn
+
   # ===========================================================================
   # STACK METADATA
   # ===========================================================================

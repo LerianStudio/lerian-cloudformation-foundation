@@ -20,7 +20,11 @@ There are two supported deployment paths:
   `templates/foundation.yaml` and `products/midaz/infrastructure.yaml`),
   then nests `orchestrator.yaml` as the Application layer and wires every
   endpoint/secret-ARN/cluster-name parameter automatically via nested-stack
-  outputs. Pick a region, name the project, click Launch — nothing to
+  outputs. If `EnableReporter`/`EnableFetcher` is `true`, it also provisions
+  that module's S3 bucket and a shared IRSA role (`ObjectStorageRole`) for
+  it — `orchestrator.yaml` itself does not provision object storage, so
+  without this, enabling either module crashes it on "bucket name is
+  required." Pick a region, name the project, click Launch — nothing to
   pre-provision.
 - **`orchestrator.yaml`** — **Application only**: installs just the
   operator onto an **existing** EKS cluster and hands it module lifecycle.
