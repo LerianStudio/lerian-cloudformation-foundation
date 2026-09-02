@@ -13,21 +13,41 @@ image/chart — see [`CHECKPOINT.md`](./CHECKPOINT.md) for the full backlog).
 7 of 9 catalog modules have been validated live end-to-end against a real AWS
 sandbox account via real `create-stack`/`update-stack` calls.
 
-The current, correct template is **`orchestrator.yaml`**. `full-stack.yaml`,
-`app-stack.yaml`, `application.yaml`, and `helm.yaml` are earlier iterations
-kept in this directory for reference — they are **not** the deployment path
-described here; do not launch them expecting this behavior.
+There are two supported deployment paths:
+
+- **`one-click.yaml`** — **Full Stack**: a single stack that provisions VPC,
+  EKS, RDS, DocumentDB, ElastiCache, and AmazonMQ (nesting
+  `templates/foundation.yaml` and `products/midaz/infrastructure.yaml`),
+  then nests `orchestrator.yaml` as the Application layer and wires every
+  endpoint/secret-ARN/cluster-name parameter automatically via nested-stack
+  outputs. Pick a region, name the project, click Launch — nothing to
+  pre-provision.
+- **`orchestrator.yaml`** — **Application only**: installs just the
+  operator onto an **existing** EKS cluster and hands it module lifecycle.
+  Requires you to already have RDS/DocumentDB/ElastiCache/AmazonMQ (and
+  their Secrets Manager ARNs) on hand — see Prerequisites below.
+
+`full-stack.yaml`, `app-stack.yaml`, `application.yaml`, and `helm.yaml` are
+earlier iterations kept in this directory for reference — they are **not**
+the deployment path described here; do not launch them expecting this
+behavior.
 
 ## Prerequisites
 
-`orchestrator.yaml` installs the operator and hands it module lifecycle — it
-does **not** provision the data layer. Before launching it you need an
-existing EKS cluster plus (depending on which modules you enable) RDS
-PostgreSQL, DocumentDB, ElastiCache (Valkey/Redis), AmazonMQ (RabbitMQ), and
-MSK, with their endpoints/Secrets Manager ARNs/KMS key ARNs on hand to pass
-in as stack parameters. Midaz's own `foundation.yaml` + `infrastructure.yaml`
-templates in this repo provision that same infra shape and are a reasonable
-way to stand it up first if you don't already have it.
+**Full Stack (`one-click.yaml`)** — none. It provisions the EKS cluster and
+the entire data layer itself; you only need an AWS account and the
+`sa-east-1` region (see below).
+
+**Application only (`orchestrator.yaml`)** — installs the operator and hands
+it module lifecycle, but does **not** provision the data layer. Before
+launching it you need an existing EKS cluster plus (depending on which
+modules you enable) RDS PostgreSQL, DocumentDB, ElastiCache (Valkey/Redis),
+AmazonMQ (RabbitMQ), and MSK, with their endpoints/Secrets Manager ARNs/KMS
+key ARNs on hand to pass in as stack parameters. Midaz's own
+`foundation.yaml` + `infrastructure.yaml` templates in this repo provision
+that same infra shape and are a reasonable way to stand it up first if you
+don't already have it — or just launch `one-click.yaml` instead, which does
+this composition for you.
 
 ## ⚠️ Region: `sa-east-1` only
 
@@ -76,7 +96,10 @@ Everything else in the catalog (`ledger`, `tracer`, `access_manager`,
 
 | Stack | Description | Deploy |
 |-------|-------------|--------|
-| **Orchestrator** | Installs `platform-orchestrator` onto an existing EKS cluster and reconciles the enabled module set | [![Launch][img]][lerian-platform-orchestrator-sa-east-1] |
+| **Full Stack** | VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and the platform-orchestrator + module set — all from scratch, single click | [![Launch][img]][lerian-platform-full-sa-east-1] |
+| **Orchestrator (Application only)** | Installs `platform-orchestrator` onto an **existing** EKS cluster and reconciles the enabled module set — requires the data layer already provisioned (see Prerequisites) | [![Launch][img]][lerian-platform-orchestrator-sa-east-1] |
+
+[lerian-platform-full-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/one-click.yaml&stackName=lerian-platform
 
 [lerian-platform-orchestrator-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/orchestrator.yaml&stackName=lerian-platform
 
@@ -93,6 +116,16 @@ Prerequisites). Everything else has a working default.
 `OrchestratorChartVersion` and the manager image are already pinned to a
 live-validated build — see the parameter's inline description in
 `orchestrator.yaml` for exactly which commit and what was validated on it.
+
+`one-click.yaml` (Full Stack) drops that list to just **3** required
+parameters — `RDSMasterUsername`, `DocumentDBMasterUsername`,
+`AmazonMQAdminUsername` — since it provisions `ProjectName`/
+`EnvironmentName`/`ClusterName` and every data-layer endpoint/secret ARN
+itself and wires them internally via nested-stack outputs instead of asking
+for them. Its console form groups parameters per module (Access Manager,
+Ledger, Reporter, Tracer, Fetcher, Console, Bank Transfer, Fees) rather than
+by parameter type, so each module's enable flag, chart version, license key,
+and any module-specific fields sit together in one collapsible section.
 
 ### CLI equivalent
 
