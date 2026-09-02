@@ -717,13 +717,19 @@ Parameters:
 
   AmazonMQInstanceType:
     Type: String
-    Default: mq.t3.micro
+    # mq.t3.micro is ActiveMQ-only — the shared, live amazonmq.yaml this
+    # composition nests (releases/latest/amazonmq.yaml) always creates the
+    # broker with EngineType RABBITMQ and removed mq.t3.micro from its own
+    # AllowedValues (RabbitMQ doesn't support it: "Broker engine type
+    # [RabbitMQ] does not support host instance type [mq.t3.micro]").
+    # mq.m7g.medium is that template's own smallest RabbitMQ-supported type
+    # (its comment calls it "evaluation-sized"). Found live: a create-stack
+    # attempt with the old mq.t3.micro default failed instantly on this
+    # exact parameter validation, several nested-stack layers down from
+    # this template's own (looser, not-yet-updated) AllowedValues list.
+    Default: mq.m7g.medium
     AllowedValues:
-      - mq.t3.micro
-      - mq.m5.large
-      - mq.m5.xlarge
-      - mq.m5.2xlarge
-      - mq.m5.4xlarge
+      - mq.m7g.medium
       - mq.m7g.large
       - mq.m7g.xlarge
       - mq.m7g.2xlarge
@@ -731,7 +737,11 @@ Parameters:
       - mq.m7g.8xlarge
       - mq.m7g.12xlarge
       - mq.m7g.16xlarge
-    Description: AmazonMQ broker instance type
+      - mq.m5.large
+      - mq.m5.xlarge
+      - mq.m5.2xlarge
+      - mq.m5.4xlarge
+    Description: AmazonMQ broker instance type (RabbitMQ-supported types only — see comment above)
 
   AmazonMQDeploymentMode:
     Type: String
