@@ -472,7 +472,14 @@ Parameters:
 
   NodeInstanceType:
     Type: String
-    Default: c7g.large
+    # x86_64, NOT the inherited ARM64/Graviton default (foundation.yaml's own
+    # default is c7g.large) — the pinned platform-orchestrator manager image
+    # (OrchestratorChartVersion's Default in orchestrator.yaml,
+    # v0.1.0-e2e-9952caa-amd64) is single-arch amd64, the only architecture
+    # actually live-validated end-to-end (c6i.xlarge, per CHECKPOINT.md). A
+    # Graviton default here puts the operator pod in ImagePullBackOff/exec
+    # format error on day one.
+    Default: c6i.xlarge
     AllowedValues:
       - c7g.medium
       - c7g.large
@@ -704,7 +711,12 @@ Parameters:
 
   ElastiCacheNodeType:
     Type: String
-    Default: cache.m7g.large
+    # Trial-sized default (was cache.m7g.large, inherited from
+    # infrastructure.yaml's own production-scale default) — every other
+    # data-layer default in this template (RDSInstanceClass db.t3.medium,
+    # AmazonMQInstanceType mq.t3.micro, DocumentDBInstanceCount 2,
+    # RDSMultiAZ false) is already trial-sized; this was the one outlier.
+    Default: cache.t3.small
     AllowedValues:
       - cache.t3.micro
       - cache.t3.small
