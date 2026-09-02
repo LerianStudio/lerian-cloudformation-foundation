@@ -109,11 +109,11 @@ Metadata:
           - EnvironmentContractCARef
     ParameterLabels:
       ProjectName:
-        default: "Project Name"
+        default: "(Required) Project Name"
       EnvironmentName:
-        default: "Environment Name"
+        default: "(Required) Environment Name"
       ClusterName:
-        default: "EKS Cluster Name"
+        default: "(Required) EKS Cluster Name"
       PlatformNamespace:
         default: "Platform Namespace"
       OperatorNamespace:
@@ -121,23 +121,23 @@ Metadata:
       PermissionsBoundaryArn:
         default: "IAM Permissions Boundary ARN"
       RDSEndpoint:
-        default: "RDS PostgreSQL Endpoint"
+        default: "(Required) RDS PostgreSQL Endpoint"
       RDSReplicaEndpoint:
         default: "RDS Read Replica Endpoint"
       RDSSecretArn:
-        default: "RDS Secret ARN"
+        default: "(Required) RDS Secret ARN"
       DocumentDBEndpoint:
-        default: "DocumentDB Endpoint"
+        default: "(Required) DocumentDB Endpoint"
       DocumentDBSecretArn:
-        default: "DocumentDB Secret ARN"
+        default: "(Required) DocumentDB Secret ARN"
       ElastiCacheEndpoint:
-        default: "ElastiCache Endpoint"
+        default: "(Required) ElastiCache Endpoint"
       ElastiCacheSecretArn:
         default: "ElastiCache Auth Token Secret ARN"
       AmazonMQEndpoint:
-        default: "AmazonMQ Broker Endpoint"
+        default: "(Required) AmazonMQ Broker Endpoint"
       AmazonMQSecretArn:
-        default: "AmazonMQ Secret ARN"
+        default: "(Required) AmazonMQ Secret ARN"
       MSKClusterArn:
         default: "MSK Cluster ARN"
       MSKSecretArn:

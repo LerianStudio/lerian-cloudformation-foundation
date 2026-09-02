@@ -82,9 +82,14 @@ Everything else in the catalog (`ledger`, `tracer`, `access_manager`,
 
 [img]: https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png
 
-You will be prompted in the console for the required inputs the template
-does not default (`ProjectName`, `EnvironmentName`, `ClusterName`, and the
-existing data-layer endpoints/secret ARNs listed under Prerequisites).
+The console groups parameters into labeled sections; the 10 that have no
+default are marked **`(Required)`** right in the parameter label so they're
+obvious in the form, not just in this doc:
+`ProjectName`, `EnvironmentName`, `ClusterName`, `RDSEndpoint`,
+`RDSSecretArn`, `DocumentDBEndpoint`, `DocumentDBSecretArn`,
+`ElastiCacheEndpoint`, `AmazonMQEndpoint`, `AmazonMQSecretArn` — all of
+them existing data-layer endpoints/secret ARNs except the first three (see
+Prerequisites). Everything else has a working default.
 `OrchestratorChartVersion` and the manager image are already pinned to a
 live-validated build — see the parameter's inline description in
 `orchestrator.yaml` for exactly which commit and what was validated on it.
@@ -104,8 +109,11 @@ aws cloudformation create-stack \
     ParameterKey=RDSEndpoint,ParameterValue=<...> \
     ParameterKey=RDSSecretArn,ParameterValue=<...> \
     ParameterKey=DocumentDBEndpoint,ParameterValue=<...> \
-    ParameterKey=DocumentDBSecretArn,ParameterValue=<...>
-    # ... remaining data-layer params per your enabled module set
+    ParameterKey=DocumentDBSecretArn,ParameterValue=<...> \
+    ParameterKey=ElastiCacheEndpoint,ParameterValue=<...> \
+    ParameterKey=AmazonMQEndpoint,ParameterValue=<...> \
+    ParameterKey=AmazonMQSecretArn,ParameterValue=<...>
+    # ... remaining optional params per your enabled module set
 ```
 
 ## Known limitations
