@@ -5,12 +5,15 @@ Kubernetes controller onto an existing EKS cluster, then hands module lifecycle
 (Ledger, Access Manager, Tracer, Console, Reporter, Fetcher, Bank Transfer)
 to it declaratively via two CRDs (`EnvironmentContract` + `Platform`) — the
 operator reconciles continuously as a long-running Deployment instead of the
-Lambda looping a `helm install` per app.
+Lambda looping a `helm install` per app. **Tracer now ships bundled into the
+Ledger module** (midaz-helm v9.1.0/helm#1926 folded it directly into the
+same chart Ledger installs) rather than as its own catalog entry — there is
+no separate `EnableTracer` parameter; enabling Ledger enables Tracer too.
 
 **Status: v0, dev-scoped, one-click.** Not yet an AWS Marketplace submission
 (no ECR migration, no admission webhook, no CI/CD pipeline for the operator
 image/chart — see [`CHECKPOINT.md`](./CHECKPOINT.md) for the full backlog).
-7 of 9 catalog modules have been validated live end-to-end against a real AWS
+7 of 8 catalog modules have been validated live end-to-end against a real AWS
 sandbox account via real `create-stack`/`update-stack` calls.
 
 There are two supported deployment paths:
@@ -130,9 +133,10 @@ parameters — `RDSMasterUsername`, `DocumentDBMasterUsername`,
 `EnvironmentName`/`ClusterName` and every data-layer endpoint/secret ARN
 itself and wires them internally via nested-stack outputs instead of asking
 for them. Its console form groups parameters per module (Access Manager,
-Ledger, Reporter, Tracer, Fetcher, Console, Bank Transfer) rather than by
-parameter type, so each module's enable flag, chart version, license key,
-and any module-specific fields sit together in one collapsible section.
+Ledger, Reporter, Fetcher, Console, Bank Transfer) rather than by parameter
+type, so each module's enable flag, chart version, license key, and any
+module-specific fields sit together in one collapsible section — Tracer has
+no group of its own here since it ships bundled into Ledger's.
 
 ### CLI equivalent
 

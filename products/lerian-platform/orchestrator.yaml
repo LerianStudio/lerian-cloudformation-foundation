@@ -70,11 +70,6 @@ Metadata:
           - ReporterChartVersion
           - ReporterStorageBucketName
       - Label:
-          default: "Module: Tracer"
-        Parameters:
-          - EnableTracer
-          - TracerChartVersion
-      - Label:
           default: "Module: Fetcher"
         Parameters:
           - EnableFetcher
@@ -173,8 +168,6 @@ Metadata:
         default: "Deploy Ledger (Midaz)"
       EnableReporter:
         default: "Deploy Reporter"
-      EnableTracer:
-        default: "Deploy Tracer"
       EnableFetcher:
         default: "Deploy Fetcher"
       EnableConsole:
@@ -187,8 +180,6 @@ Metadata:
         default: "Ledger (Midaz) Chart Version"
       ReporterChartVersion:
         default: "Reporter Chart Version"
-      TracerChartVersion:
-        default: "Tracer Chart Version"
       FetcherChartVersion:
         default: "Fetcher Chart Version"
       ConsoleChartVersion:
@@ -380,12 +371,6 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: Deploy the Reporter module
 
-  EnableTracer:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Deploy the Tracer module
-
   EnableFetcher:
     Type: String
     Default: "false"
@@ -430,6 +415,13 @@ Parameters:
     # ledger.configmap.* open dict) are unchanged from the alpha pin. Must
     # stay in lockstep with the catalog: this tag does not exist under the
     # alpha/midaz-helm path anymore.
+    #
+    # As of platform-orchestrator commit 37a282a, this same chart also folds
+    # in Tracer (midaz-helm v9.1.0/helm#1926's templates/tracer/*.yaml,
+    # gated by tracer.enabled — the catalog's ledger.go sets it
+    # unconditionally, same posture as crm.enabled). There is no more
+    # standalone EnableTracer/TracerChartVersion parameter pair: Tracer now
+    # deploys and versions together with Ledger.
     Default: "9.1.0"
     Description: midaz-helm chart version
   ReporterChartVersion:
@@ -437,14 +429,6 @@ Parameters:
     # Stable (helm#1924, merged) — lerian-common masks adopted.
     Default: "4.1.0"
     Description: reporter-helm chart version
-  TracerChartVersion:
-    Type: String
-    # Alpha (helm#1926, feat/tracer-lerian-common, not yet merged) — matches
-    # the orchestrator catalog's tracer.go Chart.Repo default (oci://.../
-    # alpha/tracer-helm). Must stay in lockstep with the catalog: this tag
-    # does not exist under the non-alpha tracer-helm path.
-    Default: "2.1.0-alpha.202608261808.d0152339"
-    Description: tracer-helm chart version
   FetcherChartVersion:
     Type: String
     Default: "3.1.0"
@@ -490,44 +474,47 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.0-e2e.479ebfb"
+    Default: "0.1.0-e2e.37a282a"
     Description: >-
       platform-orchestrator chart version. Pinned to the build from commit
-      479ebfb (branch feat/operator-e2e-hardening) — one commit past the
-      previously-published 9952caa build, moving the catalog's `ledger`
-      module off its alpha midaz-helm pin onto the stable, released
-      midaz-helm v9.1.0 (see LedgerChartVersion above for the compatibility
-      check performed against LerianStudio/helm main before this bump). No
-      other catalog/reconcile behavior changed versus 9952caa, which was
-      itself a superset of 46175de, the last commit live-validated
-      end-to-end (7 of 9 catalog modules reached Platform.status.Ready=True
-      via real create-stack against the AWS sandbox) — the commits between
-      46175de and 9952caa were CI/dependency hygiene only (CVE fixes in
-      oras-go/helm.sh/containerd, deprecated controller-runtime
-      scheme.Builder replacement, Dockerfile base bump to golang:1.26).
+      37a282a (branch feat/operator-e2e-hardening) — one commit past the
+      previously-published 479ebfb build, consolidating the catalog's
+      standalone `tracer` ModuleDefinition (own chart/release/namespace)
+      into the `ledger` descriptor instead: midaz-helm v9.1.0/helm#1926
+      folded Tracer directly into the SAME chart Ledger already installs
+      (templates/tracer/*.yaml, gated by tracer.enabled — ledger.go now
+      sets it unconditionally, same posture as crm.enabled). There is no
+      more standalone EnableTracer/TracerChartVersion parameter pair in
+      this template as of this bump (see LedgerChartVersion above and the
+      Tracer note in the README) — Tracer deploys and versions together
+      with Ledger from here on. No other catalog/reconcile behavior
+      changed versus 479ebfb.
       Pushed to oci://ghcr.io/lerianstudio/alpha/platform-orchestrator-helm
       for this sandbox test — a PUBLIC package, still an alpha (no CI/CD
       publish pipeline exists yet for this chart; every build to date has
       been pushed by hand). Manager image
-      ghcr.io/lerianstudio/platform-orchestrator:v0.1.0-e2e-479ebfb-amd64 is
+      ghcr.io/lerianstudio/platform-orchestrator:v0.1.0-e2e-37a282a-amd64 is
       also real, published, and public (single-arch amd64, matching the
       sandbox EKS node type — not multi-arch). Chart content is
-      byte-equivalent to the 9952caa chart (sourced from
+      byte-equivalent to the 41f3ee9 chart (sourced from
       LerianStudio/helm-internal, branch feat/add-platform-orchestrator-chart,
-      commit 41f3ee9); only Chart.yaml's version/appVersion changed to point
-      at this build. Everything from the prior pin (0c8f640a) still applies
-      on top of this: real access_manager/ledger/tracer/console/bank_transfer/
-      reporter/fetcher convergence confirmed live end-to-end previously —
-      see git history on commits ae2e0c9, 89f72ac, 94c7d6c, 1948f2b, acd4ed5,
-      0d6e682, e49de1f, e904119, ae2e0c9, 4ccf6d7, 3802277, f040a64, 5ffcb83
-      for that earlier chain of live-discovered fixes. This specific build
-      (479ebfb image + 0.1.0-e2e.479ebfb chart) has NOT itself been re-run
-      through a live create-stack as of this commit — that is the next step
-      in this session, specifically to confirm the ledger module reaches
-      Ready on midaz-helm v9.1.0 (not just that the chart pulls/renders).
-      Everything else in this build beyond the ledger version bump is
-      unchanged from the 9952caa build and inherits its validation status as
-      described above.
+      commit 57a4873, which additionally drops the now-orphaned
+      platform.modules.tracer convenience entry from this chart's OWN
+      values.yaml — the platform.enabled=true self-managed path, distinct
+      from this CFN template's REGISTRY dict); only Chart.yaml's
+      version/appVersion and that values.yaml trim changed versus 479ebfb's
+      pin. Everything from the prior pin still applies on top of this: real
+      access_manager/ledger/tracer/console/bank_transfer/reporter/fetcher
+      convergence confirmed live end-to-end previously — see git history on
+      commits ae2e0c9, 89f72ac, 94c7d6c, 1948f2b, acd4ed5, 0d6e682, e49de1f,
+      e904119, ae2e0c9, 4ccf6d7, 3802277, f040a64, 5ffcb83 for that earlier
+      chain of live-discovered fixes. This specific build (37a282a image +
+      0.1.0-e2e.37a282a chart) has NOT itself been re-run through a live
+      create-stack as of this commit — that is a separate, already-paused
+      task another agent owns, specifically to confirm the ledger module
+      (with tracer now bundled in) reaches Ready. Everything else in this
+      build beyond the tracer consolidation is unchanged from the 479ebfb
+      build and inherits its validation status as described above.
 
   # ---------------------------------------------------------------------------
   # Access Manager (Casdoor) — authorizer (mother) credential + admin + license
@@ -808,7 +795,6 @@ Resources:
           # Flags
           ENABLE_LEDGER: !Ref EnableLedger
           ENABLE_REPORTER: !Ref EnableReporter
-          ENABLE_TRACER: !Ref EnableTracer
           ENABLE_FETCHER: !Ref EnableFetcher
           ENABLE_CONSOLE: !Ref EnableConsole
           ENABLE_ACCESS_MANAGER: !Ref EnableAccessManager
@@ -831,7 +817,6 @@ Resources:
           # Module chart versions (rendered into Platform.spec.modules.<name>.version)
           LEDGER_VERSION: !Ref LedgerChartVersion
           REPORTER_VERSION: !Ref ReporterChartVersion
-          TRACER_VERSION: !Ref TracerChartVersion
           FETCHER_VERSION: !Ref FetcherChartVersion
           CONSOLE_VERSION: !Ref ConsoleChartVersion
           ACCESS_MANAGER_VERSION: !Ref AccessManagerChartVersion
@@ -888,8 +873,11 @@ Resources:
           # Module catalog. Mirrors helm.yaml's REGISTRY 1:1 (same release names /
           # namespaces / chart repos), confirmed against platform-orchestrator's
           # internal/modules/catalog/*.go (module Name fields match these keys
-          # exactly: access_manager, ledger, tracer, fetcher, reporter, fees,
-          # bank_transfer, console). Unlike helm.yaml, this dict is used only to
+          # exactly: access_manager, ledger, fetcher, reporter, fees,
+          # bank_transfer, console). tracer is deliberately NOT a key here
+          # anymore (commit 37a282a): it is folded into the ledger release's
+          # own midaz-helm chart, not a standalone ModuleRelease/namespace.
+          # Unlike helm.yaml, this dict is used only to
           # render Platform.spec.modules — the operator does the actual helm
           # install/upgrade per module, not this Lambda.
           # ---------------------------------------------------------------------
@@ -911,8 +899,6 @@ Resources:
                                   "namespace": "plugin-access-manager"},
               "ledger": {"enable": "ENABLE_LEDGER", "version_env": "LEDGER_VERSION", "license_env": None,
                          "bucket_env": None, "namespace": "midaz"},
-              "tracer": {"enable": "ENABLE_TRACER", "version_env": "TRACER_VERSION", "license_env": None,
-                         "bucket_env": None, "namespace": "tracer"},
               "fetcher": {"enable": "ENABLE_FETCHER", "version_env": "FETCHER_VERSION",
                           "license_env": "FETCHER_LICENSE_KEY", "bucket_env": "FETCHER_S3_BUCKET",
                           "namespace": "fetcher"},
@@ -1540,7 +1526,6 @@ Resources:
           - "-"
           - - !Ref EnableLedger
             - !Ref EnableReporter
-            - !Ref EnableTracer
             - !Ref EnableFetcher
             - !Ref EnableConsole
             - !Ref EnableAccessManager
@@ -1548,7 +1533,6 @@ Resources:
             - !Ref AuthorizerClientId
             - !Ref LedgerChartVersion
             - !Ref ReporterChartVersion
-            - !Ref TracerChartVersion
             - !Ref FetcherChartVersion
             - !Ref ConsoleChartVersion
             - !Ref AccessManagerChartVersion

@@ -99,11 +99,6 @@ Metadata:
           - EnableReporter
           - ReporterChartVersion
       - Label:
-          default: "Module: Tracer"
-        Parameters:
-          - EnableTracer
-          - TracerChartVersion
-      - Label:
           default: "Module: Fetcher"
         Parameters:
           - EnableFetcher
@@ -265,11 +260,6 @@ Metadata:
         default: "Deploy Reporter"
       ReporterChartVersion:
         default: "Reporter Chart Version"
-      # Module: Tracer
-      EnableTracer:
-        default: "Deploy Tracer"
-      TracerChartVersion:
-        default: "Tracer Chart Version"
       # Module: Fetcher
       EnableFetcher:
         default: "Deploy Fetcher"
@@ -841,20 +831,6 @@ Parameters:
     Description: reporter-helm chart version
 
   # ===========================================================================
-  # MODULE: TRACER
-  # ===========================================================================
-  EnableTracer:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Deploy the Tracer module
-
-  TracerChartVersion:
-    Type: String
-    Default: "2.1.0-alpha.202608261808.d0152339"
-    Description: tracer-helm chart version
-
-  # ===========================================================================
   # MODULE: FETCHER
   # ===========================================================================
   EnableFetcher:
@@ -959,11 +935,12 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.0-e2e.479ebfb"
+    Default: "0.1.0-e2e.37a282a"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of
-      this pin.
+      this pin — this bump consolidates Tracer into the Ledger module
+      (no more standalone EnableTracer/TracerChartVersion parameters).
 
   # ===========================================================================
   # OCI HELM REGISTRY (private charts only)
@@ -1288,7 +1265,6 @@ Resources:
         # Module enable/disable
         EnableLedger: !Ref EnableLedger
         EnableReporter: !Ref EnableReporter
-        EnableTracer: !Ref EnableTracer
         EnableFetcher: !Ref EnableFetcher
         EnableConsole: !Ref EnableConsole
         EnableAccessManager: !Ref EnableAccessManager
@@ -1296,7 +1272,6 @@ Resources:
         # Module chart versions
         LedgerChartVersion: !Ref LedgerChartVersion
         ReporterChartVersion: !Ref ReporterChartVersion
-        TracerChartVersion: !Ref TracerChartVersion
         FetcherChartVersion: !Ref FetcherChartVersion
         ConsoleChartVersion: !Ref ConsoleChartVersion
         AccessManagerChartVersion: !Ref AccessManagerChartVersion
