@@ -2,7 +2,7 @@
 
 [Lerian Platform](https://docs.lerian.studio) deploys the `platform-orchestrator`
 Kubernetes controller onto an existing EKS cluster, then hands module lifecycle
-(Ledger, Access Manager, Tracer, Console, Reporter, Fetcher, Bank Transfer, Fees)
+(Ledger, Access Manager, Tracer, Console, Reporter, Fetcher, Bank Transfer)
 to it declaratively via two CRDs (`EnvironmentContract` + `Platform`) — the
 operator reconciles continuously as a long-running Deployment instead of the
 Lambda looping a `helm install` per app.
@@ -82,10 +82,12 @@ acceptable for an internal/dev "kick the tires" deploy, but:
 
 ## Modules NOT yet supported — leave disabled
 
-- **`fees`** (`EnableFees`) — catalog entry exists but has never been
-  enabled/validated live. Every module tested so far surfaced at least one
-  real bug before it worked; `fees` has not been through that pass. Default
-  is `false` — leave it that way.
+- **`fees`** — not exposed as a parameter in `orchestrator.yaml`/
+  `full-stack.yaml` at all (there is no `EnableFees`/`FeesChartVersion`/
+  `FeesLicenseKey` — removed; it was never enabled/validated live through
+  this template, and every other module tested so far surfaced at least
+  one real bug before it worked). If it's ever brought into scope, treat
+  that as adding it back, not un-hiding something already there.
 - **`pix_indirect_btg`** — not exposed as a parameter in `orchestrator.yaml`
   at all (there is no `EnablePixIndirectBtg`), so it cannot currently be
   enabled through this template. It also has a known, unfixed gap even in
@@ -128,8 +130,8 @@ parameters — `RDSMasterUsername`, `DocumentDBMasterUsername`,
 `EnvironmentName`/`ClusterName` and every data-layer endpoint/secret ARN
 itself and wires them internally via nested-stack outputs instead of asking
 for them. Its console form groups parameters per module (Access Manager,
-Ledger, Reporter, Tracer, Fetcher, Console, Bank Transfer, Fees) rather than
-by parameter type, so each module's enable flag, chart version, license key,
+Ledger, Reporter, Tracer, Fetcher, Console, Bank Transfer) rather than by
+parameter type, so each module's enable flag, chart version, license key,
 and any module-specific fields sit together in one collapsible section.
 
 ### CLI equivalent

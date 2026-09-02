@@ -98,12 +98,6 @@ Metadata:
           - BankTransferChartVersion
           - BankTransferLicenseKey
       - Label:
-          default: "Module: Fees Plugin"
-        Parameters:
-          - EnableFees
-          - FeesChartVersion
-          - FeesLicenseKey
-      - Label:
           default: "Object Storage — Shared"
         Parameters:
           - ObjectStorageRoleArn
@@ -187,8 +181,6 @@ Metadata:
         default: "Deploy Product Console"
       EnableBankTransfer:
         default: "Deploy BR Bank Transfer"
-      EnableFees:
-        default: "Deploy Fees Plugin"
       AccessManagerChartVersion:
         default: "Access Manager Chart Version"
       LedgerChartVersion:
@@ -203,8 +195,6 @@ Metadata:
         default: "Console Chart Version"
       BankTransferChartVersion:
         default: "BR Bank Transfer Chart Version"
-      FeesChartVersion:
-        default: "Fees Plugin Chart Version"
       OrchestratorChartRepo:
         default: "Orchestrator Chart Repo (OCI)"
       OrchestratorChartVersion:
@@ -221,8 +211,6 @@ Metadata:
         default: "Access Manager License Key"
       FetcherLicenseKey:
         default: "Fetcher License Key"
-      FeesLicenseKey:
-        default: "Fees License Key"
       BankTransferLicenseKey:
         default: "BR Bank Transfer License Key"
       HelmRegistryHost:
@@ -422,12 +410,6 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: Deploy the BR Bank Transfer plugin
 
-  EnableFees:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Deploy the Plugin Fees module
-
   # ---------------------------------------------------------------------------
   # Chart versions — same parameter names as helm.yaml. NOTE: these version
   # module Helm charts (via the operator's ModuleRelease); the operator chart
@@ -487,13 +469,6 @@ Parameters:
     # against the stable repo (or vice versa) fails the chart pull outright.
     Default: "2.0.0"
     Description: plugin-br-bank-transfer-helm chart version
-  FeesChartVersion:
-    Type: String
-    # Stable (helm#1946, merged) — lerian-common masks adopted; CLIENT_ID lives
-    # in the Secret as of 8.0.0 (orchestrator's fees.go SecretMap handles it).
-    Default: "8.0.1"
-    Description: plugin-fees-helm chart version
-
   # ---------------------------------------------------------------------------
   # platform-orchestrator itself (the controller, distinct from the modules
   # it manages)
@@ -580,11 +555,6 @@ Parameters:
     Default: ""
     NoEcho: true
     Description: "Lerian license key for Fetcher. Each licensed plugin has its own key."
-  FeesLicenseKey:
-    Type: String
-    Default: ""
-    NoEcho: true
-    Description: "Lerian license key for the Fees plugin. Each licensed plugin has its own key."
   BankTransferLicenseKey:
     Type: String
     Default: ""
@@ -843,13 +813,11 @@ Resources:
           ENABLE_CONSOLE: !Ref EnableConsole
           ENABLE_ACCESS_MANAGER: !Ref EnableAccessManager
           ENABLE_BANK_TRANSFER: !Ref EnableBankTransfer
-          ENABLE_FEES: !Ref EnableFees
           # Access Manager (authorizer/license)
           AUTHORIZER_CLIENT_ID: !Ref AuthorizerClientId
           AUTHORIZER_CLIENT_SECRET: !Ref AuthorizerClientSecret
           ACCESS_MANAGER_LICENSE_KEY: !Ref AccessManagerLicenseKey
           FETCHER_LICENSE_KEY: !Ref FetcherLicenseKey
-          FEES_LICENSE_KEY: !Ref FeesLicenseKey
           BANK_TRANSFER_LICENSE_KEY: !Ref BankTransferLicenseKey
           ACCESS_MANAGER_ORGANIZATION_IDS: !Ref AccessManagerOrganizationIds
           LICENSE_USE_DEV_GATEWAY: !Ref LicenseUseDevGateway
@@ -868,7 +836,6 @@ Resources:
           CONSOLE_VERSION: !Ref ConsoleChartVersion
           ACCESS_MANAGER_VERSION: !Ref AccessManagerChartVersion
           BANK_TRANSFER_VERSION: !Ref BankTransferChartVersion
-          FEES_VERSION: !Ref FeesChartVersion
           # Console / ingress (forwarded as-is; the operator/chart renders them)
           NEXTAUTH_URL: !Ref NextAuthUrl
           ENABLE_INGRESS: !Ref EnableIngress
@@ -951,8 +918,6 @@ Resources:
                           "namespace": "fetcher"},
               "reporter": {"enable": "ENABLE_REPORTER", "version_env": "REPORTER_VERSION", "license_env": None,
                            "bucket_env": "REPORTER_S3_BUCKET", "namespace": "reporter"},
-              "fees": {"enable": "ENABLE_FEES", "version_env": "FEES_VERSION", "license_env": "FEES_LICENSE_KEY",
-                       "bucket_env": None, "namespace": "plugin-fees"},
               "bank_transfer": {"enable": "ENABLE_BANK_TRANSFER", "version_env": "BANK_TRANSFER_VERSION",
                                  "license_env": "BANK_TRANSFER_LICENSE_KEY", "bucket_env": None,
                                  "namespace": "plugin-br-bank-transfer"},
@@ -1580,7 +1545,6 @@ Resources:
             - !Ref EnableConsole
             - !Ref EnableAccessManager
             - !Ref EnableBankTransfer
-            - !Ref EnableFees
             - !Ref AuthorizerClientId
             - !Ref LedgerChartVersion
             - !Ref ReporterChartVersion
@@ -1589,7 +1553,6 @@ Resources:
             - !Ref ConsoleChartVersion
             - !Ref AccessManagerChartVersion
             - !Ref BankTransferChartVersion
-            - !Ref FeesChartVersion
             - !Ref OrchestratorChartRepo
             - !Ref OrchestratorChartVersion
             - !Ref RDSEndpoint

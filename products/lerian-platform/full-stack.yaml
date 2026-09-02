@@ -126,12 +126,6 @@ Metadata:
           - BankTransferChartVersion
           - BankTransferLicenseKey
       - Label:
-          default: "Module: Fees Plugin"
-        Parameters:
-          - EnableFees
-          - FeesChartVersion
-          - FeesLicenseKey
-      - Label:
           default: "platform-orchestrator (controller)"
         Parameters:
           - PlatformNamespace
@@ -305,13 +299,6 @@ Metadata:
         default: "BR Bank Transfer Chart Version"
       BankTransferLicenseKey:
         default: "BR Bank Transfer License Key"
-      # Module: Fees Plugin
-      EnableFees:
-        default: "Deploy Fees Plugin (unsupported — leave disabled)"
-      FeesChartVersion:
-        default: "Fees Plugin Chart Version"
-      FeesLicenseKey:
-        default: "Fees License Key"
       # platform-orchestrator (controller)
       PlatformNamespace:
         default: "Platform Namespace"
@@ -949,28 +936,6 @@ Parameters:
     Description: "Lerian license key for the BR Bank Transfer plugin. Each licensed plugin has its own key."
 
   # ===========================================================================
-  # MODULE: FEES PLUGIN
-  # ===========================================================================
-  EnableFees:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: >-
-      Deploy the Plugin Fees module. NOT YET SUPPORTED — never validated live
-      through this template (see CHECKPOINT.md). Leave "false".
-
-  FeesChartVersion:
-    Type: String
-    Default: "8.0.1"
-    Description: plugin-fees-helm chart version
-
-  FeesLicenseKey:
-    Type: String
-    Default: ""
-    NoEcho: true
-    Description: "Lerian license key for the Fees plugin. Each licensed plugin has its own key."
-
-  # ===========================================================================
   # PLATFORM-ORCHESTRATOR (CONTROLLER)
   # ===========================================================================
   PlatformNamespace:
@@ -1328,7 +1293,6 @@ Resources:
         EnableConsole: !Ref EnableConsole
         EnableAccessManager: !Ref EnableAccessManager
         EnableBankTransfer: !Ref EnableBankTransfer
-        EnableFees: !Ref EnableFees
         # Module chart versions
         LedgerChartVersion: !Ref LedgerChartVersion
         ReporterChartVersion: !Ref ReporterChartVersion
@@ -1337,7 +1301,6 @@ Resources:
         ConsoleChartVersion: !Ref ConsoleChartVersion
         AccessManagerChartVersion: !Ref AccessManagerChartVersion
         BankTransferChartVersion: !Ref BankTransferChartVersion
-        FeesChartVersion: !Ref FeesChartVersion
         # platform-orchestrator itself
         OrchestratorChartRepo: !Ref OrchestratorChartRepo
         OrchestratorChartVersion: !Ref OrchestratorChartVersion
@@ -1346,7 +1309,6 @@ Resources:
         AuthorizerClientSecret: !Ref AuthorizerClientSecret
         AccessManagerLicenseKey: !Ref AccessManagerLicenseKey
         FetcherLicenseKey: !Ref FetcherLicenseKey
-        FeesLicenseKey: !Ref FeesLicenseKey
         BankTransferLicenseKey: !Ref BankTransferLicenseKey
         AccessManagerOrganizationIds: !Ref AccessManagerOrganizationIds
         LicenseUseDevGateway: !Ref LicenseUseDevGateway
