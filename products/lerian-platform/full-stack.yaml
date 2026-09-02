@@ -88,22 +88,26 @@ Metadata:
           - AuthorizerClientSecret
           - AccessManagerOrganizationIds
           - AccessManagerLicenseKey
+          - AccessManagerValuesOverride
       - Label:
           default: "Module: Ledger (Midaz)"
         Parameters:
           - EnableLedger
           - LedgerChartVersion
+          - LedgerValuesOverride
       - Label:
           default: "Module: Reporter"
         Parameters:
           - EnableReporter
           - ReporterChartVersion
+          - ReporterValuesOverride
       - Label:
           default: "Module: Fetcher"
         Parameters:
           - EnableFetcher
           - FetcherChartVersion
           - FetcherLicenseKey
+          - FetcherValuesOverride
       - Label:
           default: "Module: Product Console"
         Parameters:
@@ -114,12 +118,14 @@ Metadata:
           - IngressHostname
           - IngressScheme
           - IngressCertificateArn
+          - ConsoleValuesOverride
       - Label:
           default: "Module: BR Bank Transfer"
         Parameters:
           - EnableBankTransfer
           - BankTransferChartVersion
           - BankTransferLicenseKey
+          - BankTransferValuesOverride
       - Label:
           default: "platform-orchestrator (controller)"
         Parameters:
@@ -250,16 +256,22 @@ Metadata:
         default: "Organization IDs (optional)"
       AccessManagerLicenseKey:
         default: "Access Manager License Key"
+      AccessManagerValuesOverride:
+        default: "Access Manager Values Override (advanced)"
       # Module: Ledger
       EnableLedger:
         default: "Deploy Ledger (Midaz)"
       LedgerChartVersion:
         default: "Ledger (Midaz) Chart Version"
+      LedgerValuesOverride:
+        default: "Ledger Values Override (advanced)"
       # Module: Reporter
       EnableReporter:
         default: "Deploy Reporter"
       ReporterChartVersion:
         default: "Reporter Chart Version"
+      ReporterValuesOverride:
+        default: "Reporter Values Override (advanced)"
       # Module: Fetcher
       EnableFetcher:
         default: "Deploy Fetcher"
@@ -267,6 +279,8 @@ Metadata:
         default: "Fetcher Chart Version"
       FetcherLicenseKey:
         default: "Fetcher License Key"
+      FetcherValuesOverride:
+        default: "Fetcher Values Override (advanced)"
       # Module: Product Console
       EnableConsole:
         default: "Deploy Product Console"
@@ -282,11 +296,15 @@ Metadata:
         default: "ALB Scheme"
       IngressCertificateArn:
         default: "ACM Certificate ARN"
+      ConsoleValuesOverride:
+        default: "Console Values Override (advanced)"
       # Module: BR Bank Transfer
       EnableBankTransfer:
         default: "Deploy BR Bank Transfer"
       BankTransferChartVersion:
         default: "BR Bank Transfer Chart Version"
+      BankTransferValuesOverride:
+        default: "BR Bank Transfer Values Override (advanced)"
       BankTransferLicenseKey:
         default: "BR Bank Transfer License Key"
       # platform-orchestrator (controller)
@@ -802,6 +820,11 @@ Parameters:
     NoEcho: true
     Description: "Lerian license key for the Access Manager (auth + identity). Required for licensed operation."
 
+  AccessManagerValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. See orchestrator.yaml's own Parameter description for the exact shape expected."
+
   # ===========================================================================
   # MODULE: LEDGER (MIDAZ)
   # ===========================================================================
@@ -816,6 +839,11 @@ Parameters:
     Default: "9.1.0"
     Description: midaz-helm chart version. See orchestrator.yaml's own Parameter description for the compatibility check behind this pin.
 
+  LedgerValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.ledger.valuesOverride (also covers the bundled crm/tracer subcomponents). See orchestrator.yaml's own Parameter description for the exact shape expected."
+
   # ===========================================================================
   # MODULE: REPORTER
   # ===========================================================================
@@ -829,6 +857,11 @@ Parameters:
     Type: String
     Default: "4.1.0"
     Description: reporter-helm chart version
+
+  ReporterValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.reporter.valuesOverride. See orchestrator.yaml's own Parameter description for the exact shape expected."
 
   # ===========================================================================
   # MODULE: FETCHER
@@ -849,6 +882,11 @@ Parameters:
     Default: ""
     NoEcho: true
     Description: "Lerian license key for Fetcher. Each licensed plugin has its own key."
+
+  FetcherValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.fetcher.valuesOverride. See orchestrator.yaml's own Parameter description for the exact shape expected."
 
   # ===========================================================================
   # MODULE: PRODUCT CONSOLE
@@ -891,6 +929,11 @@ Parameters:
     Default: ""
     Description: ACM Certificate ARN for HTTPS (optional)
 
+  ConsoleValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.console.valuesOverride. See orchestrator.yaml's own Parameter description for the exact shape expected."
+
   # ===========================================================================
   # MODULE: BR BANK TRANSFER
   # ===========================================================================
@@ -910,6 +953,11 @@ Parameters:
     Default: ""
     NoEcho: true
     Description: "Lerian license key for the BR Bank Transfer plugin. Each licensed plugin has its own key."
+
+  BankTransferValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.bank_transfer.valuesOverride. See orchestrator.yaml's own Parameter description for the exact shape expected."
 
   # ===========================================================================
   # PLATFORM-ORCHESTRATOR (CONTROLLER)
@@ -1297,6 +1345,13 @@ Resources:
         IngressHostname: !Ref IngressHostname
         IngressScheme: !Ref IngressScheme
         IngressCertificateArn: !Ref IngressCertificateArn
+        # Per-module valuesOverride (advanced)
+        AccessManagerValuesOverride: !Ref AccessManagerValuesOverride
+        LedgerValuesOverride: !Ref LedgerValuesOverride
+        ReporterValuesOverride: !Ref ReporterValuesOverride
+        FetcherValuesOverride: !Ref FetcherValuesOverride
+        ConsoleValuesOverride: !Ref ConsoleValuesOverride
+        BankTransferValuesOverride: !Ref BankTransferValuesOverride
         # EnvironmentContract TLS override (advanced)
         EnvironmentContractCARef: !Ref EnvironmentContractCARef
       Tags:

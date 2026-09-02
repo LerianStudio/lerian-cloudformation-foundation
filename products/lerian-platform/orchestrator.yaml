@@ -58,17 +58,20 @@ Metadata:
           - AuthorizerClientSecret
           - AccessManagerOrganizationIds
           - AccessManagerLicenseKey
+          - AccessManagerValuesOverride
       - Label:
           default: "Module: Ledger (Midaz)"
         Parameters:
           - EnableLedger
           - LedgerChartVersion
+          - LedgerValuesOverride
       - Label:
           default: "Module: Reporter"
         Parameters:
           - EnableReporter
           - ReporterChartVersion
           - ReporterStorageBucketName
+          - ReporterValuesOverride
       - Label:
           default: "Module: Fetcher"
         Parameters:
@@ -76,6 +79,7 @@ Metadata:
           - FetcherChartVersion
           - FetcherStorageBucketName
           - FetcherLicenseKey
+          - FetcherValuesOverride
       - Label:
           default: "Module: Product Console"
         Parameters:
@@ -86,12 +90,14 @@ Metadata:
           - IngressHostname
           - IngressScheme
           - IngressCertificateArn
+          - ConsoleValuesOverride
       - Label:
           default: "Module: BR Bank Transfer"
         Parameters:
           - EnableBankTransfer
           - BankTransferChartVersion
           - BankTransferLicenseKey
+          - BankTransferValuesOverride
       - Label:
           default: "Object Storage — Shared"
         Parameters:
@@ -220,6 +226,18 @@ Metadata:
         default: "ALB Scheme"
       IngressCertificateArn:
         default: "ACM Certificate ARN"
+      AccessManagerValuesOverride:
+        default: "Access Manager Values Override (advanced)"
+      LedgerValuesOverride:
+        default: "Ledger Values Override (advanced)"
+      ReporterValuesOverride:
+        default: "Reporter Values Override (advanced)"
+      FetcherValuesOverride:
+        default: "Fetcher Values Override (advanced)"
+      ConsoleValuesOverride:
+        default: "Console Values Override (advanced)"
+      BankTransferValuesOverride:
+        default: "BR Bank Transfer Values Override (advanced)"
       EnvironmentContractCARef:
         default: "Custom CA Bundle (base64 PEM, advanced)"
 
@@ -453,6 +471,46 @@ Parameters:
     # against the stable repo (or vice versa) fails the chart pull outright.
     Default: "2.0.0"
     Description: plugin-br-bank-transfer-helm chart version
+
+  # ---------------------------------------------------------------------------
+  # Per-module valuesOverride (advanced) — the only way to give a module a
+  # datastore host/port distinct from the shared EnvironmentContract-derived
+  # one (every catalog module's ValueMap otherwise always binds the same
+  # global.datastores.* mask). Raw YAML MAPPING CONTENT, not wrapped in its
+  # own "valuesOverride:" key — rendered verbatim under
+  # spec.modules.<name>.valuesOverride (ModuleSpec.ValuesOverride,
+  # api/v1alpha1/platform_types.go, "mechanism 4, break-glass"). Empty by
+  # default (opt-in). Example, to give Reporter its own Postgres host:
+  #   global:
+  #     datastores:
+  #       postgres:
+  #         host: reporter-dedicated.example.com
+  # ---------------------------------------------------------------------------
+  AccessManagerValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. See the comment above this section for the exact shape expected."
+  LedgerValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.ledger.valuesOverride (also covers the bundled crm/tracer subcomponents). See the comment above this section for the exact shape expected."
+  ReporterValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.reporter.valuesOverride. See the comment above this section for the exact shape expected."
+  FetcherValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.fetcher.valuesOverride. See the comment above this section for the exact shape expected."
+  BankTransferValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.bank_transfer.valuesOverride. See the comment above this section for the exact shape expected."
+  ConsoleValuesOverride:
+    Type: String
+    Default: ""
+    Description: "Advanced: raw YAML merged into spec.modules.console.valuesOverride. See the comment above this section for the exact shape expected."
+
   # ---------------------------------------------------------------------------
   # platform-orchestrator itself (the controller, distinct from the modules
   # it manages)
@@ -821,6 +879,14 @@ Resources:
           CONSOLE_VERSION: !Ref ConsoleChartVersion
           ACCESS_MANAGER_VERSION: !Ref AccessManagerChartVersion
           BANK_TRANSFER_VERSION: !Ref BankTransferChartVersion
+          # Per-module valuesOverride (raw YAML, empty by default — see the
+          # REGISTRY comment above render_platform for what this is for)
+          ACCESS_MANAGER_VALUES_OVERRIDE: !Ref AccessManagerValuesOverride
+          LEDGER_VALUES_OVERRIDE: !Ref LedgerValuesOverride
+          REPORTER_VALUES_OVERRIDE: !Ref ReporterValuesOverride
+          FETCHER_VALUES_OVERRIDE: !Ref FetcherValuesOverride
+          BANK_TRANSFER_VALUES_OVERRIDE: !Ref BankTransferValuesOverride
+          CONSOLE_VALUES_OVERRIDE: !Ref ConsoleValuesOverride
           # Console / ingress (forwarded as-is; the operator/chart renders them)
           NEXTAUTH_URL: !Ref NextAuthUrl
           ENABLE_INGRESS: !Ref EnableIngress
@@ -893,22 +959,36 @@ Resources:
           # — needed by purge_module_helm_releases() below, since the Lambda
           # itself never renders per-module namespaces into the Platform CR
           # (that assignment is entirely internal to the Go operator).
+          # override_env: the CFN parameter (raw YAML text, mapping content —
+          # NOT wrapped in its own "valuesOverride:" key) rendered verbatim
+          # under spec.modules.<name>.valuesOverride (api/v1alpha1/
+          # platform_types.go ModuleSpec.ValuesOverride, "mechanism 4,
+          # break-glass"). This is how a module gets a datastore host/port
+          # distinct from the shared EnvironmentContract-derived one (e.g.
+          # ledger.valuesOverride: "global:\n  datastores:\n    postgres:\n
+          # host: other-rds.example.com") — the catalog's ValueMap always
+          # binds the shared global.datastores.* mask; this is the only
+          # per-module escape hatch and it is opt-in/empty by default.
           REGISTRY = {
               "access_manager": {"enable": "ENABLE_ACCESS_MANAGER", "version_env": "ACCESS_MANAGER_VERSION",
                                   "license_env": "ACCESS_MANAGER_LICENSE_KEY", "bucket_env": None,
+                                  "override_env": "ACCESS_MANAGER_VALUES_OVERRIDE",
                                   "namespace": "plugin-access-manager"},
               "ledger": {"enable": "ENABLE_LEDGER", "version_env": "LEDGER_VERSION", "license_env": None,
-                         "bucket_env": None, "namespace": "midaz"},
+                         "bucket_env": None, "override_env": "LEDGER_VALUES_OVERRIDE", "namespace": "midaz"},
               "fetcher": {"enable": "ENABLE_FETCHER", "version_env": "FETCHER_VERSION",
                           "license_env": "FETCHER_LICENSE_KEY", "bucket_env": "FETCHER_S3_BUCKET",
-                          "namespace": "fetcher"},
+                          "override_env": "FETCHER_VALUES_OVERRIDE", "namespace": "fetcher"},
               "reporter": {"enable": "ENABLE_REPORTER", "version_env": "REPORTER_VERSION", "license_env": None,
-                           "bucket_env": "REPORTER_S3_BUCKET", "namespace": "reporter"},
+                           "bucket_env": "REPORTER_S3_BUCKET", "override_env": "REPORTER_VALUES_OVERRIDE",
+                           "namespace": "reporter"},
               "bank_transfer": {"enable": "ENABLE_BANK_TRANSFER", "version_env": "BANK_TRANSFER_VERSION",
                                  "license_env": "BANK_TRANSFER_LICENSE_KEY", "bucket_env": None,
+                                 "override_env": "BANK_TRANSFER_VALUES_OVERRIDE",
                                  "namespace": "plugin-br-bank-transfer"},
               "console": {"enable": "ENABLE_CONSOLE", "version_env": "CONSOLE_VERSION", "license_env": None,
-                          "bucket_env": None, "namespace": "product-console"},
+                          "bucket_env": None, "override_env": "CONSOLE_VALUES_OVERRIDE",
+                          "namespace": "product-console"},
           }
 
           def purge_module_helm_releases():
@@ -1348,6 +1428,12 @@ Resources:
                   bucket = os.environ.get(bucket_env, '') if bucket_env else ''
                   if bucket:
                       lines.append(f"      bucket: \"{bucket}\"")
+                  override_env = m.get('override_env')
+                  override_yaml = os.environ.get(override_env, '') if override_env else ''
+                  if override_yaml.strip():
+                      lines.append("      valuesOverride:")
+                      for ov_line in override_yaml.splitlines():
+                          lines.append(f"        {ov_line}")
               return "\n".join(lines) + "\n"
 
           def write_license_secrets(ns):
@@ -1546,6 +1632,12 @@ Resources:
             - !Ref NextAuthUrl
             - !Ref EnableIngress
             - !Ref IngressHostname
+            - !Ref AccessManagerValuesOverride
+            - !Ref LedgerValuesOverride
+            - !Ref ReporterValuesOverride
+            - !Ref FetcherValuesOverride
+            - !Ref ConsoleValuesOverride
+            - !Ref BankTransferValuesOverride
             - !Ref EnvironmentContractCARef
             - "v1"
 
