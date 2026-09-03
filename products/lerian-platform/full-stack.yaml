@@ -844,16 +844,18 @@ Parameters:
     Type: String
     # Non-empty default — see orchestrator.yaml's own Parameter comment.
     # plugin-access-manager's auth-init-user Job defaults to a single-arch
-    # amd64-only image (ghcr.io/lerianstudio/caradhras-user-init:
-    # 3.2.0-beta.67); this shared foundation.yaml is ARM64/Graviton-only, so
-    # without this override that Job ImagePullBackOffs forever. 3.3.1 is the
-    # first stable multi-arch tag (confirmed via docker buildx imagetools
-    # inspect).
+    # amd64-only image; this shared foundation.yaml is ARM64/Graviton-only,
+    # so without this override that Job ImagePullBackOffs forever. Disabled
+    # outright (auth.initUser.enabled: false) rather than re-pinning the
+    # image — matches how lerian-aws-gitops's own production config runs
+    # this module (the Job is post-install-only, and chart 10.x+ requires
+    # adminPassword/useExistingSecret+adminPasswordSecretName when enabled,
+    # neither of which this template sets).
     Default: |
       auth:
         initUser:
-          image: "ghcr.io/lerianstudio/caradhras-user-init:3.3.1"
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to pinning auth-init-user's image to a multi-arch tag — see orchestrator.yaml's own Parameter description for details."
+          enabled: false
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to disabling auth-init-user — see orchestrator.yaml's own Parameter description for details."
 
   # ===========================================================================
   # MODULE: LEDGER (MIDAZ)

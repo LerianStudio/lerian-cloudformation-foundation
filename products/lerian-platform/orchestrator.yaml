@@ -489,18 +489,21 @@ Parameters:
   AccessManagerValuesOverride:
     Type: String
     # Non-empty default (unlike every other module's ValuesOverride, which
-    # default to ""): plugin-access-manager's chart hardcodes
-    # ghcr.io/lerianstudio/caradhras-user-init:3.2.0-beta.67 as the fallback
-    # for its auth-init-user Job (charts/plugin-access-manager/templates/
-    # auth/init_user.yaml on LerianStudio/helm main, chart 9.2.1 — same
-    # broken default as our pinned 9.2.0) and that tag is single-arch amd64
-    # only (confirmed via docker buildx imagetools inspect — no arm64
-    # manifest). Since this template's shared foundation.yaml is ARM64/
-    # Graviton-only (see NodeInstanceType's comment), the default init-user
-    # Job would ImagePullBackOff forever without this override. 3.3.0/3.3.1
-    # are the first stable tags actually published multi-arch (amd64+arm64,
-    # confirmed the same way) — pin 3.3.1. Every other image this template's
-    # 6 enabled modules pull (ledger/ledger-migrations/crm/tracer/tracer-
+    # default to ""): the auth-init-user Job defaults to
+    # ghcr.io/lerianstudio/caradhras-user-init:3.2.0-beta.67, single-arch
+    # amd64 only (confirmed via docker buildx imagetools inspect — no arm64
+    # manifest, and the whole 3.2.0-beta.*/3.4.0-beta-rc.* tag ranges are
+    # amd64-only too). This template's shared foundation.yaml is ARM64/
+    # Graviton-only, so that Job ImagePullBackOffs forever left at its
+    # default. Disabled outright instead of re-pinning the image — this is
+    # exactly how LerianStudio/lerian-aws-gitops's own production config
+    # runs plugin-access-manager (environments/production/lerian-eks-
+    # production/helmfile/applications/plugin-access-manager-mt/values.yaml:
+    # `auth.initUser.enabled: false`, with the same rationale: the Job is
+    # post-install-only, and chart 10.x+ requires adminPassword/
+    # useExistingSecret+adminPasswordSecretName when enabled, neither of
+    # which this template sets). Every other image this template's 6
+    # enabled modules pull (ledger/ledger-migrations/crm/tracer/tracer-
     # migrations, plugin-identity/plugin-auth/caradhras, product-console,
     # plugin-br-bank-transfer, reporter-manager/worker, fetcher-manager/
     # worker) was individually verified multi-arch already — this was the
@@ -508,8 +511,8 @@ Parameters:
     Default: |
       auth:
         initUser:
-          image: "ghcr.io/lerianstudio/caradhras-user-init:3.3.1"
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to pinning auth-init-user's image to a multi-arch tag (see comment above) — override only if you need something different."
+          enabled: false
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to disabling auth-init-user (see comment above) — override only if you need something different."
   LedgerValuesOverride:
     Type: String
     Default: ""
