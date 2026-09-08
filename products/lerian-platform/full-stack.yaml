@@ -722,14 +722,17 @@ Parameters:
     # broker with EngineType RABBITMQ and removed mq.t3.micro from its own
     # AllowedValues (RabbitMQ doesn't support it: "Broker engine type
     # [RabbitMQ] does not support host instance type [mq.t3.micro]").
-    # mq.m7g.medium is that template's own smallest RabbitMQ-supported type
-    # (its comment calls it "evaluation-sized"). Found live: a create-stack
-    # attempt with the old mq.t3.micro default failed instantly on this
-    # exact parameter validation, several nested-stack layers down from
-    # this template's own (looser, not-yet-updated) AllowedValues list.
-    Default: mq.m7g.medium
+    # mq.m7g.large is that template's own smallest RabbitMQ-supported type —
+    # NOT mq.m7g.medium, which an earlier fix here wrongly assumed existed:
+    # confirmed live, a create-stack with mq.m7g.medium passed THIS
+    # template's own (looser) AllowedValues check, then failed several
+    # nested-stack layers down where the real templates/amazonmq.yaml
+    # actually validates it (that template's AllowedValues starts at
+    # mq.m7g.large — "medium" isn't a real AmazonMQ broker size). Same
+    # AllowedValues/Default list, keep this and products/midaz/
+    # infrastructure.yaml's copy in lockstep with templates/amazonmq.yaml.
+    Default: mq.m7g.large
     AllowedValues:
-      - mq.m7g.medium
       - mq.m7g.large
       - mq.m7g.xlarge
       - mq.m7g.2xlarge

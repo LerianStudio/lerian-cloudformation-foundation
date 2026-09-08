@@ -457,13 +457,16 @@ Parameters:
     # mq.t3.micro is ActiveMQ-only — the nested amazonmq.yaml this template
     # calls always creates the broker with EngineType RABBITMQ and has
     # already removed mq.t3.micro from its own AllowedValues (unsupported by
-    # that engine). mq.m7g.medium is that template's smallest RabbitMQ-
-    # supported type. Found live via a lerian-platform full-stack.yaml
-    # create-stack attempt failing several nested-stack layers down on this
-    # exact parameter.
-    Default: mq.m7g.medium
+    # that engine). mq.m7g.large is that template's smallest RabbitMQ-
+    # supported type — NOT mq.m7g.medium, which an earlier fix here wrongly
+    # assumed existed: confirmed live, mq.m7g.medium passed THIS template's
+    # own (looser) AllowedValues check, then failed several nested-stack
+    # layers down where the real templates/amazonmq.yaml actually validates
+    # it ("medium" isn't a real AmazonMQ broker size). Keep this and
+    # products/lerian-platform/full-stack.yaml's copy in lockstep with
+    # templates/amazonmq.yaml.
+    Default: mq.m7g.large
     AllowedValues:
-      - mq.m7g.medium
       - mq.m7g.large
       - mq.m7g.xlarge
       - mq.m7g.2xlarge
