@@ -65,17 +65,6 @@ Parameters:
       - m6g.xlarge
     Default: c7g.large
 
-  NodeAmiType:
-    Type: String
-    Description: >-
-      EKS node AMI type. Must match NodeInstanceType architecture:
-      AL2023_x86_64_STANDARD for x86 (c6i.*) — required for amd64-only container images;
-      AL2023_ARM_64_STANDARD for Graviton (c7g/m7g/r7g/c6g/m6g).
-    Default: AL2023_x86_64_STANDARD
-    AllowedValues:
-      - AL2023_x86_64_STANDARD
-      - AL2023_ARM_64_STANDARD
-
   NodeGroupMinSize:
     Type: Number
     Description: Minimum number of worker nodes
@@ -102,6 +91,19 @@ Parameters:
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # Derived, not a separate parameter: a standalone NodeAmiType input let its
+  # own default (AL2023_x86_64_STANDARD) silently drift out of sync with
+  # NodeInstanceType's default (c7g.large, Graviton/ARM64) — confirmed live,
+  # EKSNodeGroup CREATE_FAILED with "[c7g.large] is not a valid instance type
+  # for requested amiType AL2023_x86_64_STANDARD". Only c6i.* in
+  # NodeInstanceType's AllowedValues list is x86_64; every other allowed
+  # value (c7g/m7g/r7g/c6g/m6g families) is Graviton — deriving AmiType from
+  # NodeInstanceType here means the two can never disagree again, for any
+  # value in that list, not just the current default.
+  NodeInstanceIsX86: !Or
+    - !Equals [!Ref NodeInstanceType, "c6i.large"]
+    - !Equals [!Ref NodeInstanceType, "c6i.xlarge"]
+    - !Equals [!Ref NodeInstanceType, "c6i.2xlarge"]
 
 Resources:
   # =============================================================================
@@ -253,7 +255,7 @@ Resources:
         DesiredSize: !Ref NodeGroupDesiredSize
       InstanceTypes:
         - !Ref NodeInstanceType
-      AmiType: !Ref NodeAmiType
+      AmiType: !If [NodeInstanceIsX86, "AL2023_x86_64_STANDARD", "AL2023_ARM_64_STANDARD"]
       CapacityType: ON_DEMAND
       Labels:
         Environment: !Ref EnvironmentName
