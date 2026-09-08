@@ -555,14 +555,20 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.4-e2e.ccb4346"
+    Default: "0.1.5-e2e.a6ae26a"
     Description: >-
-      platform-orchestrator chart version. Bumped from 0.1.0-e2e.37a282a-multiarch
-      to pick up a batch of fixes/refactors made after that pin (still
-      multi-arch, same build convention). Not yet re-run through a live
-      create-stack. Validated locally via a full from-zero minikube run
-      (all modules reaching Ready with no manual steps). NodeInstanceType
-      stays Graviton (c7g.large), unaffected by this bump.
+      platform-orchestrator chart version. Bumped from 0.1.4-e2e.ccb4346 after
+      a TLS code-path audit found two real gaps ahead of a live create-stack
+      against real RDS/DocumentDB: Postgres TLS was already correct (no fix
+      needed there), but Mongo TLS had no CA-bundle wiring at all, and one
+      module (pix_indirect_btg) never set an SSL mode on its Postgres
+      connections. Both fixed and verified against real chart source (not
+      guessed). Still multi-arch, same build convention. Not yet re-run
+      through a live create-stack. Validated locally via a full from-zero
+      minikube run (all modules reaching Ready with no manual steps) — note
+      minikube uses plaintext datastores, so this only proves no regression,
+      not that the new TLS-required code paths work against real infra.
+      NodeInstanceType stays Graviton (c7g.large), unaffected by this bump.
 
   # ---------------------------------------------------------------------------
   # Access Manager (Casdoor) — authorizer (mother) credential + admin + license
