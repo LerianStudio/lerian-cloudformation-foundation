@@ -1028,7 +1028,7 @@ Parameters:
     # old build believing it was current. This file's Default always wins
     # (it's what actually gets passed down), so THIS is the one to check
     # first if a deployed operator doesn't match what you expect.
-    Default: "0.1.5-e2e.a6ae26a"
+    Default: "0.1.10-e2e.7b4c70e"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of

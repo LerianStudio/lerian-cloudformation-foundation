@@ -560,7 +560,7 @@ Parameters:
     # wins on a full-stack create-stack — confirmed live: bumping ONLY this
     # copy left a real create-stack silently running the OLD pinned build for
     # hours, no error at all. Keep both defaults identical.
-    Default: "0.1.5-e2e.a6ae26a"
+    Default: "0.1.10-e2e.7b4c70e"
     Description: >-
       platform-orchestrator chart version. Bumped from 0.1.4-e2e.ccb4346 after
       a TLS code-path audit found two real gaps ahead of a live create-stack
@@ -1237,8 +1237,23 @@ Resources:
               # _bootstrapoperations.yaml) is installed automatically by
               # `helm install` — Helm always applies charts/<name>/crds/* before
               # templates, so NO separate `kubectl apply` step for CRDs is needed.
+              # The chart now defaults to a full local/dev QUICKSTART (bundled
+              # throwaway Postgres/Mongo/Valkey/RabbitMQ/RedPanda, a fake
+              # EnvironmentContract marked Ready, and its own Platform CR) —
+              # see helm-internal's charts/platform-orchestrator README. This
+              # Lambda is the REAL provisioner path (real RDS/DocumentDB/
+              # ElastiCache/AmazonMQ, its own EnvironmentContract/Platform CRs
+              # written separately below) and MUST explicitly disable every
+              # quickstart toggle, or the chart would additionally stand up a
+              # conflicting fake EnvironmentContract/Platform CR alongside the
+              # real ones this Lambda writes.
               run(['helm', 'upgrade', '--install', 'platform-orchestrator', repo,
                    '--version', version, '--namespace', ns, '--create-namespace',
+                   '--set', 'infraEmbedded=false',
+                   '--set', 'platform.enabled=false',
+                   '--set', 'environmentContract.enabled=false',
+                   '--set', 'environmentContract.markReadyForDev=false',
+                   '--set', 'devContractSecrets.enabled=false',
                    '--wait', '--timeout', '10m'])
 
           # =====================================================================
