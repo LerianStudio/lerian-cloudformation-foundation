@@ -555,6 +555,11 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
+    # full-stack.yaml carries its OWN copy of this exact Parameter (CFN can't
+    # share one definition across templates) and its Default is what actually
+    # wins on a full-stack create-stack — confirmed live: bumping ONLY this
+    # copy left a real create-stack silently running the OLD pinned build for
+    # hours, no error at all. Keep both defaults identical.
     Default: "0.1.5-e2e.a6ae26a"
     Description: >-
       platform-orchestrator chart version. Bumped from 0.1.4-e2e.ccb4346 after

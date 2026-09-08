@@ -1018,7 +1018,17 @@ Parameters:
 
   OrchestratorChartVersion:
     Type: String
-    Default: "0.1.0-e2e.37a282a-multiarch"
+    # MUST match orchestrator.yaml's own OrchestratorChartVersion Default —
+    # CFN has no way to share one Parameter definition across templates, so
+    # this is a real, structural two-copies-one-drifts risk (same class as
+    # the AmiType/AmazonMQInstanceType bugs fixed today). Confirmed live:
+    # a create-stack that only updated orchestrator.yaml's own default (not
+    # this one) silently deployed the STALE image/chart this default still
+    # pointed at — no error, no warning, just several hours of testing an
+    # old build believing it was current. This file's Default always wins
+    # (it's what actually gets passed down), so THIS is the one to check
+    # first if a deployed operator doesn't match what you expect.
+    Default: "0.1.5-e2e.a6ae26a"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of
