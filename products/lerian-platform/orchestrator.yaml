@@ -24,6 +24,12 @@ Metadata:
           - OperatorNamespace
           - PermissionsBoundaryArn
       - Label:
+          default: "AWS Marketplace Parameters (only used to auto-provision MSK — see below)"
+        Parameters:
+          - MPS3BucketName
+          - MPS3BucketRegion
+          - MPS3KeyPrefix
+      - Label:
           default: "Data Layer — Endpoints & Secrets"
         Parameters:
           - RDSEndpoint
@@ -37,6 +43,13 @@ Metadata:
           - AmazonMQSecretArn
           - MSKClusterArn
           - MSKSecretArn
+      - Label:
+          default: "MSK Auto-Provisioning (only used when Fetcher is enabled and MSKClusterArn is empty)"
+        Parameters:
+          - MSKVpcId
+          - MSKVpcCIDR
+          - MSKPrivateSubnetIds
+          - MSKInstanceType
       - Label:
           default: "Data Layer — Encryption (KMS)"
         Parameters:
@@ -152,6 +165,14 @@ Metadata:
         default: "MSK Cluster ARN"
       MSKSecretArn:
         default: "MSK SASL/SCRAM Secret ARN"
+      MSKVpcId:
+        default: "(Required if Fetcher enabled + no MSKClusterArn) VPC ID for auto-provisioned MSK"
+      MSKVpcCIDR:
+        default: "(Required if Fetcher enabled + no MSKClusterArn) VPC CIDR for auto-provisioned MSK"
+      MSKPrivateSubnetIds:
+        default: "(Required if Fetcher enabled + no MSKClusterArn) Private Subnet IDs for auto-provisioned MSK"
+      MSKInstanceType:
+        default: "Auto-Provisioned MSK Broker Instance Type"
       RDSKMSKeyArn:
         default: "RDS KMS Key ARN"
       DocumentDBKMSKeyArn:
@@ -243,6 +264,33 @@ Metadata:
 
 Parameters:
   # ---------------------------------------------------------------------------
+  # AWS Marketplace parameters — only consulted when auto-provisioning MSK
+  # (ShouldProvisionMSK below), to locate templates/msk.yaml. Everything else
+  # in this template is genuinely self-contained (a single inline-code
+  # Lambda, no other nested stacks) — this is the one exception, since MSK
+  # is a real, non-trivial CFN resource shape worth reusing from
+  # templates/msk.yaml rather than re-authoring inline in this Lambda.
+  # ---------------------------------------------------------------------------
+  MPS3BucketName:
+    Type: String
+    Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
+    Default: "lerian-cloudformation-templates"
+
+  MPS3BucketRegion:
+    Type: String
+    Description: "AWS Region where the S3 bucket is located (fixed to sa-east-1)"
+    Default: "sa-east-1"
+    AllowedValues:
+      - sa-east-1
+
+  MPS3KeyPrefix:
+    Type: String
+    Description: "S3 key prefix for the shared CloudFormation templates"
+    Default: "releases/latest/"
+    AllowedPattern: "^[a-zA-Z0-9-_./]*$"
+    ConstraintDescription: "Key prefix can include alphanumeric characters, hyphens, underscores, periods, and forward slashes"
+
+  # ---------------------------------------------------------------------------
   # General
   # ---------------------------------------------------------------------------
   PermissionsBoundaryArn:
@@ -320,12 +368,71 @@ Parameters:
   MSKClusterArn:
     Type: String
     Default: ""
-    Description: MSK Cluster ARN (streaming backbone; empty disables streaming consumers)
+    Description: >-
+      MSK Cluster ARN (streaming backbone). Leave empty to either disable
+      streaming (Fetcher disabled) or have this template auto-provision a
+      new MSK cluster for you (Fetcher enabled — see the "MSK
+      Auto-Provisioning" parameter group below).
 
   MSKSecretArn:
     Type: String
     Default: ""
     Description: MSK SASL/SCRAM credentials Secret ARN
+
+  # ---------------------------------------------------------------------------
+  # MSK auto-provisioning (only used when EnableFetcher=true AND
+  # MSKClusterArn is left empty — see ShouldProvisionMSK below). Fetcher
+  # hard-requires a working Kafka/MSK connection: confirmed live, without one
+  # fetcher-worker crashes on startup with "STREAMING_ENABLED=true is
+  # required for mandatory job event notifications" and never reaches
+  # Ready. orchestrator.yaml is otherwise deliberately "app only" (no
+  # data-layer provisioning — see the README), but Fetcher is the one module
+  # that cannot function against this template's normal
+  # bring-your-own-endpoints model without ALSO being handed a Kafka
+  # endpoint, so this is a narrow, deliberate exception rather than a
+  # reversal of that design.
+  # ---------------------------------------------------------------------------
+  MSKVpcId:
+    Type: String
+    Default: ""
+    Description: >-
+      VPC ID for the auto-provisioned MSK cluster. Required only when
+      EnableFetcher=true and MSKClusterArn is empty — typically the same VPC
+      your EKS cluster (ClusterName) runs in.
+
+  MSKVpcCIDR:
+    Type: String
+    Default: ""
+    Description: >-
+      VPC CIDR block, for the auto-provisioned MSK cluster's security group
+      rules. Required only when EnableFetcher=true and MSKClusterArn is empty.
+
+  MSKPrivateSubnetIds:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma-separated private subnet IDs the auto-provisioned MSK cluster's
+      brokers are placed into (one per broker, each in a distinct AZ).
+      Required only when EnableFetcher=true and MSKClusterArn is empty.
+
+  MSKInstanceType:
+    Type: String
+    Default: kafka.m7g.large
+    AllowedValues:
+      - kafka.t3.small
+      - kafka.m5.large
+      - kafka.m5.xlarge
+      - kafka.m5.2xlarge
+      - kafka.m5.4xlarge
+      - kafka.m7g.large
+      - kafka.m7g.xlarge
+      - kafka.m7g.2xlarge
+      - kafka.m7g.4xlarge
+    Description: >-
+      Broker instance type for the auto-provisioned MSK cluster. Only used
+      when EnableFetcher=true and MSKClusterArn is empty. Graviton
+      (kafka.m7g.*) default to match this template's Graviton-only EKS
+      foundation.
 
   MSKKMSKeyArn:
     Type: String
@@ -495,24 +602,25 @@ Parameters:
     # manifest, and the whole 3.2.0-beta.*/3.4.0-beta-rc.* tag ranges are
     # amd64-only too). This template's shared foundation.yaml is ARM64/
     # Graviton-only, so that Job ImagePullBackOffs forever left at its
-    # default. Disabled outright instead of re-pinning the image — this is
-    # exactly how LerianStudio/lerian-aws-gitops's own production config
-    # runs plugin-access-manager (environments/production/lerian-eks-
-    # production/helmfile/applications/plugin-access-manager-mt/values.yaml:
-    # `auth.initUser.enabled: false`, with the same rationale: the Job is
-    # post-install-only, and chart 10.x+ requires adminPassword/
-    # useExistingSecret+adminPasswordSecretName when enabled, neither of
-    # which this template sets). Every other image this template's 6
-    # enabled modules pull (ledger/ledger-migrations/crm/tracer/tracer-
-    # migrations, plugin-identity/plugin-auth/caradhras, product-console,
-    # plugin-br-bank-transfer, reporter-manager/worker, fetcher-manager/
-    # worker) was individually verified multi-arch already — this was the
-    # only exception found.
+    # default. FIXED (was: disabled outright) by re-pinning to 3.3.1, which
+    # DOES ship a multi-arch manifest (confirmed via docker buildx imagetools
+    # inspect) — confirmed live end-to-end: the m2m-app BootstrapOperation
+    # that consumes the admin user this Job creates now reaches Succeeded on
+    # a real Graviton EKS cluster. Disabling the Job outright (the previous
+    # default) left the operator's m2m-app bootstrap permanently failing with
+    # HTTP 401 "the user does not exist", since no admin user is ever
+    # created in Casdoor for the operator to authenticate as. The
+    # useExistingSecret/adminPasswordSecretName the chart also requires when
+    # initUser is enabled are ALREADY set unconditionally by the operator's
+    # own catalog descriptor (internal/modules/catalog/access_manager.go),
+    # not by this override — only the image tag needed fixing here.
     Default: |
       auth:
         initUser:
-          enabled: false
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to disabling auth-init-user (see comment above) — override only if you need something different."
+          enabled: true
+          image:
+            tag: "3.3.1"
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to pinning auth-init-user to a multi-arch-compatible tag (see comment above) — override only if you need something different."
   LedgerValuesOverride:
     Type: String
     Default: ""
@@ -717,15 +825,49 @@ Conditions:
   HasAmazonMQSecret: !Not [!Equals [!Ref AmazonMQSecretArn, ""]]
   HasElastiCacheSecret: !Not [!Equals [!Ref ElastiCacheSecretArn, ""]]
   HasElastiCacheKMS: !Not [!Equals [!Ref ElastiCacheKMSKeyArn, ""]]
-  HasMSKCluster: !Not [!Equals [!Ref MSKClusterArn, ""]]
-  HasMSKSecret: !Not [!Equals [!Ref MSKSecretArn, ""]]
-  HasMSKKMS: !Not [!Equals [!Ref MSKKMSKeyArn, ""]]
+  HasMSKCluster: !Or [!Not [!Equals [!Ref MSKClusterArn, ""]], !Condition ShouldProvisionMSK]
+  HasMSKSecret: !Or [!Not [!Equals [!Ref MSKSecretArn, ""]], !Condition ShouldProvisionMSK]
+  HasMSKKMS: !Or [!Not [!Equals [!Ref MSKKMSKeyArn, ""]], !Condition ShouldProvisionMSK]
+  # Fetcher hard-requires Kafka/MSK (confirmed live — see the MSKVpcId
+  # parameter's comment above) but this template otherwise never provisions
+  # data-layer infra. Auto-provision ONLY when Fetcher is enabled AND the
+  # caller didn't already bring their own MSK cluster via MSKClusterArn.
+  EnableFetcherCond: !Equals [!Ref EnableFetcher, "true"]
+  ShouldProvisionMSK: !And
+    - !Condition EnableFetcherCond
+    - !Equals [!Ref MSKClusterArn, ""]
   HasKMSKeys: !And
     - !Not [!Equals [!Ref RDSKMSKeyArn, ""]]
     - !Not [!Equals [!Ref DocumentDBKMSKeyArn, ""]]
     - !Not [!Equals [!Ref AmazonMQKMSKeyArn, ""]]
 
 Resources:
+  # ===========================================================================
+  # MSK (auto-provisioned ONLY when Fetcher is enabled and the caller didn't
+  # bring their own MSKClusterArn — see ShouldProvisionMSK/the MSKVpcId
+  # parameter's comment above for why this is the one data-layer resource
+  # this otherwise "app only" template will provision).
+  # ===========================================================================
+  MSKStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldProvisionMSK
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}msk.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !Ref MSKVpcId
+        VpcCIDR: !Ref MSKVpcCIDR
+        PrivateSubnetIds: !Ref MSKPrivateSubnetIds
+        InstanceType: !Ref MSKInstanceType
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-msk-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
   # ===========================================================================
   # LAMBDA EXECUTION ROLE (reused as-is from helm.yaml — same EKS access entry
   # mechanism, same Secrets Manager / KMS / MSK / CloudWatch policy shapes)
@@ -766,7 +908,10 @@ Resources:
                   - !If [HasDocumentDBSecret, !Ref DocumentDBSecretArn, !Ref "AWS::NoValue"]
                   - !If [HasElastiCacheSecret, !Ref ElastiCacheSecretArn, !Ref "AWS::NoValue"]
                   - !If [HasAmazonMQSecret, !Ref AmazonMQSecretArn, !Ref "AWS::NoValue"]
-                  - !If [HasMSKSecret, !Ref MSKSecretArn, !Ref "AWS::NoValue"]
+                  - !If
+                    - HasMSKSecret
+                    - !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.SecretArn, !Ref MSKSecretArn]
+                    - !Ref "AWS::NoValue"
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -776,7 +921,10 @@ Resources:
                     - !Ref DocumentDBKMSKeyArn
                     - !Ref AmazonMQKMSKeyArn
                     - !If [HasElastiCacheKMS, !Ref ElastiCacheKMSKeyArn, !Ref "AWS::NoValue"]
-                    - !If [HasMSKKMS, !Ref MSKKMSKeyArn, !Ref "AWS::NoValue"]
+                    - !If
+                      - HasMSKKMS
+                      - !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.KMSKeyArn, !Ref MSKKMSKeyArn]
+                      - !Ref "AWS::NoValue"
                   - - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
                 Condition:
                   StringEquals:
@@ -788,7 +936,10 @@ Resources:
               - Effect: Allow
                 Action:
                   - kafka:GetBootstrapBrokers
-                Resource: !If [HasMSKCluster, !Ref MSKClusterArn, !Sub "arn:aws:kafka:${AWS::Region}:${AWS::AccountId}:cluster/*"]
+                Resource: !If
+                  - HasMSKCluster
+                  - !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.ClusterArn, !Ref MSKClusterArn]
+                  - !Sub "arn:aws:kafka:${AWS::Region}:${AWS::AccountId}:cluster/*"
         - PolicyName: CloudWatchLogs
           PolicyDocument:
             Version: '2012-10-17'
@@ -852,8 +1003,8 @@ Resources:
           ELASTICACHE_SECRET_ARN: !Ref ElastiCacheSecretArn
           AMAZONMQ_ENDPOINT: !Ref AmazonMQEndpoint
           AMAZONMQ_SECRET_ARN: !Ref AmazonMQSecretArn
-          MSK_CLUSTER_ARN: !Ref MSKClusterArn
-          MSK_SECRET_ARN: !Ref MSKSecretArn
+          MSK_CLUSTER_ARN: !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.ClusterArn, !Ref MSKClusterArn]
+          MSK_SECRET_ARN: !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.SecretArn, !Ref MSKSecretArn]
           # Per-app S3
           REPORTER_S3_BUCKET: !Ref ReporterStorageBucketName
           FETCHER_S3_BUCKET: !Ref FetcherStorageBucketName
@@ -1572,10 +1723,31 @@ Resources:
                       # next attempt's Helm install then collides with on
                       # ownership metadata (confirmed live).
                       purge_module_helm_releases()
+                      # BLOCKING wait (was --wait=false): a fire-and-forget
+                      # delete returns to CFN as soon as the API server
+                      # accepts the delete request, well before the object is
+                      # actually gone — any finalizer-driven cleanup
+                      # (platform_controller.go's disown reconcile) keeps
+                      # running in the background. If CFN's next CREATE
+                      # attempt (immediately after this stack is deleted, or
+                      # on CFN's own internal "delete the failed resource,
+                      # then retry create" cycle) applies the SAME-named
+                      # Platform CR while that background deletion is still
+                      # in flight, kubectl apply "succeeds" (it updates the
+                      # still-terminating object) but Kubernetes' garbage
+                      # collector then deletes it out from under the new
+                      # deployment moments later — confirmed live: apply
+                      # logged "configured", the very next poll ~15s later
+                      # saw NotFound, and the object never existed at any
+                      # point kubectl get could observe it. Waiting here for
+                      # the delete to fully complete (finalizers processed)
+                      # BEFORE uninstalling the operator closes that race —
+                      # the operator is still running to finish the disown
+                      # cleanup while we wait.
                       run(['kubectl', '-n', ns, 'delete', 'platform', platform_name,
-                           '--ignore-not-found', '--wait=false'], check=False)
+                           '--ignore-not-found', '--wait=true', '--timeout=120s'], check=False)
                       run(['kubectl', '-n', ns, 'delete', 'environmentcontract', contract_name,
-                           '--ignore-not-found', '--wait=false'], check=False)
+                           '--ignore-not-found', '--wait=true', '--timeout=60s'], check=False)
                       run(['helm', 'uninstall', 'platform-orchestrator', '-n', ns], check=False)
                       send_response(event, context, 'SUCCESS', {
                           'Message': 'Platform/EnvironmentContract CRs deleted, module Helm releases '
