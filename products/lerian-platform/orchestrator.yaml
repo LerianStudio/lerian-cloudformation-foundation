@@ -910,7 +910,7 @@ Resources:
                   - !If [HasAmazonMQSecret, !Ref AmazonMQSecretArn, !Ref "AWS::NoValue"]
                   - !If
                     - HasMSKSecret
-                    - !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.SecretArn, !Ref MSKSecretArn]
+                    - !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.ScramSecretArn, !Ref MSKSecretArn]
                     - !Ref "AWS::NoValue"
               - Effect: Allow
                 Action:
@@ -1004,7 +1004,7 @@ Resources:
           AMAZONMQ_ENDPOINT: !Ref AmazonMQEndpoint
           AMAZONMQ_SECRET_ARN: !Ref AmazonMQSecretArn
           MSK_CLUSTER_ARN: !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.ClusterArn, !Ref MSKClusterArn]
-          MSK_SECRET_ARN: !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.SecretArn, !Ref MSKSecretArn]
+          MSK_SECRET_ARN: !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.ScramSecretArn, !Ref MSKSecretArn]
           # Per-app S3
           REPORTER_S3_BUCKET: !Ref ReporterStorageBucketName
           FETCHER_S3_BUCKET: !Ref FetcherStorageBucketName
