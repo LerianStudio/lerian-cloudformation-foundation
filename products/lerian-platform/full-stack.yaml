@@ -1327,6 +1327,16 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3ProductKeyPrefix}orchestrator.yaml"
       Parameters:
+        # orchestrator.yaml auto-provisions MSK (via templates/msk.yaml) when
+        # EnableFetcher=true and no MSKClusterArn is supplied — needs its own
+        # copy of the shared-templates coordinates, plus the VPC it should
+        # provision MSK's brokers into.
+        MPS3BucketName: !Ref MPS3BucketName
+        MPS3BucketRegion: !Ref MPS3BucketRegion
+        MPS3KeyPrefix: !Ref MPS3KeyPrefix
+        MSKVpcId: !GetAtt FoundationStack.Outputs.VpcId
+        MSKVpcCIDR: !Ref VpcCIDR
+        MSKPrivateSubnetIds: !GetAtt FoundationStack.Outputs.PrivateSubnetIds
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
@@ -1343,10 +1353,12 @@ Resources:
         ElastiCacheSecretArn: !GetAtt InfrastructureStack.Outputs.ElastiCacheSecretArn
         AmazonMQEndpoint: !GetAtt InfrastructureStack.Outputs.AmazonMQEndpoint
         AmazonMQSecretArn: !GetAtt InfrastructureStack.Outputs.AmazonMQSecretArn
-        # MSK is not part of this composition — infrastructure.yaml does not
-        # provision it (no MSK template in this repo's midaz pattern yet).
-        # orchestrator.yaml's own defaults ("") apply, which disable
-        # streaming consumers.
+        # MSK itself is NOT wired from InfrastructureStack — that stack still
+        # doesn't provision it (no MSK template in this repo's midaz
+        # pattern). Left as "" (orchestrator.yaml's own default), which lets
+        # orchestrator.yaml auto-provision its own MSK cluster when
+        # EnableFetcher=true (see MSKVpcId/MSKVpcCIDR/MSKPrivateSubnetIds
+        # above) — or disables streaming consumers when Fetcher is disabled.
         RDSKMSKeyArn: !GetAtt InfrastructureStack.Outputs.RDSKMSKeyArn
         DocumentDBKMSKeyArn: !GetAtt InfrastructureStack.Outputs.DocumentDBKMSKeyArn
         ElastiCacheKMSKeyArn: !GetAtt InfrastructureStack.Outputs.ElastiCacheKMSKeyArn
