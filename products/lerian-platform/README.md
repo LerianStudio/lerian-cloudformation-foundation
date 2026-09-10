@@ -109,9 +109,22 @@ Everything else in the catalog (`ledger`, `tracer`, `access_manager`,
 | **Full Stack** | VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and the platform-orchestrator + module set — all from scratch, single click | [![Launch][img]][lerian-platform-full-sa-east-1] |
 | **Orchestrator (Application only)** | Installs `platform-orchestrator` onto an **existing** EKS cluster and reconciles the enabled module set — requires the data layer already provisioned (see Prerequisites) | [![Launch][img]][lerian-platform-orchestrator-sa-east-1] |
 
-[lerian-platform-full-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/full-stack.yaml&stackName=lerian-platform
+<!--
+TEMPORARY — internal testing only, on branch feat/lerian-platform-cfn-fixes.
+The two links below point at a scratch S3 bucket (lerian-cfn-test-524121347244-sae1)
+holding this branch's templates, NOT the real Marketplace bucket — the real bucket
+(lerian-cloudformation-templates) only gets published by release.yml on a merge to
+main, so it does not yet have this branch's fixes. Revert to the real-bucket URLs
+(kept commented out just below) before/when merging to main.
 
+Real (production) links, for restoring after merge:
+[lerian-platform-full-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/full-stack.yaml&stackName=lerian-platform
 [lerian-platform-orchestrator-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/orchestrator.yaml&stackName=lerian-platform
+-->
+
+[lerian-platform-full-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cfn-test-524121347244-sae1.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/full-stack.yaml&stackName=lerian-platform
+
+[lerian-platform-orchestrator-sa-east-1]: https://console.aws.amazon.com/cloudformation/home?region=sa-east-1#/stacks/quickcreate?templateURL=https://lerian-cfn-test-524121347244-sae1.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/orchestrator.yaml&stackName=lerian-platform
 
 [img]: https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png
 
