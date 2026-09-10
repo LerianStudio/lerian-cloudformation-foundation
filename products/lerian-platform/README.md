@@ -47,8 +47,8 @@ described here; do not launch them expecting this behavior.
 | | Full Stack (`full-stack.yaml`) | Application only (`orchestrator.yaml`) |
 |---|---|---|
 | AWS account + region | `sa-east-1` only (see below) | `sa-east-1` only (see below) |
-| VPC / EKS | Provisioned for you | Existing EKS cluster required |
-| RDS / DocumentDB / ElastiCache / AmazonMQ | Provisioned for you | Existing, with endpoints + Secrets Manager ARNs on hand |
+| VPC / EKS | Created by this stack — nothing to prepare | Existing EKS cluster required |
+| RDS / DocumentDB / ElastiCache / AmazonMQ | Created by this stack — nothing to prepare | Existing, with endpoints + Secrets Manager ARNs on hand |
 | MSK (Fetcher only) | Auto-provisioned when `EnableFetcher=true` | Bring your own (`MSKClusterArn`) or auto-provision (`MSKVpcId`/`MSKVpcCIDR`/`MSKPrivateSubnetIds`) |
 
 **Region**: `sa-east-1` only for now — the bootstrap Lambda embeds a
