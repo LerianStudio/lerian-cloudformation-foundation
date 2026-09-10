@@ -85,6 +85,11 @@ Metadata:
         Parameters:
           - LicenseUseDevGateway
       - Label:
+          default: "Ingress (Shared ALB Settings)"
+        Parameters:
+          - IngressClassName
+          - IngressCertificateArn
+      - Label:
           default: "Module: Plugin Access Manager"
         Parameters:
           - EnableAccessManager
@@ -97,11 +102,6 @@ Metadata:
           - EnableAccessManagerAuthIngress
           - AccessManagerAuthIngressHostname
           - AccessManagerValuesOverride
-      - Label:
-          default: "Ingress (Shared ALB Settings)"
-        Parameters:
-          - IngressClassName
-          - IngressCertificateArn
       - Label:
           default: "Module: Ledger (Midaz)"
         Parameters:

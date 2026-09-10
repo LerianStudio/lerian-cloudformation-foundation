@@ -196,6 +196,7 @@ Resources:
                   - elasticloadbalancing:ModifyTargetGroup
                   - elasticloadbalancing:ModifyTargetGroupAttributes
                   - elasticloadbalancing:DeleteTargetGroup
+                  - elasticloadbalancing:SetRulePriorities
                 Resource: "*"
                 Condition:
                   "Null":
