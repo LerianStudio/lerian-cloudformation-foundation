@@ -173,6 +173,42 @@ aws cloudformation create-stack \
     # ... remaining optional params per your enabled module set
 ```
 
+## Ingress (Custom Domains)
+
+Each of these modules can get its own AWS ALB Ingress with a custom
+hostname: **Console**, **Ledger**, **Reporter**, **Fetcher**, and **Access
+Manager** (its `auth` and `identity` endpoints specifically — `caradhras`/
+`caradhras.ui` aren't wired yet, see `CHECKPOINT.md`).
+
+For each one, two parameters control it:
+
+| Module | Enable | Hostname |
+|--------|--------|----------|
+| Console | `EnableConsoleIngress` | `ConsoleIngressHostname` |
+| Ledger | `EnableLedgerIngress` | `LedgerIngressHostname` |
+| Reporter | `EnableReporterIngress` | `ReporterIngressHostname` |
+| Fetcher | `EnableFetcherIngress` | `FetcherIngressHostname` |
+| Access Manager (auth) | `EnableAccessManagerAuthIngress` | `AccessManagerAuthIngressHostname` |
+| Access Manager (identity) | `EnableAccessManagerIdentityIngress` | `AccessManagerIdentityIngressHostname` |
+
+Three settings are shared across every enabled module's Ingress (one ALB,
+via a common `alb.ingress.kubernetes.io/group.name` annotation) instead of
+being repeated per module:
+
+- `IngressClassName` — default `alb` (the AWS Load Balancer Controller's
+  own default). Requires `EnableALBController: true`.
+- `IngressScheme` — `internet-facing` (default) or `internal`.
+- `IngressCertificateArn` — an ACM certificate ARN for HTTPS. Leave empty
+  for HTTP-only.
+
+**Hostnames auto-derive from `DomainName` when left empty.** Set
+`DomainName` (e.g. `client.net`) once, and any Ingress you enable without
+typing its own hostname gets `<module>.<DomainName>` automatically —
+`console.client.net`, `ledger.client.net`, `auth.client.net`,
+`identity.client.net`, etc. Setting a hostname explicitly always overrides
+the derivation. Leaving `DomainName` empty means every enabled module's
+hostname must be typed out by hand.
+
 ## Known limitations
 
 See [`CHECKPOINT.md`](./CHECKPOINT.md) for the full, current list (no
