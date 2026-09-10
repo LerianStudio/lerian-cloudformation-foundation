@@ -71,6 +71,10 @@ Metadata:
           - AuthorizerClientSecret
           - AccessManagerOrganizationIds
           - AccessManagerLicenseKey
+          - EnableAccessManagerIdentityIngress
+          - AccessManagerIdentityIngressHostname
+          - EnableAccessManagerAuthIngress
+          - AccessManagerAuthIngressHostname
           - AccessManagerValuesOverride
       - Label:
           default: "Ingress (Shared ALB Settings)"
@@ -236,6 +240,14 @@ Metadata:
         default: "Use Dev License Gateway"
       AccessManagerLicenseKey:
         default: "Access Manager License Key"
+      EnableAccessManagerIdentityIngress:
+        default: "Enable Access Manager Identity Ingress"
+      AccessManagerIdentityIngressHostname:
+        default: "Access Manager Identity Ingress Hostname"
+      EnableAccessManagerAuthIngress:
+        default: "Enable Access Manager Auth Ingress"
+      AccessManagerAuthIngressHostname:
+        default: "Access Manager Auth Ingress Hostname"
       BankTransferLicenseKey:
         default: "BR Bank Transfer License Key"
       HelmRegistryHost:
@@ -616,32 +628,49 @@ Parameters:
   # ---------------------------------------------------------------------------
   AccessManagerValuesOverride:
     Type: String
-    # Non-empty default (unlike every other module's ValuesOverride, which
-    # default to ""): the auth-init-user Job defaults to
-    # ghcr.io/lerianstudio/caradhras-user-init:3.2.0-beta.67, single-arch
-    # amd64 only (confirmed via docker buildx imagetools inspect — no arm64
-    # manifest, and the whole 3.2.0-beta.*/3.4.0-beta-rc.* tag ranges are
-    # amd64-only too). This template's shared foundation.yaml is ARM64/
-    # Graviton-only, so that Job ImagePullBackOffs forever left at its
-    # default. FIXED (was: disabled outright) by re-pinning to 3.3.1, which
-    # DOES ship a multi-arch manifest (confirmed via docker buildx imagetools
-    # inspect) — confirmed live end-to-end: the m2m-app BootstrapOperation
-    # that consumes the admin user this Job creates now reaches Succeeded on
-    # a real Graviton EKS cluster. Disabling the Job outright (the previous
-    # default) left the operator's m2m-app bootstrap permanently failing with
-    # HTTP 401 "the user does not exist", since no admin user is ever
-    # created in Casdoor for the operator to authenticate as. The
-    # useExistingSecret/adminPasswordSecretName the chart also requires when
-    # initUser is enabled are ALREADY set unconditionally by the operator's
-    # own catalog descriptor (internal/modules/catalog/access_manager.go),
-    # not by this override — only the image tag needed fixing here.
-    Default: |
-      auth:
-        initUser:
-          enabled: true
-          image:
-            tag: "3.3.1"
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to pinning auth-init-user to a multi-arch-compatible tag (see comment above) — override only if you need something different."
+    Default: ""
+    # Empty by default — unlike an earlier version of this Parameter. The
+    # auth-init-user Job's multi-arch image-tag fix (ghcr.io/lerianstudio/
+    # caradhras-user-init:3.3.1, replacing the default 3.2.0-beta.67, which
+    # is amd64-only and ImagePullBackOffs forever on this template's ARM64/
+    # Graviton-only EKS — confirmed via docker buildx imagetools inspect)
+    # is now a HARDCODED, unconditional Python dict in render_platform()
+    # (see the "auth_init_user_fix" dict below), not carried in this
+    # Parameter's default text anymore. Reason: render_platform() also
+    # needs to inject Access Manager's per-root Ingress config
+    # (identity.ingress/auth.ingress) under these SAME two top-level keys
+    # (`auth:`/`identity:`) that this override targets — this Lambda has no
+    # `yaml` module (stdlib only) to safely dict-merge raw parameter text
+    # with programmatically-built ingress config, so the two are combined
+    # as real Python dicts before being serialized once, and this Parameter
+    # is now reserved for genuinely-disjoint advanced overrides (anything
+    # NOT under `auth:`/`identity:`) appended after.
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride, for keys OTHER than auth:/identity: (which render_platform() already manages — auth-init-user fix + Ingress). Empty by default."
+
+  # Access Manager Ingress — identity/auth roots only (NOT caradhras/
+  # caradhras.ui — those two are deferred; see the REGISTRY comment near
+  # ACCESS_MANAGER_INGRESS_TARGETS in the Lambda body).
+  EnableAccessManagerIdentityIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for Access Manager's identity endpoint.
+
+  AccessManagerIdentityIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Access Manager identity Ingress.
+
+  EnableAccessManagerAuthIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for Access Manager's auth endpoint.
+
+  AccessManagerAuthIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Access Manager auth Ingress.
   LedgerValuesOverride:
     Type: String
     Default: ""
@@ -1096,6 +1125,10 @@ Resources:
           AUTHORIZER_CLIENT_SECRET: !Ref AuthorizerClientSecret
           ACCESS_MANAGER_LICENSE_KEY: !Ref AccessManagerLicenseKey
           BANK_TRANSFER_LICENSE_KEY: !Ref BankTransferLicenseKey
+          ENABLE_ACCESS_MANAGER_IDENTITY_INGRESS: !Ref EnableAccessManagerIdentityIngress
+          ACCESS_MANAGER_IDENTITY_INGRESS_HOSTNAME: !Ref AccessManagerIdentityIngressHostname
+          ENABLE_ACCESS_MANAGER_AUTH_INGRESS: !Ref EnableAccessManagerAuthIngress
+          ACCESS_MANAGER_AUTH_INGRESS_HOSTNAME: !Ref AccessManagerAuthIngressHostname
           ACCESS_MANAGER_ORGANIZATION_IDS: !Ref AccessManagerOrganizationIds
           LICENSE_USE_DEV_GATEWAY: !Ref LicenseUseDevGateway
           # OCI registry auth (private charts)
@@ -1219,22 +1252,18 @@ Resources:
           #     as sibling sub-components, ledger is the one this Lambda's
           #     EnableLedger already targets) -> ["ledger"]
           #   - reporter/fetcher: `manager.ingress:`          -> ["manager"]
-          # access_manager is DELIBERATELY None (not wired): its chart
-          # renders FOUR separate Ingress resources (identity.ingress /
-          # auth.ingress / caradhras.ingress / caradhras.ui.ingress), and
-          # `auth:`/`caradhras:` are the SAME top-level keys
-          # AccessManagerValuesOverride's own default already sets (the
-          # auth-init-user image-tag fix). This Lambda builds valuesOverride
-          # by concatenating raw YAML text (no `yaml` module available in
-          # this Lambda runtime — stdlib only), so naively appending a second
-          # `auth:`/`caradhras:` block would either produce invalid YAML or
-          # silently CLOBBER the init-user fix depending on parser behavior.
-          # Wiring access_manager ingress correctly needs a real dict-merge
-          # (build the whole valuesOverride as a Python dict, not text
-          # concatenation) — tracked separately, not done here to avoid
-          # shipping a plausible-but-wrong config next to the fix for the
-          # exact class of bug ("parameter exists, does nothing") this
-          # ingress feature was added to fix in the first place.
+          # access_manager is DELIBERATELY None here (not the generic text-
+          # append path below): its chart renders FOUR separate Ingress
+          # resources (identity.ingress / auth.ingress / caradhras.ingress /
+          # caradhras.ui.ingress). This Lambda has no `yaml` module (stdlib
+          # only), so a second raw-text `auth:` block appended after the
+          # auth-init-user fix's own `auth:` block would either be invalid
+          # YAML or silently clobber the fix, depending on parser behavior.
+          # Handled instead by build_access_manager_values_lines() below,
+          # which constructs BOTH the init-user fix and Ingress (identity/
+          # auth roots ONLY — caradhras/caradhras.ui deferred) as one Python
+          # dict, serialized once via dict_to_yaml_lines(). See its own
+          # docstring for the full rationale.
           REGISTRY = {
               "access_manager": {"enable": "ENABLE_ACCESS_MANAGER", "version_env": "ACCESS_MANAGER_VERSION",
                                   "license_env": "ACCESS_MANAGER_LICENSE_KEY", "bucket_env": None,
@@ -1687,6 +1716,96 @@ Resources:
           # spec.modules[*].enabled, not from a catalog profile; profile only
           # feeds the BOM-hash identity string. Confirmed by reading that function.
           # =====================================================================
+          # ---------------------------------------------------------------------
+          # Minimal, stdlib-only dict -> YAML-lines serializer. This Lambda has
+          # no `yaml` module (no layer, no vendored dependency) — everywhere
+          # else in this file, valuesOverride content is built by directly
+          # concatenating pre-formatted text lines, which only stays safe as
+          # long as each source writes to a DISJOINT top-level key. Access
+          # Manager breaks that assumption (its auth-init-user fix and its
+          # Ingress config both live under the SAME `auth:` key), so its
+          # valuesOverride is built as a real nested dict and serialized once
+          # instead. Handles exactly the shapes used below (nested dicts,
+          # lists of dicts, strings, bools) — not a general-purpose emitter.
+          # ---------------------------------------------------------------------
+          def yaml_scalar(v):
+              if isinstance(v, bool):
+                  return "true" if v else "false"
+              if v is None:
+                  return "null"
+              if isinstance(v, (int, float)):
+                  return str(v)
+              return '"' + str(v).replace('"', '\\"') + '"'
+
+          def dict_to_yaml_lines(d, indent=0):
+              pad = "  " * indent
+              lines = []
+              for k, v in d.items():
+                  if isinstance(v, dict):
+                      lines.append(f"{pad}{k}:")
+                      lines.extend(dict_to_yaml_lines(v, indent + 1))
+                  elif isinstance(v, list):
+                      if not v:
+                          lines.append(f"{pad}{k}: []")
+                          continue
+                      lines.append(f"{pad}{k}:")
+                      inner_pad = pad + "  "
+                      for item in v:
+                          if isinstance(item, dict):
+                              item_lines = dict_to_yaml_lines(item, indent + 1)
+                              lines.append(f"{pad}- {item_lines[0][len(inner_pad):]}")
+                              lines.extend(item_lines[1:])
+                          else:
+                              lines.append(f"{pad}- {yaml_scalar(item)}")
+                  else:
+                      lines.append(f"{pad}{k}: {yaml_scalar(v)}")
+              return lines
+
+          def _alb_ingress_block(hostname):
+              scheme = os.environ.get('INGRESS_SCHEME', 'internet-facing')
+              cert_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
+              group_name = f"{os.environ.get('PROJECT_NAME', 'lerian-platform')}-alb"
+              annotations = {
+                  "alb.ingress.kubernetes.io/scheme": scheme,
+                  "alb.ingress.kubernetes.io/group.name": group_name,
+                  "alb.ingress.kubernetes.io/target-type": "ip",
+              }
+              if cert_arn:
+                  annotations["alb.ingress.kubernetes.io/certificate-arn"] = cert_arn
+              return {
+                  "enabled": True,
+                  "className": os.environ.get('INGRESS_CLASS_NAME', 'alb'),
+                  "annotations": annotations,
+                  "hosts": [{"host": hostname, "paths": [{"path": "/", "pathType": "Prefix"}]}],
+                  "tls": [],
+              }
+
+          def build_access_manager_values_lines():
+              # auth.initUser is a hardcoded, UNCONDITIONAL fix (was previously
+              # AccessManagerValuesOverride's raw-text Default — moved here so
+              # it can be dict-merged with Ingress under the same `auth:` key;
+              # see that Parameter's own comment for the full history/rationale
+              # of the fix itself: a Graviton-incompatible default image tag
+              # permanently broke the operator's m2m-app bootstrap).
+              values = {"auth": {"initUser": {"enabled": True, "image": {"tag": "3.3.1"}}}}
+              # Ingress: identity/auth roots ONLY (caradhras/caradhras.ui
+              # deferred — see the REGISTRY comment above).
+              if os.environ.get('ENABLE_ACCESS_MANAGER_AUTH_INGRESS', 'false').lower() == 'true':
+                  values["auth"]["ingress"] = _alb_ingress_block(
+                      os.environ.get('ACCESS_MANAGER_AUTH_INGRESS_HOSTNAME', ''))
+              if os.environ.get('ENABLE_ACCESS_MANAGER_IDENTITY_INGRESS', 'false').lower() == 'true':
+                  values["identity"] = {"ingress": _alb_ingress_block(
+                      os.environ.get('ACCESS_MANAGER_IDENTITY_INGRESS_HOSTNAME', ''))}
+              lines = dict_to_yaml_lines(values)
+              # Advanced escape hatch for keys OTHER than auth:/identity: (see
+              # AccessManagerValuesOverride's Description) — text-appended,
+              # same caveat as every other module's *ValuesOverride: don't use
+              # this for auth:/identity:, those are already managed above.
+              extra = os.environ.get('ACCESS_MANAGER_VALUES_OVERRIDE', '')
+              if extra.strip():
+                  lines += extra.splitlines()
+              return lines
+
           def render_platform(name, ns, contract_name, license_secrets):
               authz_id = os.environ.get('AUTHORIZER_CLIENT_ID', '')
               authz_secret = os.environ.get('AUTHORIZER_CLIENT_SECRET', '')
@@ -1717,6 +1836,16 @@ Resources:
                   bucket = os.environ.get(bucket_env, '') if bucket_env else ''
                   if bucket:
                       lines.append(f"      bucket: \"{bucket}\"")
+                  if app == 'access_manager':
+                      # Dict-based path (auth-init-user fix + identity/auth
+                      # Ingress under the shared `auth:` key) — see
+                      # build_access_manager_values_lines()'s own docstring.
+                      am_lines = build_access_manager_values_lines()
+                      if am_lines:
+                          lines.append("      valuesOverride:")
+                          for al in am_lines:
+                              lines.append(f"        {al}")
+                      continue
                   override_env = m.get('override_env')
                   override_yaml = os.environ.get(override_env, '') if override_env else ''
                   # Per-module Ingress (custom domain) — see the REGISTRY
@@ -2000,6 +2129,10 @@ Resources:
             - !Ref ReporterIngressHostname
             - !Ref EnableFetcherIngress
             - !Ref FetcherIngressHostname
+            - !Ref EnableAccessManagerIdentityIngress
+            - !Ref AccessManagerIdentityIngressHostname
+            - !Ref EnableAccessManagerAuthIngress
+            - !Ref AccessManagerAuthIngressHostname
             - !Ref AccessManagerValuesOverride
             - !Ref LedgerValuesOverride
             - !Ref ReporterValuesOverride

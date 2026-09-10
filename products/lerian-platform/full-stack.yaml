@@ -93,6 +93,10 @@ Metadata:
           - AuthorizerClientSecret
           - AccessManagerOrganizationIds
           - AccessManagerLicenseKey
+          - EnableAccessManagerIdentityIngress
+          - AccessManagerIdentityIngressHostname
+          - EnableAccessManagerAuthIngress
+          - AccessManagerAuthIngressHostname
           - AccessManagerValuesOverride
       - Label:
           default: "Ingress (Shared ALB Settings)"
@@ -271,6 +275,14 @@ Metadata:
         default: "Organization IDs (optional)"
       AccessManagerLicenseKey:
         default: "Access Manager License Key"
+      EnableAccessManagerIdentityIngress:
+        default: "Enable Access Manager Identity Ingress"
+      AccessManagerIdentityIngressHostname:
+        default: "Access Manager Identity Ingress Hostname"
+      EnableAccessManagerAuthIngress:
+        default: "Enable Access Manager Auth Ingress"
+      AccessManagerAuthIngressHostname:
+        default: "Access Manager Auth Ingress Hostname"
       AccessManagerValuesOverride:
         default: "Access Manager Values Override (advanced)"
       # Module: Ledger
@@ -872,26 +884,39 @@ Parameters:
 
   AccessManagerValuesOverride:
     Type: String
-    # Non-empty default — see orchestrator.yaml's own Parameter comment.
-    # plugin-access-manager's auth-init-user Job defaults to a single-arch
-    # amd64-only image; this shared foundation.yaml is ARM64/Graviton-only,
-    # so the Job ImagePullBackOffs forever on the DEFAULT image tag.
-    # Previously "fixed" by disabling the Job outright (initUser.enabled:
-    # false) — that permanently broke the operator's m2m-app bootstrap
-    # (Casdoor never gets an admin user; every m2m-app BootstrapOperation
-    # 401s "the user does not exist" forever). Confirmed live on a real
-    # create-stack. The correct fix (same as orchestrator.yaml's own
-    # Default, which THIS copy overrides for a full-stack deploy — full-
-    # stack.yaml's copy of a shared Parameter always wins, see
-    # OrchestratorChartVersion's comment above) is to pin a confirmed
-    # multi-arch image tag instead of disabling the Job.
-    Default: |
-      auth:
-        initUser:
-          enabled: true
-          image:
-            tag: "3.3.1"
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to a multi-arch auth-init-user image tag — see orchestrator.yaml's own Parameter description for details."
+    Default: ""
+    # Empty by default — see orchestrator.yaml's own Parameter comment for
+    # the full history. The auth-init-user multi-arch image-tag fix
+    # (Graviton-incompatible default image otherwise permanently breaks the
+    # operator's m2m-app bootstrap) is now a hardcoded, unconditional Python
+    # dict in orchestrator.yaml's render_platform(), not carried in this
+    # Parameter's default text — it needs to be dict-merged with Access
+    # Manager's identity/auth Ingress config (same `auth:`/`identity:` top
+    # keys), which the Lambda's stdlib-only (no `yaml` module) text-append
+    # approach can't do safely.
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride, for keys OTHER than auth:/identity: (already managed — auth-init-user fix + Ingress). Empty by default."
+
+  EnableAccessManagerIdentityIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for Access Manager's identity endpoint.
+
+  AccessManagerIdentityIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Access Manager identity Ingress.
+
+  EnableAccessManagerAuthIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for Access Manager's auth endpoint.
+
+  AccessManagerAuthIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Access Manager auth Ingress.
 
   # ===========================================================================
   # MODULE: LEDGER (MIDAZ)
@@ -1525,6 +1550,10 @@ Resources:
         AuthorizerClientId: !Ref AuthorizerClientId
         AuthorizerClientSecret: !Ref AuthorizerClientSecret
         AccessManagerLicenseKey: !Ref AccessManagerLicenseKey
+        EnableAccessManagerIdentityIngress: !Ref EnableAccessManagerIdentityIngress
+        AccessManagerIdentityIngressHostname: !Ref AccessManagerIdentityIngressHostname
+        EnableAccessManagerAuthIngress: !Ref EnableAccessManagerAuthIngress
+        AccessManagerAuthIngressHostname: !Ref AccessManagerAuthIngressHostname
         BankTransferLicenseKey: !Ref BankTransferLicenseKey
         AccessManagerOrganizationIds: !Ref AccessManagerOrganizationIds
         LicenseUseDevGateway: !Ref LicenseUseDevGateway
