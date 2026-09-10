@@ -231,7 +231,7 @@ Parameters:
 
   NodeGroupMinSize:
     Type: Number
-    Default: 3
+    Default: 5
     MinValue: 1
     MaxValue: 100
     Description: Minimum number of worker nodes
@@ -245,7 +245,7 @@ Parameters:
 
   NodeGroupDesiredSize:
     Type: Number
-    Default: 3
+    Default: 5
     MinValue: 1
     MaxValue: 100
     Description: Desired number of worker nodes
