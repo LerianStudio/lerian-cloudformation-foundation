@@ -78,6 +78,7 @@ Metadata:
       - Label:
           default: "Ingress (Shared ALB Settings)"
         Parameters:
+          - DomainName
           - IngressClassName
           - IngressScheme
           - IngressCertificateArn
@@ -255,6 +256,8 @@ Metadata:
         default: "Registry Token"
       NextAuthUrl:
         default: "Console Public URL"
+      DomainName:
+        default: "Base Domain (for Ingress hostname auto-derivation)"
       IngressClassName:
         default: "Ingress Class Name"
       IngressScheme:
@@ -818,6 +821,17 @@ Parameters:
   # are always ALB annotations, injected via each chart's ingress.annotations
   # map, which is a free-form passthrough in every chart's values.schema.json).
   # ---------------------------------------------------------------------------
+  DomainName:
+    Type: String
+    Default: ""
+    Description: >-
+      Base domain (e.g. client.net). When set, any per-module Ingress
+      hostname left EMPTY auto-derives as "<module>.<DomainName>" (e.g.
+      auth.client.net for Access Manager's auth root) instead of requiring
+      each hostname typed out by hand. An explicitly-set <Module>Ingress
+      Hostname always wins over this derivation. Leave empty to require
+      every enabled module's hostname to be typed out explicitly.
+
   IngressClassName:
     Type: String
     Default: "alb"
@@ -1150,6 +1164,7 @@ Resources:
           CONSOLE_VALUES_OVERRIDE: !Ref ConsoleValuesOverride
           # Console / ingress (forwarded as-is; the operator/chart renders them)
           NEXTAUTH_URL: !Ref NextAuthUrl
+          DOMAIN_NAME: !Ref DomainName
           INGRESS_CLASS_NAME: !Ref IngressClassName
           INGRESS_SCHEME: !Ref IngressScheme
           INGRESS_CERTIFICATE_ARN: !Ref IngressCertificateArn
@@ -1267,17 +1282,17 @@ Resources:
               "ledger": {"enable": "ENABLE_LEDGER", "version_env": "LEDGER_VERSION", "license_env": None,
                          "bucket_env": None, "override_env": "LEDGER_VALUES_OVERRIDE", "namespace": "midaz",
                          "ingress_nest": ["ledger"], "ingress_enable_env": "ENABLE_LEDGER_INGRESS",
-                         "ingress_hostname_env": "LEDGER_INGRESS_HOSTNAME"},
+                         "ingress_hostname_env": "LEDGER_INGRESS_HOSTNAME", "ingress_prefix": "ledger"},
               "fetcher": {"enable": "ENABLE_FETCHER", "version_env": "FETCHER_VERSION",
                           "license_env": None, "bucket_env": "FETCHER_S3_BUCKET",
                           "override_env": "FETCHER_VALUES_OVERRIDE", "namespace": "fetcher",
                           "ingress_nest": ["manager"], "ingress_enable_env": "ENABLE_FETCHER_INGRESS",
-                          "ingress_hostname_env": "FETCHER_INGRESS_HOSTNAME"},
+                          "ingress_hostname_env": "FETCHER_INGRESS_HOSTNAME", "ingress_prefix": "fetcher"},
               "reporter": {"enable": "ENABLE_REPORTER", "version_env": "REPORTER_VERSION", "license_env": None,
                            "bucket_env": "REPORTER_S3_BUCKET", "override_env": "REPORTER_VALUES_OVERRIDE",
                            "namespace": "reporter", "ingress_nest": ["manager"],
                            "ingress_enable_env": "ENABLE_REPORTER_INGRESS",
-                           "ingress_hostname_env": "REPORTER_INGRESS_HOSTNAME"},
+                           "ingress_hostname_env": "REPORTER_INGRESS_HOSTNAME", "ingress_prefix": "reporter"},
               "bank_transfer": {"enable": "ENABLE_BANK_TRANSFER", "version_env": "BANK_TRANSFER_VERSION",
                                  "license_env": "BANK_TRANSFER_LICENSE_KEY", "bucket_env": None,
                                  "override_env": "BANK_TRANSFER_VALUES_OVERRIDE",
@@ -1286,7 +1301,7 @@ Resources:
                           "bucket_env": None, "override_env": "CONSOLE_VALUES_OVERRIDE",
                           "namespace": "product-console", "ingress_nest": [],
                           "ingress_enable_env": "ENABLE_CONSOLE_INGRESS",
-                          "ingress_hostname_env": "CONSOLE_INGRESS_HOSTNAME"},
+                          "ingress_hostname_env": "CONSOLE_INGRESS_HOSTNAME", "ingress_prefix": "console"},
           }
 
           def purge_module_helm_releases():
@@ -1756,6 +1771,16 @@ Resources:
                       lines.append(f"{pad}{k}: {yaml_scalar(v)}")
               return lines
 
+          def _derive_hostname(prefix, explicit):
+              # An explicitly-set <Module>IngressHostname always wins. Only
+              # auto-derive as "<prefix>.<DomainName>" (e.g. "auth.client.net")
+              # when the customer left it empty AND DomainName is set — never
+              # silently override a real customer-supplied value.
+              if explicit:
+                  return explicit
+              domain = os.environ.get('DOMAIN_NAME', '')
+              return f"{prefix}.{domain}" if domain else ""
+
           def _alb_ingress_block(hostname):
               scheme = os.environ.get('INGRESS_SCHEME', 'internet-facing')
               cert_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
@@ -1786,11 +1811,11 @@ Resources:
               # Ingress: identity/auth roots ONLY (caradhras/caradhras.ui
               # deferred — see the REGISTRY comment above).
               if os.environ.get('ENABLE_ACCESS_MANAGER_AUTH_INGRESS', 'false').lower() == 'true':
-                  values["auth"]["ingress"] = _alb_ingress_block(
-                      os.environ.get('ACCESS_MANAGER_AUTH_INGRESS_HOSTNAME', ''))
+                  values["auth"]["ingress"] = _alb_ingress_block(_derive_hostname(
+                      "auth", os.environ.get('ACCESS_MANAGER_AUTH_INGRESS_HOSTNAME', '')))
               if os.environ.get('ENABLE_ACCESS_MANAGER_IDENTITY_INGRESS', 'false').lower() == 'true':
-                  values["identity"] = {"ingress": _alb_ingress_block(
-                      os.environ.get('ACCESS_MANAGER_IDENTITY_INGRESS_HOSTNAME', ''))}
+                  values["identity"] = {"ingress": _alb_ingress_block(_derive_hostname(
+                      "identity", os.environ.get('ACCESS_MANAGER_IDENTITY_INGRESS_HOSTNAME', '')))}
               lines = dict_to_yaml_lines(values)
               # Advanced escape hatch for keys OTHER than auth:/identity: (see
               # AccessManagerValuesOverride's Description) — text-appended,
@@ -1860,7 +1885,9 @@ Resources:
                   if ingress_nest is not None:
                       ingress_on = os.environ.get(m.get('ingress_enable_env', ''), 'false').lower() == 'true'
                       if ingress_on:
-                          hostname = os.environ.get(m.get('ingress_hostname_env', ''), '')
+                          hostname = _derive_hostname(
+                              m.get('ingress_prefix', app),
+                              os.environ.get(m.get('ingress_hostname_env', ''), ''))
                           class_name = os.environ.get('INGRESS_CLASS_NAME', 'alb')
                           scheme = os.environ.get('INGRESS_SCHEME', 'internet-facing')
                           cert_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
@@ -2113,6 +2140,7 @@ Resources:
             - !Ref ElastiCacheEndpoint
             - !Ref AmazonMQEndpoint
             - !Ref NextAuthUrl
+            - !Ref DomainName
             - !Ref IngressClassName
             - !Ref IngressScheme
             - !Ref IngressCertificateArn

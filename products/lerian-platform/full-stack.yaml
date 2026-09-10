@@ -1550,6 +1550,7 @@ Resources:
         HelmRegistryToken: !Ref HelmRegistryToken
         # Console / ingress
         NextAuthUrl: !Ref NextAuthUrl
+        DomainName: !Ref DomainName
         IngressClassName: !Ref IngressClassName
         IngressScheme: !Ref IngressScheme
         IngressCertificateArn: !Ref IngressCertificateArn
