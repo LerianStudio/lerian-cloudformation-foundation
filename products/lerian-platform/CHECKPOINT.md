@@ -172,6 +172,27 @@ These don't block a "publishable in dev, one-click" v0 — they block the
   a real bug in the "dedicated" topology path specifically (never exercised
   this session; every test used the default `shared` topology). Fix before
   anyone tries `InfraTopology=dedicated`.
+- **`FoundationStack` bundles VPC + EKS + Route53 + ALB Controller +
+  ExternalDNS as ONE nested stack**, so `InfrastructureStack`/`MSKStack`
+  (which already run in parallel with each other) can't start until ALL of
+  Foundation finishes — even though `InfrastructureStack` only actually
+  *uses* VPC/subnet outputs (`ExistingClusterName`/`ExistingOIDCProviderArn`
+  are pure pass-through re-exports for `ApplicationStack`'s convenience, not
+  consumed for any security-group/IAM-trust wiring inside
+  `infrastructure.yaml` — confirmed by grep, only 2 occurrences beyond the
+  Parameter/Condition declarations). CloudFormation only makes a nested
+  stack's Outputs available once the WHOLE nested stack reaches
+  `CREATE_COMPLETE` — there's no way to depend on just the VPC part of
+  Foundation without splitting it. Fix: split `FoundationStack` into a
+  `VPCStack` (just VPC/subnets) and an `EKSStack` (EKS + Route53 + ALB +
+  ExternalDNS, depending on `VPCStack`) as top-level siblings; then
+  `InfrastructureStack`/`MSKStack` depend only on `VPCStack` and run in
+  parallel with `EKSStack` too — same pattern as today's MSK-vs-Infra
+  parallelization, just one level up. Deliberately NOT done yet (would mean
+  editing/re-uploading templates while a live create-stack test is running
+  against them — same class of race that caused the MPS3BucketName
+  incident this session). Do this as a follow-up once the current live
+  test is confirmed successful, not mid-test.
 
 ## Already validated (do not re-litigate, just keep regression-testing)
 
