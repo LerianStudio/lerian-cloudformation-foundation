@@ -95,22 +95,34 @@ Metadata:
           - AccessManagerLicenseKey
           - AccessManagerValuesOverride
       - Label:
+          default: "Ingress (Shared ALB Settings)"
+        Parameters:
+          - IngressClassName
+          - IngressScheme
+          - IngressCertificateArn
+      - Label:
           default: "Module: Ledger (Midaz)"
         Parameters:
           - EnableLedger
           - LedgerChartVersion
+          - EnableLedgerIngress
+          - LedgerIngressHostname
           - LedgerValuesOverride
       - Label:
           default: "Module: Reporter"
         Parameters:
           - EnableReporter
           - ReporterChartVersion
+          - EnableReporterIngress
+          - ReporterIngressHostname
           - ReporterValuesOverride
       - Label:
           default: "Module: Fetcher"
         Parameters:
           - EnableFetcher
           - FetcherChartVersion
+          - EnableFetcherIngress
+          - FetcherIngressHostname
           - FetcherValuesOverride
           - MSKInstanceType
       - Label:
@@ -119,10 +131,8 @@ Metadata:
           - EnableConsole
           - ConsoleChartVersion
           - NextAuthUrl
-          - EnableIngress
-          - IngressHostname
-          - IngressScheme
-          - IngressCertificateArn
+          - EnableConsoleIngress
+          - ConsoleIngressHostname
           - ConsoleValuesOverride
       - Label:
           default: "Module: BR Bank Transfer"
@@ -291,14 +301,28 @@ Metadata:
         default: "Console Chart Version"
       NextAuthUrl:
         default: "Console Public URL"
-      EnableIngress:
-        default: "Enable ALB Ingress (Console)"
-      IngressHostname:
-        default: "Ingress Hostname"
+      IngressClassName:
+        default: "Ingress Class Name"
       IngressScheme:
         default: "ALB Scheme"
       IngressCertificateArn:
         default: "ACM Certificate ARN"
+      EnableConsoleIngress:
+        default: "Enable Console Ingress"
+      ConsoleIngressHostname:
+        default: "Console Ingress Hostname"
+      EnableLedgerIngress:
+        default: "Enable Ledger Ingress"
+      LedgerIngressHostname:
+        default: "Ledger Ingress Hostname"
+      EnableReporterIngress:
+        default: "Enable Reporter Ingress"
+      ReporterIngressHostname:
+        default: "Reporter Ingress Hostname"
+      EnableFetcherIngress:
+        default: "Enable Fetcher Ingress"
+      FetcherIngressHostname:
+        default: "Fetcher Ingress Hostname"
       ConsoleValuesOverride:
         default: "Console Values Override (advanced)"
       # Module: BR Bank Transfer
@@ -962,29 +986,78 @@ Parameters:
   NextAuthUrl:
     Type: String
     Default: ""
-    Description: Full public URL for the product console (required for console auth)
+    Description: >-
+      Full public URL for the product console. Leave empty to auto-derive
+      from ConsoleIngressHostname (see orchestrator.yaml's own Parameter
+      description for details).
 
-  EnableIngress:
+  # ---------------------------------------------------------------------------
+  # Ingress — per-module (Console/Ledger/Reporter/Fetcher). See
+  # orchestrator.yaml's own Parameter comment (same names, same shape) for
+  # the full rationale, chart-verified key paths, and why Access Manager
+  # isn't wired here yet.
+  # ---------------------------------------------------------------------------
+  IngressClassName:
     Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Enable ALB Ingress for the product console. Requires "Enable ALB Controller" above.
-
-  IngressHostname:
-    Type: String
-    Default: ""
-    Description: Hostname for the console Ingress
+    Default: "alb"
+    Description: >-
+      IngressClass name (the AWS Load Balancer Controller's default is
+      "alb"). Requires "Enable ALB Controller" above.
 
   IngressScheme:
     Type: String
     Default: "internet-facing"
     AllowedValues: ["internal", "internet-facing"]
-    Description: ALB scheme
+    Description: "ALB scheme, applied to every enabled module's Ingress."
 
   IngressCertificateArn:
     Type: String
     Default: ""
-    Description: ACM Certificate ARN for HTTPS (optional)
+    Description: "ACM Certificate ARN for HTTPS, applied to every enabled module's Ingress. Leave empty for HTTP-only."
+
+  EnableConsoleIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Product Console.
+
+  ConsoleIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Console Ingress.
+
+  EnableLedgerIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Ledger API.
+
+  LedgerIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Ledger Ingress.
+
+  EnableReporterIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Reporter API.
+
+  ReporterIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Reporter Ingress.
+
+  EnableFetcherIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Fetcher API.
+
+  FetcherIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Fetcher Ingress.
 
   ConsoleValuesOverride:
     Type: String
@@ -1089,10 +1162,14 @@ Parameters:
 
 Rules:
   IngressRequiresALBController:
-    RuleCondition: !Equals [!Ref EnableIngress, "true"]
+    RuleCondition: !Or
+      - !Equals [!Ref EnableConsoleIngress, "true"]
+      - !Equals [!Ref EnableLedgerIngress, "true"]
+      - !Equals [!Ref EnableReporterIngress, "true"]
+      - !Equals [!Ref EnableFetcherIngress, "true"]
     Assertions:
       - Assert: !Equals [!Ref EnableALBController, "true"]
-        AssertDescription: "Enable ALB Controller must be 'true' when Enable ALB Ingress (Console) is 'true'"
+        AssertDescription: "Enable ALB Controller must be 'true' when any module's Ingress is enabled"
 
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
@@ -1457,10 +1534,17 @@ Resources:
         HelmRegistryToken: !Ref HelmRegistryToken
         # Console / ingress
         NextAuthUrl: !Ref NextAuthUrl
-        EnableIngress: !Ref EnableIngress
-        IngressHostname: !Ref IngressHostname
+        IngressClassName: !Ref IngressClassName
         IngressScheme: !Ref IngressScheme
         IngressCertificateArn: !Ref IngressCertificateArn
+        EnableConsoleIngress: !Ref EnableConsoleIngress
+        ConsoleIngressHostname: !Ref ConsoleIngressHostname
+        EnableLedgerIngress: !Ref EnableLedgerIngress
+        LedgerIngressHostname: !Ref LedgerIngressHostname
+        EnableReporterIngress: !Ref EnableReporterIngress
+        ReporterIngressHostname: !Ref ReporterIngressHostname
+        EnableFetcherIngress: !Ref EnableFetcherIngress
+        FetcherIngressHostname: !Ref FetcherIngressHostname
         # Per-module valuesOverride (advanced)
         AccessManagerValuesOverride: !Ref AccessManagerValuesOverride
         LedgerValuesOverride: !Ref LedgerValuesOverride

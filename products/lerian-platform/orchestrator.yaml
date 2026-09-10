@@ -73,10 +73,18 @@ Metadata:
           - AccessManagerLicenseKey
           - AccessManagerValuesOverride
       - Label:
+          default: "Ingress (Shared ALB Settings)"
+        Parameters:
+          - IngressClassName
+          - IngressScheme
+          - IngressCertificateArn
+      - Label:
           default: "Module: Ledger (Midaz)"
         Parameters:
           - EnableLedger
           - LedgerChartVersion
+          - EnableLedgerIngress
+          - LedgerIngressHostname
           - LedgerValuesOverride
       - Label:
           default: "Module: Reporter"
@@ -84,6 +92,8 @@ Metadata:
           - EnableReporter
           - ReporterChartVersion
           - ReporterStorageBucketName
+          - EnableReporterIngress
+          - ReporterIngressHostname
           - ReporterValuesOverride
       - Label:
           default: "Module: Fetcher"
@@ -91,6 +101,8 @@ Metadata:
           - EnableFetcher
           - FetcherChartVersion
           - FetcherStorageBucketName
+          - EnableFetcherIngress
+          - FetcherIngressHostname
           - FetcherValuesOverride
       - Label:
           default: "Module: Product Console"
@@ -98,10 +110,8 @@ Metadata:
           - EnableConsole
           - ConsoleChartVersion
           - NextAuthUrl
-          - EnableIngress
-          - IngressHostname
-          - IngressScheme
-          - IngressCertificateArn
+          - EnableConsoleIngress
+          - ConsoleIngressHostname
           - ConsoleValuesOverride
       - Label:
           default: "Module: BR Bank Transfer"
@@ -236,14 +246,28 @@ Metadata:
         default: "Registry Token"
       NextAuthUrl:
         default: "Console Public URL"
-      EnableIngress:
-        default: "Enable ALB Ingress"
-      IngressHostname:
-        default: "Ingress Hostname"
+      IngressClassName:
+        default: "Ingress Class Name"
       IngressScheme:
         default: "ALB Scheme"
       IngressCertificateArn:
         default: "ACM Certificate ARN"
+      EnableConsoleIngress:
+        default: "Enable Console Ingress"
+      ConsoleIngressHostname:
+        default: "Console Ingress Hostname"
+      EnableLedgerIngress:
+        default: "Enable Ledger Ingress"
+      LedgerIngressHostname:
+        default: "Ledger Ingress Hostname"
+      EnableReporterIngress:
+        default: "Enable Reporter Ingress"
+      ReporterIngressHostname:
+        default: "Reporter Ingress Hostname"
+      EnableFetcherIngress:
+        default: "Enable Fetcher Ingress"
+      FetcherIngressHostname:
+        default: "Fetcher Ingress Hostname"
       AccessManagerValuesOverride:
         default: "Access Manager Values Override (advanced)"
       LedgerValuesOverride:
@@ -754,29 +778,88 @@ Parameters:
   NextAuthUrl:
     Type: String
     Default: ""
-    Description: Full public URL for the product console (required for console auth)
+    Description: >-
+      Full public URL for the product console. Leave empty to auto-derive
+      from ConsoleIngressHostname (product-console-helm's own configmap
+      template already does this: NEXTAUTH_URL/ALLOWED_ORIGINS default to
+      https://<ingress.hosts[0].host> when ingress.enabled is true — only
+      set this explicitly to override that derivation).
 
-  EnableIngress:
+  # ---------------------------------------------------------------------------
+  # Ingress — per-module (Console/Ledger/Reporter/Fetcher; Access Manager not
+  # yet wired here, see the REGISTRY comment on "ingress_nest": None below).
+  # Every enabled module's chart (product-console-helm/midaz-helm/
+  # reporter-helm/fetcher-helm — verified against the real charts, not
+  # guessed) renders its OWN Ingress resource from an `ingress:` block in its
+  # valuesOverride; there is no CFN/K8s-level Ingress resource created by
+  # this Lambda or the operator directly. IngressClassName/IngressScheme/
+  # IngressCertificateArn are SHARED across every enabled module's ingress
+  # (one ALB, via a shared alb.ingress.kubernetes.io/group.name annotation
+  # the Lambda derives from ProjectName) — scheme and certificate ARN are
+  # ALB-controller/annotation concerns, not per-chart values keys, confirmed
+  # against all 4 charts (none has a dedicated values key for either; both
+  # are always ALB annotations, injected via each chart's ingress.annotations
+  # map, which is a free-form passthrough in every chart's values.schema.json).
+  # ---------------------------------------------------------------------------
+  IngressClassName:
     Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Enable ALB Ingress for the product console
-
-  IngressHostname:
-    Type: String
-    Default: ""
-    Description: Hostname for the console Ingress
+    Default: "alb"
+    Description: "IngressClass name (the AWS Load Balancer Controller's default is \"alb\")."
 
   IngressScheme:
     Type: String
     Default: "internet-facing"
     AllowedValues: ["internal", "internet-facing"]
-    Description: ALB scheme
+    Description: "ALB scheme, applied via the alb.ingress.kubernetes.io/scheme annotation to every enabled module's Ingress."
 
   IngressCertificateArn:
     Type: String
     Default: ""
-    Description: ACM Certificate ARN for HTTPS (optional)
+    Description: "ACM Certificate ARN for HTTPS, applied via the alb.ingress.kubernetes.io/certificate-arn annotation to every enabled module's Ingress. Leave empty to skip (HTTP-only, e.g. behind a separate TLS-terminating proxy)."
+
+  EnableConsoleIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Product Console.
+
+  ConsoleIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Console Ingress.
+
+  EnableLedgerIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Ledger API.
+
+  LedgerIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Ledger Ingress.
+
+  EnableReporterIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Reporter API.
+
+  ReporterIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Reporter Ingress.
+
+  EnableFetcherIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the Fetcher API.
+
+  FetcherIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the Fetcher Ingress.
 
   # ---------------------------------------------------------------------------
   # EnvironmentContract TLS — real AWS managed services (RDS/DocumentDB/
@@ -1039,10 +1122,17 @@ Resources:
           CONSOLE_VALUES_OVERRIDE: !Ref ConsoleValuesOverride
           # Console / ingress (forwarded as-is; the operator/chart renders them)
           NEXTAUTH_URL: !Ref NextAuthUrl
-          ENABLE_INGRESS: !Ref EnableIngress
-          INGRESS_HOSTNAME: !Ref IngressHostname
+          INGRESS_CLASS_NAME: !Ref IngressClassName
           INGRESS_SCHEME: !Ref IngressScheme
           INGRESS_CERTIFICATE_ARN: !Ref IngressCertificateArn
+          ENABLE_CONSOLE_INGRESS: !Ref EnableConsoleIngress
+          CONSOLE_INGRESS_HOSTNAME: !Ref ConsoleIngressHostname
+          ENABLE_LEDGER_INGRESS: !Ref EnableLedgerIngress
+          LEDGER_INGRESS_HOSTNAME: !Ref LedgerIngressHostname
+          ENABLE_REPORTER_INGRESS: !Ref EnableReporterIngress
+          REPORTER_INGRESS_HOSTNAME: !Ref ReporterIngressHostname
+          ENABLE_FETCHER_INGRESS: !Ref EnableFetcherIngress
+          FETCHER_INGRESS_HOSTNAME: !Ref FetcherIngressHostname
           # EnvironmentContract TLS
           ENVIRONMENT_CONTRACT_CA_REF: !Ref EnvironmentContractCARef
       Code:
@@ -1119,26 +1209,60 @@ Resources:
           # host: other-rds.example.com") — the catalog's ValueMap always
           # binds the shared global.datastores.* mask; this is the only
           # per-module escape hatch and it is opt-in/empty by default.
+          # ingress_nest: the key PATH (list of chart values keys, outermost
+          # first) the module's Helm chart expects its `ingress:` block
+          # nested under — verified against each chart's real values.yaml/
+          # values.schema.json (product-console-helm/midaz-helm/reporter-helm/
+          # fetcher-helm), NOT guessed:
+          #   - console: `ingress:` is TOP-LEVEL              -> []
+          #   - ledger:  `ledger.ingress:` (midaz-helm has ledger/crm/tracer
+          #     as sibling sub-components, ledger is the one this Lambda's
+          #     EnableLedger already targets) -> ["ledger"]
+          #   - reporter/fetcher: `manager.ingress:`          -> ["manager"]
+          # access_manager is DELIBERATELY None (not wired): its chart
+          # renders FOUR separate Ingress resources (identity.ingress /
+          # auth.ingress / caradhras.ingress / caradhras.ui.ingress), and
+          # `auth:`/`caradhras:` are the SAME top-level keys
+          # AccessManagerValuesOverride's own default already sets (the
+          # auth-init-user image-tag fix). This Lambda builds valuesOverride
+          # by concatenating raw YAML text (no `yaml` module available in
+          # this Lambda runtime — stdlib only), so naively appending a second
+          # `auth:`/`caradhras:` block would either produce invalid YAML or
+          # silently CLOBBER the init-user fix depending on parser behavior.
+          # Wiring access_manager ingress correctly needs a real dict-merge
+          # (build the whole valuesOverride as a Python dict, not text
+          # concatenation) — tracked separately, not done here to avoid
+          # shipping a plausible-but-wrong config next to the fix for the
+          # exact class of bug ("parameter exists, does nothing") this
+          # ingress feature was added to fix in the first place.
           REGISTRY = {
               "access_manager": {"enable": "ENABLE_ACCESS_MANAGER", "version_env": "ACCESS_MANAGER_VERSION",
                                   "license_env": "ACCESS_MANAGER_LICENSE_KEY", "bucket_env": None,
                                   "override_env": "ACCESS_MANAGER_VALUES_OVERRIDE",
-                                  "namespace": "plugin-access-manager"},
+                                  "namespace": "plugin-access-manager", "ingress_nest": None},
               "ledger": {"enable": "ENABLE_LEDGER", "version_env": "LEDGER_VERSION", "license_env": None,
-                         "bucket_env": None, "override_env": "LEDGER_VALUES_OVERRIDE", "namespace": "midaz"},
+                         "bucket_env": None, "override_env": "LEDGER_VALUES_OVERRIDE", "namespace": "midaz",
+                         "ingress_nest": ["ledger"], "ingress_enable_env": "ENABLE_LEDGER_INGRESS",
+                         "ingress_hostname_env": "LEDGER_INGRESS_HOSTNAME"},
               "fetcher": {"enable": "ENABLE_FETCHER", "version_env": "FETCHER_VERSION",
                           "license_env": None, "bucket_env": "FETCHER_S3_BUCKET",
-                          "override_env": "FETCHER_VALUES_OVERRIDE", "namespace": "fetcher"},
+                          "override_env": "FETCHER_VALUES_OVERRIDE", "namespace": "fetcher",
+                          "ingress_nest": ["manager"], "ingress_enable_env": "ENABLE_FETCHER_INGRESS",
+                          "ingress_hostname_env": "FETCHER_INGRESS_HOSTNAME"},
               "reporter": {"enable": "ENABLE_REPORTER", "version_env": "REPORTER_VERSION", "license_env": None,
                            "bucket_env": "REPORTER_S3_BUCKET", "override_env": "REPORTER_VALUES_OVERRIDE",
-                           "namespace": "reporter"},
+                           "namespace": "reporter", "ingress_nest": ["manager"],
+                           "ingress_enable_env": "ENABLE_REPORTER_INGRESS",
+                           "ingress_hostname_env": "REPORTER_INGRESS_HOSTNAME"},
               "bank_transfer": {"enable": "ENABLE_BANK_TRANSFER", "version_env": "BANK_TRANSFER_VERSION",
                                  "license_env": "BANK_TRANSFER_LICENSE_KEY", "bucket_env": None,
                                  "override_env": "BANK_TRANSFER_VALUES_OVERRIDE",
-                                 "namespace": "plugin-br-bank-transfer"},
+                                 "namespace": "plugin-br-bank-transfer", "ingress_nest": None},
               "console": {"enable": "ENABLE_CONSOLE", "version_env": "CONSOLE_VERSION", "license_env": None,
                           "bucket_env": None, "override_env": "CONSOLE_VALUES_OVERRIDE",
-                          "namespace": "product-console"},
+                          "namespace": "product-console", "ingress_nest": [],
+                          "ingress_enable_env": "ENABLE_CONSOLE_INGRESS",
+                          "ingress_hostname_env": "CONSOLE_INGRESS_HOSTNAME"},
           }
 
           def purge_module_helm_releases():
@@ -1595,10 +1719,59 @@ Resources:
                       lines.append(f"      bucket: \"{bucket}\"")
                   override_env = m.get('override_env')
                   override_yaml = os.environ.get(override_env, '') if override_env else ''
-                  if override_yaml.strip():
+                  # Per-module Ingress (custom domain) — see the REGISTRY
+                  # comment above on ingress_nest for why access_manager is
+                  # excluded. Text-appended into the SAME valuesOverride
+                  # block as override_env; safe for console/ledger/reporter/
+                  # fetcher today because none of them has any other default
+                  # content under the same top-level key this emits ([] for
+                  # console's top-level `ingress:`, ["ledger"]/["manager"]
+                  # for the others) — a customer-supplied *ValuesOverride
+                  # that ALSO manually sets that exact top-level key would
+                  # produce a duplicate key (undefined YAML behavior), so
+                  # don't combine IngressXxx with a *ValuesOverride that
+                  # already sets ledger:/manager:/ingress: yourself.
+                  ingress_lines = []
+                  ingress_nest = m.get('ingress_nest')
+                  if ingress_nest is not None:
+                      ingress_on = os.environ.get(m.get('ingress_enable_env', ''), 'false').lower() == 'true'
+                      if ingress_on:
+                          hostname = os.environ.get(m.get('ingress_hostname_env', ''), '')
+                          class_name = os.environ.get('INGRESS_CLASS_NAME', 'alb')
+                          scheme = os.environ.get('INGRESS_SCHEME', 'internet-facing')
+                          cert_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
+                          # Shared group.name so every enabled module's Ingress
+                          # consolidates onto ONE ALB (matches EnableALBController's
+                          # single-controller assumption) instead of one ALB per module.
+                          group_name = f"{os.environ.get('PROJECT_NAME', 'lerian-platform')}-alb"
+                          body = [
+                              "ingress:",
+                              "  enabled: true",
+                              f"  className: \"{class_name}\"",
+                              "  annotations:",
+                              f"    alb.ingress.kubernetes.io/scheme: \"{scheme}\"",
+                              f"    alb.ingress.kubernetes.io/group.name: \"{group_name}\"",
+                              "    alb.ingress.kubernetes.io/target-type: \"ip\"",
+                          ]
+                          if cert_arn:
+                              body.append(f"    alb.ingress.kubernetes.io/certificate-arn: \"{cert_arn}\"")
+                          body += [
+                              "  hosts:",
+                              f"    - host: \"{hostname}\"",
+                              "      paths:",
+                              "        - path: /",
+                              "          pathType: Prefix",
+                              "  tls: []",
+                          ]
+                          for key in reversed(ingress_nest):
+                              body = [f"{key}:"] + [f"  {b}" for b in body]
+                          ingress_lines = body
+                  if override_yaml.strip() or ingress_lines:
                       lines.append("      valuesOverride:")
                       for ov_line in override_yaml.splitlines():
                           lines.append(f"        {ov_line}")
+                      for ig_line in ingress_lines:
+                          lines.append(f"        {ig_line}")
               return "\n".join(lines) + "\n"
 
           def write_license_secrets(ns):
@@ -1816,8 +1989,17 @@ Resources:
             - !Ref ElastiCacheEndpoint
             - !Ref AmazonMQEndpoint
             - !Ref NextAuthUrl
-            - !Ref EnableIngress
-            - !Ref IngressHostname
+            - !Ref IngressClassName
+            - !Ref IngressScheme
+            - !Ref IngressCertificateArn
+            - !Ref EnableConsoleIngress
+            - !Ref ConsoleIngressHostname
+            - !Ref EnableLedgerIngress
+            - !Ref LedgerIngressHostname
+            - !Ref EnableReporterIngress
+            - !Ref ReporterIngressHostname
+            - !Ref EnableFetcherIngress
+            - !Ref FetcherIngressHostname
             - !Ref AccessManagerValuesOverride
             - !Ref LedgerValuesOverride
             - !Ref ReporterValuesOverride
