@@ -69,7 +69,7 @@ Metadata:
           - GitOpsRepoURL
           - GitOpsBranch
           - GitOpsPath
-          - GitOpsDeploySSHKeySecretArn
+          - GitOpsDeploySSHKey
           - GitOpsMode
       - Label:
           default: "Ingress (Shared ALB Settings)"
@@ -818,8 +818,7 @@ Parameters:
       Delivery backend for every module: "helm" (default — the operator
       installs charts directly via the Helm SDK) or "gitops" (the operator
       commits rendered manifests to GitOpsRepoURL for Argo CD to reconcile).
-      Requires GitOpsRepoURL + GitOpsDeploySSHKeySecretArn when set to
-      "gitops".
+      Requires GitOpsRepoURL + GitOpsDeploySSHKey when set to "gitops".
 
   GitOpsRepoURL:
     Type: String
@@ -841,15 +840,17 @@ Parameters:
       In-repo path for the emitted manifests (e.g. clusters/prod/lerian-platform).
       Leave empty for the repo root. Only used when PlatformDelivery=gitops.
 
-  GitOpsDeploySSHKeySecretArn:
+  GitOpsDeploySSHKey:
     Type: String
     Default: ""
+    NoEcho: true
     Description: >-
-      AWS Secrets Manager ARN holding the SSH private key (raw PEM, as the
-      SecretString) used to push to GitOpsRepoURL. Required when
-      PlatformDelivery=gitops; the Lambda fetches it at deploy time and
-      writes it into the cluster as a Secret — it is never itself a
-      CloudFormation parameter value (no NoEcho plaintext round-trip).
+      SSH private key (raw PEM) used to push to GitOpsRepoURL. Required when
+      PlatformDelivery=gitops. NoEcho hides it from the CloudFormation
+      Console/CLI, but NOT from the Lambda's own environment-variable view
+      (visible to anyone with lambda:GetFunctionConfiguration) — rotate this
+      deploy key on your git host once the initial GitOps seed has
+      completed; see the README's GitOps section.
 
   GitOpsMode:
     Type: String
@@ -1013,8 +1014,8 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref GitOpsRepoURL, ""]]
         AssertDescription: "GitOpsRepoURL is required when PlatformDelivery=gitops"
-      - Assert: !Not [!Equals [!Ref GitOpsDeploySSHKeySecretArn, ""]]
-        AssertDescription: "GitOpsDeploySSHKeySecretArn is required when PlatformDelivery=gitops"
+      - Assert: !Not [!Equals [!Ref GitOpsDeploySSHKey, ""]]
+        AssertDescription: "GitOpsDeploySSHKey is required when PlatformDelivery=gitops"
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -1024,7 +1025,6 @@ Conditions:
   HasAmazonMQSecret: !Not [!Equals [!Ref AmazonMQSecretArn, ""]]
   HasElastiCacheSecret: !Not [!Equals [!Ref ElastiCacheSecretArn, ""]]
   HasElastiCacheKMS: !Not [!Equals [!Ref ElastiCacheKMSKeyArn, ""]]
-  HasGitOpsDeployKey: !Not [!Equals [!Ref GitOpsDeploySSHKeySecretArn, ""]]
   HasMSKCluster: !Or [!Not [!Equals [!Ref MSKClusterArn, ""]], !Condition ShouldProvisionMSK]
   HasMSKSecret: !Or [!Not [!Equals [!Ref MSKSecretArn, ""]], !Condition ShouldProvisionMSK]
   HasMSKKMS: !Or [!Not [!Equals [!Ref MSKKMSKeyArn, ""]], !Condition ShouldProvisionMSK]
@@ -1112,7 +1112,6 @@ Resources:
                     - HasMSKSecret
                     - !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.ScramSecretArn, !Ref MSKSecretArn]
                     - !Ref "AWS::NoValue"
-                  - !If [HasGitOpsDeployKey, !Ref GitOpsDeploySSHKeySecretArn, !Ref "AWS::NoValue"]
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -1242,7 +1241,7 @@ Resources:
           GITOPS_REPO_URL: !Ref GitOpsRepoURL
           GITOPS_BRANCH: !Ref GitOpsBranch
           GITOPS_PATH: !Ref GitOpsPath
-          GITOPS_DEPLOY_SSH_KEY_SECRET_ARN: !Ref GitOpsDeploySSHKeySecretArn
+          GITOPS_DEPLOY_SSH_KEY: !Ref GitOpsDeploySSHKey
           GITOPS_MODE: !Ref GitOpsMode
           # OCI registry auth (private charts)
           HELM_REGISTRY_HOST: !Ref HelmRegistryHost
@@ -1603,16 +1602,14 @@ Resources:
                   return ''
 
           def get_gitops_deploy_key():
-              # Raw PEM SecretString (not JSON, unlike RDS/DocumentDB-style
-              # secrets get_secret() parses) — same shape as get_redis_password().
-              arn = os.environ.get('GITOPS_DEPLOY_SSH_KEY_SECRET_ARN', '')
-              if not arn:
-                  return ''
-              try:
-                  return boto3.client('secretsmanager').get_secret_value(SecretId=arn)['SecretString']
-              except Exception as e:
-                  logger.warning(f"GitOps deploy key secret fetch failed: {e}")
-                  return ''
+              # Raw PEM straight off a NoEcho CFN parameter (not a Secrets
+              # Manager ARN, unlike RDS/DocumentDB/etc.) — deliberate deploy-
+              # time convenience trade-off: no pre-created secret required
+              # before launching the stack. NoEcho hides it from the CFN
+              # Console/CLI but NOT from the Lambda's own environment-variable
+              # view, so the README instructs rotating this deploy key on the
+              # git host once the initial GitOps seed has completed.
+              return os.environ.get('GITOPS_DEPLOY_SSH_KEY', '')
 
           def get_msk_password():
               arn = os.environ.get('MSK_SECRET_ARN', '')
@@ -2110,9 +2107,8 @@ Resources:
               # "<namespace>/<name>"; key "ssh-privatekey" (go-git's own SSH auth
               # reads that exact key — internal/deploy/gitops.go defaultReadDeployKey).
               # No-op (empty ref) unless PlatformDelivery=gitops; the CFN Rule
-              # GitOpsRequiresRepoAndDeployKey already enforces the ARN is set
-              # whenever that's the case, so a raw fetch failure here is a real
-              # error, not an expected "not configured" path.
+              # GitOpsRequiresRepoAndDeployKey already enforces the key is set
+              # whenever that's the case.
               if os.environ.get('PLATFORM_DELIVERY', 'helm') != 'gitops':
                   return ''
               key = get_gitops_deploy_key()

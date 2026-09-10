@@ -171,6 +171,38 @@ hostname must be typed out by hand. `DomainName` also drives a private
 Route53 hosted zone (VPC-internal only — it does not touch any public DNS
 you may already own for that domain).
 
+## GitOps Delivery (ArgoCD)
+
+By default the operator installs every module directly via the Helm SDK
+(`PlatformDelivery=helm`). Set `PlatformDelivery=gitops` instead to have it
+commit rendered manifests to a Git repository for Argo CD to reconcile —
+useful when your organization already gates all cluster changes through
+GitOps rather than allowing an in-cluster controller to call Helm directly.
+
+This is chosen once, at day-0: the operator never switches an already-
+installed module's delivery backend later.
+
+| Parameter | Required when `gitops` | Notes |
+|-----------|------------------------|-------|
+| `PlatformDelivery` | — | `helm` (default) or `gitops` |
+| `GitOpsRepoURL` | Yes | e.g. `git@github.com:your-org/your-gitops-repo.git` |
+| `GitOpsBranch` | No | Default `main` |
+| `GitOpsPath` | No | In-repo path for emitted manifests; empty = repo root |
+| `GitOpsDeploySSHKey` | Yes | SSH private key (raw PEM) with write access to `GitOpsRepoURL` |
+| `GitOpsMode` | No | `commit` (default — Argo CD applies) or `apply` (operator applies directly) |
+
+**`GitOpsDeploySSHKey` is `NoEcho` but not a strong secret boundary.**
+`NoEcho` hides the value from the CloudFormation Console/CLI, but the
+Lambda still receives it as a plain environment variable — anyone with
+`lambda:GetFunctionConfiguration` on this stack's deployer function can
+read it back in plaintext. This trade-off is deliberate: it keeps the
+one-click deploy free of any pre-step (no Secrets Manager entry to create
+before you can even open the Launch Stack form). **Once the initial GitOps
+seed has completed** (the operator's first commit/push to `GitOpsRepoURL`
+lands and Argo CD picks it up), **rotate this deploy key on your git
+host** — revoke the key used during deploy and add a fresh one for any
+ongoing GitOps write access Argo CD/the operator still needs.
+
 ## Known limitations
 
 See [`CHECKPOINT.md`](./CHECKPOINT.md) for the full, current list and the

@@ -91,7 +91,7 @@ Metadata:
           - GitOpsRepoURL
           - GitOpsBranch
           - GitOpsPath
-          - GitOpsDeploySSHKeySecretArn
+          - GitOpsDeploySSHKey
           - GitOpsMode
       - Label:
           default: "Ingress (Shared ALB Settings)"
@@ -860,7 +860,7 @@ Parameters:
   # DELIVERY BACKEND (GITOPS/ARGOCD) — OPTIONAL
   # Passed straight through to orchestrator.yaml (ApplicationStack); see that
   # template for the full description/enforcement (GitOpsRequiresRepoAndDeployKey
-  # Rule + the Lambda logic that reads GitOpsDeploySSHKeySecretArn at deploy time).
+  # Rule + the Lambda logic that reads GitOpsDeploySSHKey at deploy time).
   # ===========================================================================
   PlatformDelivery:
     Type: String
@@ -869,7 +869,7 @@ Parameters:
     Description: >-
       Delivery backend for every module: "helm" (default) or "gitops"
       (commits rendered manifests to GitOpsRepoURL for Argo CD to reconcile).
-      Requires GitOpsRepoURL + GitOpsDeploySSHKeySecretArn when set to "gitops".
+      Requires GitOpsRepoURL + GitOpsDeploySSHKey when set to "gitops".
 
   GitOpsRepoURL:
     Type: String
@@ -886,12 +886,14 @@ Parameters:
     Default: ""
     Description: "In-repo path for the emitted manifests. Only used when PlatformDelivery=gitops."
 
-  GitOpsDeploySSHKeySecretArn:
+  GitOpsDeploySSHKey:
     Type: String
     Default: ""
+    NoEcho: true
     Description: >-
-      AWS Secrets Manager ARN holding the SSH private key (raw PEM) used to
-      push to GitOpsRepoURL. Required when PlatformDelivery=gitops.
+      SSH private key (raw PEM) used to push to GitOpsRepoURL. Required when
+      PlatformDelivery=gitops. Rotate this deploy key on your git host once
+      the initial GitOps seed has completed — see the README's GitOps section.
 
   GitOpsMode:
     Type: String
@@ -1261,8 +1263,8 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref GitOpsRepoURL, ""]]
         AssertDescription: "GitOpsRepoURL is required when PlatformDelivery=gitops"
-      - Assert: !Not [!Equals [!Ref GitOpsDeploySSHKeySecretArn, ""]]
-        AssertDescription: "GitOpsDeploySSHKeySecretArn is required when PlatformDelivery=gitops"
+      - Assert: !Not [!Equals [!Ref GitOpsDeploySSHKey, ""]]
+        AssertDescription: "GitOpsDeploySSHKey is required when PlatformDelivery=gitops"
 
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
@@ -1632,7 +1634,7 @@ Resources:
         GitOpsRepoURL: !Ref GitOpsRepoURL
         GitOpsBranch: !Ref GitOpsBranch
         GitOpsPath: !Ref GitOpsPath
-        GitOpsDeploySSHKeySecretArn: !Ref GitOpsDeploySSHKeySecretArn
+        GitOpsDeploySSHKey: !Ref GitOpsDeploySSHKey
         GitOpsMode: !Ref GitOpsMode
         # OCI Helm registry auth
         HelmRegistryHost: !Ref HelmRegistryHost
