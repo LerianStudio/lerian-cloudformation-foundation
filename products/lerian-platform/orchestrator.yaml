@@ -122,6 +122,8 @@ Metadata:
           - EnableBankTransfer
           - BankTransferChartVersion
           - BankTransferLicenseKey
+          - EnableBankTransferIngress
+          - BankTransferIngressHostname
           - BankTransferValuesOverride
       - Label:
           default: "Object Storage — Shared"
@@ -247,6 +249,10 @@ Metadata:
         default: "Access Manager Auth Ingress Hostname"
       BankTransferLicenseKey:
         default: "BR Bank Transfer License Key"
+      EnableBankTransferIngress:
+        default: "Enable Bank Transfer Ingress"
+      BankTransferIngressHostname:
+        default: "Bank Transfer Ingress Hostname"
       HelmRegistryHost:
         default: "OCI Registry Host"
       HelmRegistryUser:
@@ -758,6 +764,22 @@ Parameters:
     Default: ""
     NoEcho: true
     Description: "Lerian license key for the BR Bank Transfer plugin. Each licensed plugin has its own key."
+
+  # plugin-br-bank-transfer-helm's Ingress lives under `bankTransfer.ingress`
+  # (verified against the real chart's values.yaml/templates/ingress.yaml —
+  # `bankTransfer:` is the chart's own top-level key, `ingress:` nests
+  # under it), NOT top-level like Console.
+  EnableBankTransferIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the BR Bank Transfer API.
+
+  BankTransferIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the BR Bank Transfer Ingress.
+
   LicenseUseDevGateway:
     Type: String
     Default: "false"
@@ -1121,6 +1143,8 @@ Resources:
           AUTHORIZER_CLIENT_SECRET: !Ref AuthorizerClientSecret
           ACCESS_MANAGER_LICENSE_KEY: !Ref AccessManagerLicenseKey
           BANK_TRANSFER_LICENSE_KEY: !Ref BankTransferLicenseKey
+          ENABLE_BANK_TRANSFER_INGRESS: !Ref EnableBankTransferIngress
+          BANK_TRANSFER_INGRESS_HOSTNAME: !Ref BankTransferIngressHostname
           ENABLE_ACCESS_MANAGER_IDENTITY_INGRESS: !Ref EnableAccessManagerIdentityIngress
           ACCESS_MANAGER_IDENTITY_INGRESS_HOSTNAME: !Ref AccessManagerIdentityIngressHostname
           ENABLE_ACCESS_MANAGER_AUTH_INGRESS: !Ref EnableAccessManagerAuthIngress
@@ -1289,7 +1313,16 @@ Resources:
               "bank_transfer": {"enable": "ENABLE_BANK_TRANSFER", "version_env": "BANK_TRANSFER_VERSION",
                                  "license_env": "BANK_TRANSFER_LICENSE_KEY", "bucket_env": None,
                                  "override_env": "BANK_TRANSFER_VALUES_OVERRIDE",
-                                 "namespace": "plugin-br-bank-transfer", "ingress_nest": None},
+                                 "namespace": "plugin-br-bank-transfer",
+                                 # bankTransfer.ingress — verified against the
+                                 # real chart (plugin-br-bank-transfer-helm's
+                                 # own values.yaml/templates/ingress.yaml):
+                                 # `bankTransfer:` is the chart's own
+                                 # top-level key, ingress nests under it.
+                                 "ingress_nest": ["bankTransfer"],
+                                 "ingress_enable_env": "ENABLE_BANK_TRANSFER_INGRESS",
+                                 "ingress_hostname_env": "BANK_TRANSFER_INGRESS_HOSTNAME",
+                                 "ingress_prefix": "bank-transfer"},
               "console": {"enable": "ENABLE_CONSOLE", "version_env": "CONSOLE_VERSION", "license_env": None,
                           "bucket_env": None, "override_env": "CONSOLE_VALUES_OVERRIDE",
                           "namespace": "product-console", "ingress_nest": [],
@@ -2161,6 +2194,8 @@ Resources:
             - !Ref ReporterValuesOverride
             - !Ref FetcherValuesOverride
             - !Ref ConsoleValuesOverride
+            - !Ref EnableBankTransferIngress
+            - !Ref BankTransferIngressHostname
             - !Ref BankTransferValuesOverride
             - !Ref EnvironmentContractCARef
             - "v1"

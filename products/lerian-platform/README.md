@@ -187,9 +187,10 @@ aws cloudformation create-stack \
 ## Ingress (Custom Domains)
 
 Each of these modules can get its own AWS ALB Ingress with a custom
-hostname: **Console**, **Ledger**, **Reporter**, **Fetcher**, and **Access
-Manager** (its `auth` and `identity` endpoints specifically — `caradhras`/
-`caradhras.ui` aren't wired yet, see `CHECKPOINT.md`).
+hostname: **Console**, **Ledger**, **Reporter**, **Fetcher**, **Bank
+Transfer**, and **Access Manager** (its `auth` and `identity` endpoints
+specifically — `caradhras`/`caradhras.ui` aren't wired yet, see
+`CHECKPOINT.md`).
 
 For each one, two parameters control it:
 
@@ -199,16 +200,21 @@ For each one, two parameters control it:
 | Ledger | `EnableLedgerIngress` | `LedgerIngressHostname` |
 | Reporter | `EnableReporterIngress` | `ReporterIngressHostname` |
 | Fetcher | `EnableFetcherIngress` | `FetcherIngressHostname` |
+| Bank Transfer | `EnableBankTransferIngress` | `BankTransferIngressHostname` |
 | Access Manager (auth) | `EnableAccessManagerAuthIngress` | `AccessManagerAuthIngressHostname` |
 | Access Manager (identity) | `EnableAccessManagerIdentityIngress` | `AccessManagerIdentityIngressHostname` |
 
-Three settings are shared across every enabled module's Ingress (one ALB,
+Every Ingress is **always internal** (`alb.ingress.kubernetes.io/scheme:
+internal`) — no module here is meant to be reachable from the public
+internet; access is via VPN/port-forward/an internal ALB. This is not a
+customer-facing choice.
+
+Two settings are shared across every enabled module's Ingress (one ALB,
 via a common `alb.ingress.kubernetes.io/group.name` annotation) instead of
 being repeated per module:
 
 - `IngressClassName` — default `alb` (the AWS Load Balancer Controller's
   own default). Requires `EnableALBController: true`.
-- `IngressScheme` — `internet-facing` (default) or `internal`.
 - `IngressCertificateArn` — an ACM certificate ARN for HTTPS. Leave empty
   for HTTP-only.
 

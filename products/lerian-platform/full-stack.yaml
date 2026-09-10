@@ -142,6 +142,8 @@ Metadata:
           - EnableBankTransfer
           - BankTransferChartVersion
           - BankTransferLicenseKey
+          - EnableBankTransferIngress
+          - BankTransferIngressHostname
           - BankTransferValuesOverride
       - Label:
           default: "platform-orchestrator (controller)"
@@ -340,6 +342,10 @@ Metadata:
         default: "BR Bank Transfer Values Override (advanced)"
       BankTransferLicenseKey:
         default: "BR Bank Transfer License Key"
+      EnableBankTransferIngress:
+        default: "Enable Bank Transfer Ingress"
+      BankTransferIngressHostname:
+        default: "Bank Transfer Ingress Hostname"
       # platform-orchestrator (controller)
       PlatformNamespace:
         default: "Platform Namespace"
@@ -1089,6 +1095,17 @@ Parameters:
     NoEcho: true
     Description: "Lerian license key for the BR Bank Transfer plugin. Each licensed plugin has its own key."
 
+  EnableBankTransferIngress:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable Ingress (custom domain) for the BR Bank Transfer API.
+
+  BankTransferIngressHostname:
+    Type: String
+    Default: ""
+    Description: Hostname for the BR Bank Transfer Ingress.
+
   BankTransferValuesOverride:
     Type: String
     Default: ""
@@ -1535,6 +1552,8 @@ Resources:
         EnableAccessManagerAuthIngress: !Ref EnableAccessManagerAuthIngress
         AccessManagerAuthIngressHostname: !Ref AccessManagerAuthIngressHostname
         BankTransferLicenseKey: !Ref BankTransferLicenseKey
+        EnableBankTransferIngress: !Ref EnableBankTransferIngress
+        BankTransferIngressHostname: !Ref BankTransferIngressHostname
         LicenseUseDevGateway: !Ref LicenseUseDevGateway
         # OCI Helm registry auth
         HelmRegistryHost: !Ref HelmRegistryHost
