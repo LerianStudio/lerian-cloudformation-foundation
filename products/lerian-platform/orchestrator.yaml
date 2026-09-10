@@ -63,6 +63,15 @@ Metadata:
         Parameters:
           - LicenseUseDevGateway
       - Label:
+          default: "Delivery Backend (GitOps/ArgoCD) — Optional"
+        Parameters:
+          - PlatformDelivery
+          - GitOpsRepoURL
+          - GitOpsBranch
+          - GitOpsPath
+          - GitOpsDeploySSHKeySecretArn
+          - GitOpsMode
+      - Label:
           default: "Ingress (Shared ALB Settings)"
         Parameters:
           - DomainName
@@ -793,6 +802,65 @@ Parameters:
       testing uses dev-gateway keys.
 
   # ---------------------------------------------------------------------------
+  # Delivery backend — helm (default, self-contained Helm SDK, install-once)
+  # or gitops (ArgoCD): the operator renders manifests + commits/pushes them
+  # to GitOpsRepoURL instead of calling Helm directly, and Argo CD reconciles
+  # from there. Chosen once at day-0 (api/v1alpha1/platform_types.go
+  # PlatformSpec.Delivery — "the operator is install-once and never switches
+  # the backend of an installed module"). Applies to EVERY module in this
+  # Platform, not per-module.
+  # ---------------------------------------------------------------------------
+  PlatformDelivery:
+    Type: String
+    Default: "helm"
+    AllowedValues: ["helm", "gitops"]
+    Description: >-
+      Delivery backend for every module: "helm" (default — the operator
+      installs charts directly via the Helm SDK) or "gitops" (the operator
+      commits rendered manifests to GitOpsRepoURL for Argo CD to reconcile).
+      Requires GitOpsRepoURL + GitOpsDeploySSHKeySecretArn when set to
+      "gitops".
+
+  GitOpsRepoURL:
+    Type: String
+    Default: ""
+    Description: >-
+      Git repository holding the ArgoCD manifests (e.g.
+      git@github.com:your-org/your-gitops-repo.git). Required when
+      PlatformDelivery=gitops; ignored otherwise.
+
+  GitOpsBranch:
+    Type: String
+    Default: "main"
+    Description: "Target branch for GitOps commits. Only used when PlatformDelivery=gitops."
+
+  GitOpsPath:
+    Type: String
+    Default: ""
+    Description: >-
+      In-repo path for the emitted manifests (e.g. clusters/prod/lerian-platform).
+      Leave empty for the repo root. Only used when PlatformDelivery=gitops.
+
+  GitOpsDeploySSHKeySecretArn:
+    Type: String
+    Default: ""
+    Description: >-
+      AWS Secrets Manager ARN holding the SSH private key (raw PEM, as the
+      SecretString) used to push to GitOpsRepoURL. Required when
+      PlatformDelivery=gitops; the Lambda fetches it at deploy time and
+      writes it into the cluster as a Secret — it is never itself a
+      CloudFormation parameter value (no NoEcho plaintext round-trip).
+
+  GitOpsMode:
+    Type: String
+    Default: "commit"
+    AllowedValues: ["commit", "apply"]
+    Description: >-
+      GitOps write mode: "commit" (push rendered manifests, ArgoCD applies
+      them) or "apply" (operator applies directly against the cluster ArgoCD
+      is also watching). Only used when PlatformDelivery=gitops.
+
+  # ---------------------------------------------------------------------------
   # OCI Helm registry auth (optional; for any PRIVATE OCI Helm charts, incl.
   # the orchestrator chart itself if it ends up private)
   # ---------------------------------------------------------------------------
@@ -939,6 +1007,15 @@ Parameters:
       Amazon Root CA 1 — both public AWS CA bundles, no secret) and uses this
       Parameter only as an override for a different region/bundle.
 
+Rules:
+  GitOpsRequiresRepoAndDeployKey:
+    RuleCondition: !Equals [!Ref PlatformDelivery, "gitops"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref GitOpsRepoURL, ""]]
+        AssertDescription: "GitOpsRepoURL is required when PlatformDelivery=gitops"
+      - Assert: !Not [!Equals [!Ref GitOpsDeploySSHKeySecretArn, ""]]
+        AssertDescription: "GitOpsDeploySSHKeySecretArn is required when PlatformDelivery=gitops"
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   # Secret presence — in dedicated topology an app may not use every data service.
@@ -947,6 +1024,7 @@ Conditions:
   HasAmazonMQSecret: !Not [!Equals [!Ref AmazonMQSecretArn, ""]]
   HasElastiCacheSecret: !Not [!Equals [!Ref ElastiCacheSecretArn, ""]]
   HasElastiCacheKMS: !Not [!Equals [!Ref ElastiCacheKMSKeyArn, ""]]
+  HasGitOpsDeployKey: !Not [!Equals [!Ref GitOpsDeploySSHKeySecretArn, ""]]
   HasMSKCluster: !Or [!Not [!Equals [!Ref MSKClusterArn, ""]], !Condition ShouldProvisionMSK]
   HasMSKSecret: !Or [!Not [!Equals [!Ref MSKSecretArn, ""]], !Condition ShouldProvisionMSK]
   HasMSKKMS: !Or [!Not [!Equals [!Ref MSKKMSKeyArn, ""]], !Condition ShouldProvisionMSK]
@@ -1034,6 +1112,7 @@ Resources:
                     - HasMSKSecret
                     - !If [ShouldProvisionMSK, !GetAtt MSKStack.Outputs.ScramSecretArn, !Ref MSKSecretArn]
                     - !Ref "AWS::NoValue"
+                  - !If [HasGitOpsDeployKey, !Ref GitOpsDeploySSHKeySecretArn, !Ref "AWS::NoValue"]
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -1158,6 +1237,13 @@ Resources:
           # delivery model — no reason to ask the customer for it.
           ACCESS_MANAGER_ORGANIZATION_IDS: "global"
           LICENSE_USE_DEV_GATEWAY: !Ref LicenseUseDevGateway
+          # Delivery backend (helm|gitops)
+          PLATFORM_DELIVERY: !Ref PlatformDelivery
+          GITOPS_REPO_URL: !Ref GitOpsRepoURL
+          GITOPS_BRANCH: !Ref GitOpsBranch
+          GITOPS_PATH: !Ref GitOpsPath
+          GITOPS_DEPLOY_SSH_KEY_SECRET_ARN: !Ref GitOpsDeploySSHKeySecretArn
+          GITOPS_MODE: !Ref GitOpsMode
           # OCI registry auth (private charts)
           HELM_REGISTRY_HOST: !Ref HelmRegistryHost
           HELM_REGISTRY_USER: !Ref HelmRegistryUser
@@ -1516,6 +1602,18 @@ Resources:
                   logger.warning(f"ElastiCache secret fetch failed: {e}")
                   return ''
 
+          def get_gitops_deploy_key():
+              # Raw PEM SecretString (not JSON, unlike RDS/DocumentDB-style
+              # secrets get_secret() parses) — same shape as get_redis_password().
+              arn = os.environ.get('GITOPS_DEPLOY_SSH_KEY_SECRET_ARN', '')
+              if not arn:
+                  return ''
+              try:
+                  return boto3.client('secretsmanager').get_secret_value(SecretId=arn)['SecretString']
+              except Exception as e:
+                  logger.warning(f"GitOps deploy key secret fetch failed: {e}")
+                  return ''
+
           def get_msk_password():
               arn = os.environ.get('MSK_SECRET_ARN', '')
               return get_secret(arn).get('password', '') if arn else ''
@@ -1596,7 +1694,12 @@ Resources:
           # keys per api/v1alpha1/environmentcontract_types.go).
           # =====================================================================
           def secret_manifest(name, ns, data):
-              lines = "\n".join(f'  {k}: "{v}"' for k, v in data.items()) or '  {}: ""'
+              # json.dumps() escapes embedded quotes/backslashes/newlines into a
+              # form that's ALSO a valid YAML double-quoted scalar (needed now
+              # that write_gitops_secret() puts a real multi-line PEM through
+              # here — the previous naive f'"{v}"' broke on any value containing
+              # a literal newline or double-quote).
+              lines = "\n".join(f'  {k}: {json.dumps(v)}' for k, v in data.items()) or '  {}: ""'
               return (f"apiVersion: v1\nkind: Secret\n"
                       f"metadata:\n  name: {name}\n  namespace: {ns}\n"
                       f"type: Opaque\nstringData:\n{lines}\n")
@@ -1854,17 +1957,33 @@ Resources:
                   lines += extra.splitlines()
               return lines
 
-          def render_platform(name, ns, contract_name, license_secrets):
+          def render_platform(name, ns, contract_name, license_secrets, gitops_ref):
               authz_id = os.environ.get('AUTHORIZER_CLIENT_ID', '')
               authz_secret = os.environ.get('AUTHORIZER_CLIENT_SECRET', '')
               org_ids = os.environ.get('ACCESS_MANAGER_ORGANIZATION_IDS', '')
+              delivery = os.environ.get('PLATFORM_DELIVERY', 'helm')
 
               lines = [
                   "apiVersion: platform.lerian.io/v1alpha1", "kind: Platform",
                   "metadata:", f"  name: {name}", f"  namespace: {ns}",
                   "spec:",
                   f"  environmentContractRef: {contract_name}",
-                  "  delivery: helm",
+                  f"  delivery: {delivery}",
+              ]
+              if delivery == 'gitops':
+                  # gitops_ref ("<ns>/gitops-deploy-key") is non-empty here — the
+                  # CFN Rule GitOpsRequiresRepoAndDeployKey rejects the stack
+                  # otherwise, and write_gitops_secret() always writes the Secret
+                  # before this is called whenever delivery=gitops.
+                  lines += [
+                      "  gitops:",
+                      f"    repoURL: \"{os.environ.get('GITOPS_REPO_URL', '')}\"",
+                      f"    branch: \"{os.environ.get('GITOPS_BRANCH', 'main')}\"",
+                      f"    path: \"{os.environ.get('GITOPS_PATH', '')}\"",
+                      f"    deployKeySecretRef: \"{gitops_ref}\"",
+                      f"    mode: \"{os.environ.get('GITOPS_MODE', 'commit')}\"",
+                  ]
+              lines += [
                   "  authorizer:",
                   f"    clientId: \"{authz_id}\"",
                   f"    clientSecret: \"{authz_secret}\"",
@@ -1985,6 +2104,21 @@ Resources:
                       {"LICENSE_KEY": key, "IS_DEVELOPMENT": dev_gateway}))
                   refs[app] = f"{ns}/{name}"
               return refs
+
+          def write_gitops_secret(ns):
+              # api/v1alpha1/platform_types.go GitOpsSpec.DeployKeySecretRef is
+              # "<namespace>/<name>"; key "ssh-privatekey" (go-git's own SSH auth
+              # reads that exact key — internal/deploy/gitops.go defaultReadDeployKey).
+              # No-op (empty ref) unless PlatformDelivery=gitops; the CFN Rule
+              # GitOpsRequiresRepoAndDeployKey already enforces the ARN is set
+              # whenever that's the case, so a raw fetch failure here is a real
+              # error, not an expected "not configured" path.
+              if os.environ.get('PLATFORM_DELIVERY', 'helm') != 'gitops':
+                  return ''
+              key = get_gitops_deploy_key()
+              name = "gitops-deploy-key"
+              kubectl_apply(secret_manifest(name, ns, {"ssh-privatekey": key}))
+              return f"{ns}/{name}"
 
           # =====================================================================
           # Step 5 — CFN is the "provisioner" here: patch EnvironmentContract's
@@ -2112,7 +2246,8 @@ Resources:
                   patch_contract_ready(contract_name, ns)
 
                   license_secrets = write_license_secrets(ns)
-                  kubectl_apply(render_platform(platform_name, ns, contract_name, license_secrets))
+                  gitops_ref = write_gitops_secret(ns)
+                  kubectl_apply(render_platform(platform_name, ns, contract_name, license_secrets, gitops_ref))
 
                   deadline = time.time() + 840  # leave margin under the 900s Lambda timeout
                   ok, message, conds = poll_platform_ready(platform_name, ns, deadline)

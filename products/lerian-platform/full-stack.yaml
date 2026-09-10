@@ -85,6 +85,15 @@ Metadata:
         Parameters:
           - LicenseUseDevGateway
       - Label:
+          default: "Delivery Backend (GitOps/ArgoCD) — Optional"
+        Parameters:
+          - PlatformDelivery
+          - GitOpsRepoURL
+          - GitOpsBranch
+          - GitOpsPath
+          - GitOpsDeploySSHKeySecretArn
+          - GitOpsMode
+      - Label:
           default: "Ingress (Shared ALB Settings)"
         Parameters:
           - IngressClassName
@@ -848,6 +857,49 @@ Parameters:
       Lerian-internal sandbox testing uses dev-gateway keys.
 
   # ===========================================================================
+  # DELIVERY BACKEND (GITOPS/ARGOCD) — OPTIONAL
+  # Passed straight through to orchestrator.yaml (ApplicationStack); see that
+  # template for the full description/enforcement (GitOpsRequiresRepoAndDeployKey
+  # Rule + the Lambda logic that reads GitOpsDeploySSHKeySecretArn at deploy time).
+  # ===========================================================================
+  PlatformDelivery:
+    Type: String
+    Default: "helm"
+    AllowedValues: ["helm", "gitops"]
+    Description: >-
+      Delivery backend for every module: "helm" (default) or "gitops"
+      (commits rendered manifests to GitOpsRepoURL for Argo CD to reconcile).
+      Requires GitOpsRepoURL + GitOpsDeploySSHKeySecretArn when set to "gitops".
+
+  GitOpsRepoURL:
+    Type: String
+    Default: ""
+    Description: "Git repository holding the ArgoCD manifests. Required when PlatformDelivery=gitops."
+
+  GitOpsBranch:
+    Type: String
+    Default: "main"
+    Description: "Target branch for GitOps commits. Only used when PlatformDelivery=gitops."
+
+  GitOpsPath:
+    Type: String
+    Default: ""
+    Description: "In-repo path for the emitted manifests. Only used when PlatformDelivery=gitops."
+
+  GitOpsDeploySSHKeySecretArn:
+    Type: String
+    Default: ""
+    Description: >-
+      AWS Secrets Manager ARN holding the SSH private key (raw PEM) used to
+      push to GitOpsRepoURL. Required when PlatformDelivery=gitops.
+
+  GitOpsMode:
+    Type: String
+    Default: "commit"
+    AllowedValues: ["commit", "apply"]
+    Description: "GitOps write mode. Only used when PlatformDelivery=gitops."
+
+  # ===========================================================================
   # MODULE: ACCESS MANAGER (CASDOOR)
   # ===========================================================================
   EnableAccessManager:
@@ -1204,6 +1256,13 @@ Rules:
     Assertions:
       - Assert: !Equals [!Ref EnableALBController, "true"]
         AssertDescription: "Enable ALB Controller must be 'true' when any module's Ingress is enabled"
+  GitOpsRequiresRepoAndDeployKey:
+    RuleCondition: !Equals [!Ref PlatformDelivery, "gitops"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref GitOpsRepoURL, ""]]
+        AssertDescription: "GitOpsRepoURL is required when PlatformDelivery=gitops"
+      - Assert: !Not [!Equals [!Ref GitOpsDeploySSHKeySecretArn, ""]]
+        AssertDescription: "GitOpsDeploySSHKeySecretArn is required when PlatformDelivery=gitops"
 
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
@@ -1567,6 +1626,14 @@ Resources:
         EnableBankTransferIngress: !Ref EnableBankTransferIngress
         BankTransferIngressHostname: !Ref BankTransferIngressHostname
         LicenseUseDevGateway: !Ref LicenseUseDevGateway
+        # Delivery backend (helm|gitops) — pure passthrough, orchestrator.yaml
+        # owns the Rule + Lambda logic.
+        PlatformDelivery: !Ref PlatformDelivery
+        GitOpsRepoURL: !Ref GitOpsRepoURL
+        GitOpsBranch: !Ref GitOpsBranch
+        GitOpsPath: !Ref GitOpsPath
+        GitOpsDeploySSHKeySecretArn: !Ref GitOpsDeploySSHKeySecretArn
+        GitOpsMode: !Ref GitOpsMode
         # OCI Helm registry auth
         HelmRegistryHost: !Ref HelmRegistryHost
         HelmRegistryUser: !Ref HelmRegistryUser
