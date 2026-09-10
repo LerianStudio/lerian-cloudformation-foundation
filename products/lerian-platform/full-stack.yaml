@@ -108,6 +108,7 @@ Metadata:
           - FetcherChartVersion
           - FetcherLicenseKey
           - FetcherValuesOverride
+          - MSKInstanceType
       - Label:
           default: "Module: Product Console"
         Parameters:
@@ -848,17 +849,23 @@ Parameters:
     # Non-empty default — see orchestrator.yaml's own Parameter comment.
     # plugin-access-manager's auth-init-user Job defaults to a single-arch
     # amd64-only image; this shared foundation.yaml is ARM64/Graviton-only,
-    # so without this override that Job ImagePullBackOffs forever. Disabled
-    # outright (auth.initUser.enabled: false) rather than re-pinning the
-    # image — matches how lerian-aws-gitops's own production config runs
-    # this module (the Job is post-install-only, and chart 10.x+ requires
-    # adminPassword/useExistingSecret+adminPasswordSecretName when enabled,
-    # neither of which this template sets).
+    # so the Job ImagePullBackOffs forever on the DEFAULT image tag.
+    # Previously "fixed" by disabling the Job outright (initUser.enabled:
+    # false) — that permanently broke the operator's m2m-app bootstrap
+    # (Casdoor never gets an admin user; every m2m-app BootstrapOperation
+    # 401s "the user does not exist" forever). Confirmed live on a real
+    # create-stack. The correct fix (same as orchestrator.yaml's own
+    # Default, which THIS copy overrides for a full-stack deploy — full-
+    # stack.yaml's copy of a shared Parameter always wins, see
+    # OrchestratorChartVersion's comment above) is to pin a confirmed
+    # multi-arch image tag instead of disabling the Job.
     Default: |
       auth:
         initUser:
-          enabled: false
-    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to disabling auth-init-user — see orchestrator.yaml's own Parameter description for details."
+          enabled: true
+          image:
+            tag: "3.3.1"
+    Description: "Advanced: raw YAML merged into spec.modules.access_manager.valuesOverride. Defaults to a multi-arch auth-init-user image tag — see orchestrator.yaml's own Parameter description for details."
 
   # ===========================================================================
   # MODULE: LEDGER (MIDAZ)
@@ -922,6 +929,25 @@ Parameters:
     Type: String
     Default: ""
     Description: "Advanced: raw YAML merged into spec.modules.fetcher.valuesOverride. See orchestrator.yaml's own Parameter description for the exact shape expected."
+
+  MSKInstanceType:
+    Type: String
+    Default: kafka.m7g.large
+    AllowedValues:
+      - kafka.t3.small
+      - kafka.m5.large
+      - kafka.m5.xlarge
+      - kafka.m5.2xlarge
+      - kafka.m5.4xlarge
+      - kafka.m7g.large
+      - kafka.m7g.xlarge
+      - kafka.m7g.2xlarge
+      - kafka.m7g.4xlarge
+    Description: >-
+      MSK broker instance type, provisioned when EnableFetcher=true (see the
+      MSKStack resource — provisioned as a sibling of InfrastructureStack, in
+      parallel, not nested inside ApplicationStack). Graviton (kafka.m7g.*)
+      default to match this template's Graviton-only EKS NodeInstanceType.
 
   # ===========================================================================
   # MODULE: PRODUCT CONSOLE
@@ -1028,7 +1054,7 @@ Parameters:
     # old build believing it was current. This file's Default always wins
     # (it's what actually gets passed down), so THIS is the one to check
     # first if a deployed operator doesn't match what you expect.
-    Default: "0.1.20-e2e.e6019bc"
+    Default: "0.1.29-e2e.83bb248-multiarch"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of
@@ -1317,16 +1343,57 @@ Resources:
           Value: CloudFormation
 
   # ===========================================================================
+  # MSK STACK (Fetcher's Kafka backbone) — a SIBLING of InfrastructureStack,
+  # not nested inside ApplicationStack. It only depends on FoundationStack's
+  # VPC/subnets, never on RDS/DocumentDB/ElastiCache/AmazonMQ, so nesting it
+  # inside ApplicationStack (which DOES wait on InfrastructureStack's
+  # endpoints) forced it to run strictly AFTER Infrastructure finished for no
+  # real reason — confirmed live: a real one-click create-stack spent
+  # Infrastructure's ~15-20min AND THEN MSK's ~20-40min back-to-back
+  # (sequential) purely because of this nesting accident, not a dependency.
+  # Promoting it to a top-level sibling lets CloudFormation create it
+  # CONCURRENTLY with InfrastructureStack, cutting real one-click wall-clock
+  # time. orchestrator.yaml itself still owns MSK self-provisioning for its
+  # OWN standalone ("Application only") deployment mode — unchanged there.
+  # This full-stack.yaml composition instead resolves MSK's ARNs HERE and
+  # passes them into ApplicationStack as already-provisioned ("bring your
+  # own"), which makes orchestrator.yaml's own ShouldProvisionMSK condition
+  # false (MSKClusterArn non-empty) and skip its internal MSKStack entirely.
+  # ===========================================================================
+  MSKStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: EnableFetcherCond
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}msk.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt FoundationStack.Outputs.VpcId
+        VpcCIDR: !Ref VpcCIDR
+        PrivateSubnetIds: !GetAtt FoundationStack.Outputs.PrivateSubnetIds
+        InstanceType: !Ref MSKInstanceType
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-msk-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ===========================================================================
   # APPLICATION STACK (platform-orchestrator + module catalog) — nests the
   # existing orchestrator.yaml unmodified; every endpoint/secret/cluster
   # parameter it would otherwise ask a human for is wired here from
-  # FoundationStack/InfrastructureStack outputs instead.
+  # FoundationStack/InfrastructureStack/MSKStack outputs instead.
   # ===========================================================================
   ApplicationStack:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3ProductKeyPrefix}orchestrator.yaml"
       Parameters:
+        MPS3BucketName: !Ref MPS3BucketName
+        MPS3BucketRegion: !Ref MPS3BucketRegion
+        MPS3KeyPrefix: !Ref MPS3KeyPrefix
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
@@ -1343,10 +1410,17 @@ Resources:
         ElastiCacheSecretArn: !GetAtt InfrastructureStack.Outputs.ElastiCacheSecretArn
         AmazonMQEndpoint: !GetAtt InfrastructureStack.Outputs.AmazonMQEndpoint
         AmazonMQSecretArn: !GetAtt InfrastructureStack.Outputs.AmazonMQSecretArn
-        # MSK is not part of this composition — infrastructure.yaml does not
-        # provision it (no MSK template in this repo's midaz pattern yet).
-        # orchestrator.yaml's own defaults ("") apply, which disable
-        # streaming consumers.
+        # MSK is provisioned by the sibling MSKStack above (in parallel with
+        # InfrastructureStack — see the comment on that resource), not by
+        # orchestrator.yaml itself. Passing an already-resolved MSKClusterArn/
+        # MSKSecretArn/MSKKMSKeyArn here makes orchestrator.yaml's own
+        # ShouldProvisionMSK condition false (non-empty MSKClusterArn), so it
+        # treats this as "bring your own" and skips its internal MSKStack
+        # entirely. Empty strings when Fetcher is disabled (MSKStack itself is
+        # Condition: EnableFetcherCond, so its Outputs don't exist then).
+        MSKClusterArn: !If [EnableFetcherCond, !GetAtt MSKStack.Outputs.ClusterArn, ""]
+        MSKSecretArn: !If [EnableFetcherCond, !GetAtt MSKStack.Outputs.ScramSecretArn, ""]
+        MSKKMSKeyArn: !If [EnableFetcherCond, !GetAtt MSKStack.Outputs.KMSKeyArn, ""]
         RDSKMSKeyArn: !GetAtt InfrastructureStack.Outputs.RDSKMSKeyArn
         DocumentDBKMSKeyArn: !GetAtt InfrastructureStack.Outputs.DocumentDBKMSKeyArn
         ElastiCacheKMSKeyArn: !GetAtt InfrastructureStack.Outputs.ElastiCacheKMSKeyArn
