@@ -69,7 +69,6 @@ Metadata:
           - AccessManagerChartVersion
           - AuthorizerClientId
           - AuthorizerClientSecret
-          - AccessManagerOrganizationIds
           - AccessManagerLicenseKey
           - EnableAccessManagerIdentityIngress
           - AccessManagerIdentityIngressHostname
@@ -234,8 +233,6 @@ Metadata:
         default: "Authorizer Client ID"
       AuthorizerClientSecret:
         default: "Authorizer Client Secret"
-      AccessManagerOrganizationIds:
-        default: "Organization IDs (optional)"
       LicenseUseDevGateway:
         default: "Use Dev License Gateway"
       AccessManagerLicenseKey:
@@ -761,17 +758,6 @@ Parameters:
     Default: ""
     NoEcho: true
     Description: "Lerian license key for the BR Bank Transfer plugin. Each licensed plugin has its own key."
-  AccessManagerOrganizationIds:
-    Type: String
-    # NOT actually optional despite the old description below — confirmed
-    # live: plugin-access-manager-auth panics on boot ("Invalid
-    # configuration: at least one organization ID is required" -> "panic:
-    # LicenseClient is nil, cannot create middleware") when this is empty.
-    # Defaulted to a placeholder UUID so the one-click path doesn't crash
-    # out of the box; override with a real organization ID for anything
-    # beyond a smoke test.
-    Default: "11111111-1111-1111-1111-111111111111"
-    Description: "Comma-separated organization IDs for the Access Manager. NOT optional in practice — auth panics on boot without at least one (see comment above); defaulted to a placeholder UUID."
   LicenseUseDevGateway:
     Type: String
     Default: "false"
@@ -1131,7 +1117,14 @@ Resources:
           ACCESS_MANAGER_IDENTITY_INGRESS_HOSTNAME: !Ref AccessManagerIdentityIngressHostname
           ENABLE_ACCESS_MANAGER_AUTH_INGRESS: !Ref EnableAccessManagerAuthIngress
           ACCESS_MANAGER_AUTH_INGRESS_HOSTNAME: !Ref AccessManagerAuthIngressHostname
-          ACCESS_MANAGER_ORGANIZATION_IDS: !Ref AccessManagerOrganizationIds
+          # "global" — decoupled from Casdoor's own internal org name
+          # ("lerian"); confirmed live (real Ready=True deployments, both
+          # minikube and AWS) as the value that actually works. NOT a
+          # customer-facing Parameter: plugin-access-manager-auth panics on
+          # boot without at least one org ID ("LicenseClient is nil, cannot
+          # create middleware"), and there is no other valid value for this
+          # delivery model — no reason to ask the customer for it.
+          ACCESS_MANAGER_ORGANIZATION_IDS: "global"
           LICENSE_USE_DEV_GATEWAY: !Ref LicenseUseDevGateway
           # OCI registry auth (private charts)
           HELM_REGISTRY_HOST: !Ref HelmRegistryHost

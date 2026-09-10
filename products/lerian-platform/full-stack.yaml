@@ -91,7 +91,6 @@ Metadata:
           - AccessManagerChartVersion
           - AuthorizerClientId
           - AuthorizerClientSecret
-          - AccessManagerOrganizationIds
           - AccessManagerLicenseKey
           - EnableAccessManagerIdentityIngress
           - AccessManagerIdentityIngressHostname
@@ -271,8 +270,6 @@ Metadata:
         default: "Authorizer Client ID"
       AuthorizerClientSecret:
         default: "Authorizer Client Secret (shared dev default — see CHECKPOINT.md)"
-      AccessManagerOrganizationIds:
-        default: "Organization IDs (optional)"
       AccessManagerLicenseKey:
         default: "Access Manager License Key"
       EnableAccessManagerIdentityIngress:
@@ -866,15 +863,6 @@ Parameters:
       M2M secret as every other deploy. Do not expose this stack's Console/
       API endpoints to the public internet without rotating it. See
       CHECKPOINT.md.
-
-  AccessManagerOrganizationIds:
-    Type: String
-    # NOT actually optional — see orchestrator.yaml's own Parameter comment
-    # (plugin-access-manager-auth panics on boot without at least one org
-    # ID). Defaulted to a placeholder UUID so the one-click path doesn't
-    # crash out of the box.
-    Default: "11111111-1111-1111-1111-111111111111"
-    Description: "Comma-separated organization IDs for the Access Manager. NOT optional in practice — see orchestrator.yaml's own Parameter description."
 
   AccessManagerLicenseKey:
     Type: String
@@ -1555,7 +1543,6 @@ Resources:
         EnableAccessManagerAuthIngress: !Ref EnableAccessManagerAuthIngress
         AccessManagerAuthIngressHostname: !Ref AccessManagerAuthIngressHostname
         BankTransferLicenseKey: !Ref BankTransferLicenseKey
-        AccessManagerOrganizationIds: !Ref AccessManagerOrganizationIds
         LicenseUseDevGateway: !Ref LicenseUseDevGateway
         # OCI Helm registry auth
         HelmRegistryHost: !Ref HelmRegistryHost
