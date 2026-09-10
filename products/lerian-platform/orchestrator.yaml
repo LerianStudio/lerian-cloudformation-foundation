@@ -91,7 +91,6 @@ Metadata:
           - EnableFetcher
           - FetcherChartVersion
           - FetcherStorageBucketName
-          - FetcherLicenseKey
           - FetcherValuesOverride
       - Label:
           default: "Module: Product Console"
@@ -227,8 +226,6 @@ Metadata:
         default: "Use Dev License Gateway"
       AccessManagerLicenseKey:
         default: "Access Manager License Key"
-      FetcherLicenseKey:
-        default: "Fetcher License Key"
       BankTransferLicenseKey:
         default: "BR Bank Transfer License Key"
       HelmRegistryHost:
@@ -704,11 +701,6 @@ Parameters:
     Default: ""
     NoEcho: true
     Description: "Lerian license key for the Access Manager (auth + identity). Required for licensed operation."
-  FetcherLicenseKey:
-    Type: String
-    Default: ""
-    NoEcho: true
-    Description: "Lerian license key for Fetcher. Each licensed plugin has its own key."
   BankTransferLicenseKey:
     Type: String
     Default: ""
@@ -1020,7 +1012,6 @@ Resources:
           AUTHORIZER_CLIENT_ID: !Ref AuthorizerClientId
           AUTHORIZER_CLIENT_SECRET: !Ref AuthorizerClientSecret
           ACCESS_MANAGER_LICENSE_KEY: !Ref AccessManagerLicenseKey
-          FETCHER_LICENSE_KEY: !Ref FetcherLicenseKey
           BANK_TRANSFER_LICENSE_KEY: !Ref BankTransferLicenseKey
           ACCESS_MANAGER_ORGANIZATION_IDS: !Ref AccessManagerOrganizationIds
           LICENSE_USE_DEV_GATEWAY: !Ref LicenseUseDevGateway
@@ -1136,7 +1127,7 @@ Resources:
               "ledger": {"enable": "ENABLE_LEDGER", "version_env": "LEDGER_VERSION", "license_env": None,
                          "bucket_env": None, "override_env": "LEDGER_VALUES_OVERRIDE", "namespace": "midaz"},
               "fetcher": {"enable": "ENABLE_FETCHER", "version_env": "FETCHER_VERSION",
-                          "license_env": "FETCHER_LICENSE_KEY", "bucket_env": "FETCHER_S3_BUCKET",
+                          "license_env": None, "bucket_env": "FETCHER_S3_BUCKET",
                           "override_env": "FETCHER_VALUES_OVERRIDE", "namespace": "fetcher"},
               "reporter": {"enable": "ENABLE_REPORTER", "version_env": "REPORTER_VERSION", "license_env": None,
                            "bucket_env": "REPORTER_S3_BUCKET", "override_env": "REPORTER_VALUES_OVERRIDE",

@@ -106,7 +106,6 @@ Metadata:
         Parameters:
           - EnableFetcher
           - FetcherChartVersion
-          - FetcherLicenseKey
           - FetcherValuesOverride
           - MSKInstanceType
       - Label:
@@ -278,8 +277,6 @@ Metadata:
         default: "Deploy Fetcher"
       FetcherChartVersion:
         default: "Fetcher Chart Version"
-      FetcherLicenseKey:
-        default: "Fetcher License Key"
       FetcherValuesOverride:
         default: "Fetcher Values Override (advanced)"
       # Module: Product Console
@@ -919,12 +916,6 @@ Parameters:
     Default: "3.1.0"
     Description: fetcher-helm chart version
 
-  FetcherLicenseKey:
-    Type: String
-    Default: ""
-    NoEcho: true
-    Description: "Lerian license key for Fetcher. Each licensed plugin has its own key."
-
   FetcherValuesOverride:
     Type: String
     Default: ""
@@ -1452,7 +1443,6 @@ Resources:
         AuthorizerClientId: !Ref AuthorizerClientId
         AuthorizerClientSecret: !Ref AuthorizerClientSecret
         AccessManagerLicenseKey: !Ref AccessManagerLicenseKey
-        FetcherLicenseKey: !Ref FetcherLicenseKey
         BankTransferLicenseKey: !Ref BankTransferLicenseKey
         AccessManagerOrganizationIds: !Ref AccessManagerOrganizationIds
         LicenseUseDevGateway: !Ref LicenseUseDevGateway
