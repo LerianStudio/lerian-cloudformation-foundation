@@ -373,7 +373,19 @@ Parameters:
   MPS3BucketName:
     Type: String
     Description: "S3 bucket name containing the CloudFormation templates (managed by AWS Marketplace)"
-    Default: "lerian-cloudformation-templates"
+    # TEMPORARY — internal testing only, on branch feat/lerian-platform-cfn-fixes.
+    # Default points at the scratch bucket (lerian-cfn-test-524121347244-sae1)
+    # holding this branch's templates, NOT the real Marketplace bucket — every
+    # nested stack (Foundation/Infrastructure/MSK/Application) resolves its
+    # own TemplateURL from THIS parameter's value, independent of whichever
+    # bucket full-stack.yaml itself was loaded from. Confirmed live: a
+    # create-stack that loaded full-stack.yaml from the scratch bucket but
+    # left this Default untouched still fetched orchestrator.yaml from the
+    # REAL bucket's much-older, pre-PR#62 copy for ApplicationStack — every
+    # new Parameter this branch adds "does not exist in the template" there.
+    # MUST be reverted to "lerian-cloudformation-templates" before/when
+    # merging to main.
+    Default: "lerian-cfn-test-524121347244-sae1"
 
   MPS3BucketRegion:
     Type: String
