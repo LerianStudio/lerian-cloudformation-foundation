@@ -668,7 +668,7 @@ Parameters:
     # wins on a full-stack create-stack — confirmed live: bumping ONLY this
     # copy left a real create-stack silently running the OLD pinned build for
     # hours, no error at all. Keep both defaults identical.
-    Default: "0.1.20-e2e.e6019bc"
+    Default: "0.1.29-e2e.83bb248-multiarch"
     Description: >-
       platform-orchestrator chart version. Bumped from 0.1.4-e2e.ccb4346 after
       a TLS code-path audit found two real gaps ahead of a live create-stack
