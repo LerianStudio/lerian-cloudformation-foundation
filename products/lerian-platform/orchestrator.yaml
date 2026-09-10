@@ -63,7 +63,7 @@ Metadata:
         Parameters:
           - LicenseUseDevGateway
       - Label:
-          default: "Module: Access Manager (Casdoor)"
+          default: "Module: Plugin Access Manager"
         Parameters:
           - EnableAccessManager
           - AccessManagerChartVersion

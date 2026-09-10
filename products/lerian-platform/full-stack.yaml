@@ -17,13 +17,18 @@ Description: |
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
-      - Label:
-          default: "AWS Marketplace Configuration"
-        Parameters:
-          - MPS3BucketName
-          - MPS3BucketRegion
-          - MPS3KeyPrefix
-          - MPS3ProductKeyPrefix
+      # MPS3BucketName/MPS3BucketRegion/MPS3KeyPrefix/MPS3ProductKeyPrefix are
+      # deliberately NOT in a ParameterGroup here — they're internal plumbing
+      # (which S3 bucket OUR OWN nested templates live in), never something a
+      # customer should need to touch. A raw CFN template has no native
+      # "hide this parameter" flag; leaving them ungrouped is the closest a
+      # template alone can get (Console renders them in a generic, unlabeled
+      # area instead of a nice named section). They stay real Parameters
+      # (not hardcoded literals) so internal/dev testing can still point them
+      # at a scratch bucket. True hiding for the real customer-facing
+      # Marketplace listing happens in the AWS Marketplace Management
+      # Portal's own fulfillment/parameter-lock configuration for this
+      # product, not in this template.
       - Label:
           default: "General Configuration"
         Parameters:
@@ -80,7 +85,7 @@ Metadata:
         Parameters:
           - LicenseUseDevGateway
       - Label:
-          default: "Module: Access Manager (Casdoor)"
+          default: "Module: Plugin Access Manager"
         Parameters:
           - EnableAccessManager
           - AccessManagerChartVersion
