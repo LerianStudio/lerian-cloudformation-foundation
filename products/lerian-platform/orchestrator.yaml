@@ -80,7 +80,6 @@ Metadata:
         Parameters:
           - DomainName
           - IngressClassName
-          - IngressScheme
           - IngressCertificateArn
       - Label:
           default: "Module: Ledger (Midaz)"
@@ -260,8 +259,6 @@ Metadata:
         default: "Base Domain (for Ingress hostname auto-derivation)"
       IngressClassName:
         default: "Ingress Class Name"
-      IngressScheme:
-        default: "ALB Scheme"
       IngressCertificateArn:
         default: "ACM Certificate ARN"
       EnableConsoleIngress:
@@ -812,9 +809,11 @@ Parameters:
   # reporter-helm/fetcher-helm — verified against the real charts, not
   # guessed) renders its OWN Ingress resource from an `ingress:` block in its
   # valuesOverride; there is no CFN/K8s-level Ingress resource created by
-  # this Lambda or the operator directly. IngressClassName/IngressScheme/
-  # IngressCertificateArn are SHARED across every enabled module's ingress
-  # (one ALB, via a shared alb.ingress.kubernetes.io/group.name annotation
+  # this Lambda or the operator directly. IngressClassName/IngressCertificateArn
+  # are SHARED across every enabled module's ingress (one ALB, via a shared
+  # alb.ingress.kubernetes.io/group.name annotation), and the ALB scheme is
+  # ALWAYS "internal" — no module in this catalog is meant to be reachable
+  # from the public internet
   # the Lambda derives from ProjectName) — scheme and certificate ARN are
   # ALB-controller/annotation concerns, not per-chart values keys, confirmed
   # against all 4 charts (none has a dedicated values key for either; both
@@ -837,11 +836,6 @@ Parameters:
     Default: "alb"
     Description: "IngressClass name (the AWS Load Balancer Controller's default is \"alb\")."
 
-  IngressScheme:
-    Type: String
-    Default: "internet-facing"
-    AllowedValues: ["internal", "internet-facing"]
-    Description: "ALB scheme, applied via the alb.ingress.kubernetes.io/scheme annotation to every enabled module's Ingress."
 
   IngressCertificateArn:
     Type: String
@@ -1166,7 +1160,6 @@ Resources:
           NEXTAUTH_URL: !Ref NextAuthUrl
           DOMAIN_NAME: !Ref DomainName
           INGRESS_CLASS_NAME: !Ref IngressClassName
-          INGRESS_SCHEME: !Ref IngressScheme
           INGRESS_CERTIFICATE_ARN: !Ref IngressCertificateArn
           ENABLE_CONSOLE_INGRESS: !Ref EnableConsoleIngress
           CONSOLE_INGRESS_HOSTNAME: !Ref ConsoleIngressHostname
@@ -1782,7 +1775,9 @@ Resources:
               return f"{prefix}.{domain}" if domain else ""
 
           def _alb_ingress_block(hostname):
-              scheme = os.environ.get('INGRESS_SCHEME', 'internet-facing')
+              # ALWAYS internal — see the matching comment in the generic
+              # ingress loop above. Not a customer-facing choice.
+              scheme = "internal"
               cert_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
               group_name = f"{os.environ.get('PROJECT_NAME', 'lerian-platform')}-alb"
               annotations = {
@@ -1889,7 +1884,13 @@ Resources:
                               m.get('ingress_prefix', app),
                               os.environ.get(m.get('ingress_hostname_env', ''), ''))
                           class_name = os.environ.get('INGRESS_CLASS_NAME', 'alb')
-                          scheme = os.environ.get('INGRESS_SCHEME', 'internet-facing')
+                          # ALWAYS internal — no module in this catalog is
+                          # meant to be reachable from the public internet
+                          # (Console/Access Manager/Ledger/Reporter/Fetcher
+                          # are all internal-only by design here; access is
+                          # via VPN/port-forward/internal ALB, never a public
+                          # ALB). Not a customer-facing choice.
+                          scheme = "internal"
                           cert_arn = os.environ.get('INGRESS_CERTIFICATE_ARN', '')
                           # Shared group.name so every enabled module's Ingress
                           # consolidates onto ONE ALB (matches EnableALBController's
@@ -2142,7 +2143,6 @@ Resources:
             - !Ref NextAuthUrl
             - !Ref DomainName
             - !Ref IngressClassName
-            - !Ref IngressScheme
             - !Ref IngressCertificateArn
             - !Ref EnableConsoleIngress
             - !Ref ConsoleIngressHostname

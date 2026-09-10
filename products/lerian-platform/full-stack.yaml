@@ -101,7 +101,6 @@ Metadata:
           default: "Ingress (Shared ALB Settings)"
         Parameters:
           - IngressClassName
-          - IngressScheme
           - IngressCertificateArn
       - Label:
           default: "Module: Ledger (Midaz)"
@@ -312,8 +311,6 @@ Metadata:
         default: "Console Public URL"
       IngressClassName:
         default: "Ingress Class Name"
-      IngressScheme:
-        default: "ALB Scheme"
       IngressCertificateArn:
         default: "ACM Certificate ARN"
       EnableConsoleIngress:
@@ -1017,11 +1014,6 @@ Parameters:
       IngressClass name (the AWS Load Balancer Controller's default is
       "alb"). Requires "Enable ALB Controller" above.
 
-  IngressScheme:
-    Type: String
-    Default: "internet-facing"
-    AllowedValues: ["internal", "internet-facing"]
-    Description: "ALB scheme, applied to every enabled module's Ingress."
 
   IngressCertificateArn:
     Type: String
@@ -1552,7 +1544,6 @@ Resources:
         NextAuthUrl: !Ref NextAuthUrl
         DomainName: !Ref DomainName
         IngressClassName: !Ref IngressClassName
-        IngressScheme: !Ref IngressScheme
         IngressCertificateArn: !Ref IngressCertificateArn
         EnableConsoleIngress: !Ref EnableConsoleIngress
         ConsoleIngressHostname: !Ref ConsoleIngressHostname
