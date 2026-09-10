@@ -7,8 +7,8 @@ Bank Transfer — that a bank or fintech runs as their own core, in their own
 AWS account (BYOC). This directory deploys it on AWS with a single
 CloudFormation stack: click **Launch Stack**, fill in a handful of
 parameters, and end up with a running platform — VPC, EKS, the managed data
-layer (RDS/DocumentDB/ElastiCache/AmazonMQ), and every module you enabled,
-all reconciled and healthy.
+layer (RDS/DocumentDB/ElastiCache/AmazonMQ, plus MSK when Fetcher is
+enabled), and every module you enabled, all reconciled and healthy.
 
 Under the hood, the stack installs the `platform-orchestrator` Kubernetes
 controller onto the EKS cluster and hands it module lifecycle declaratively
@@ -19,99 +19,47 @@ Ledger module** (midaz-helm v9.1.0/helm#1926 folded it directly into the
 same chart Ledger installs) rather than as its own catalog entry — there is
 no separate `EnableTracer` parameter; enabling Ledger enables Tracer too.
 
-Validated live, end-to-end, against real AWS infrastructure: every module
-below except `fees`/`pix_indirect_btg` (see "Modules not yet supported")
-reaches `Platform.status.Ready=True` together in a single run, with zero
-manual intervention after clicking Launch. See [`CHECKPOINT.md`](./CHECKPOINT.md)
-for the detailed validation log and the current backlog toward a full AWS
-Marketplace listing (ECR migration, admission webhook, CI/CD for the
-operator image/chart).
+Validated live, end-to-end, against real AWS infrastructure: `ledger`
+(+`tracer`), `access_manager`, `console`, `bank_transfer`, `reporter`, and
+`fetcher` reach `Platform.status.Ready=True` together in a single run, with
+zero manual intervention after clicking Launch. See
+[`CHECKPOINT.md`](./CHECKPOINT.md) for the detailed validation log and the
+current backlog toward a full AWS Marketplace listing.
 
-There are two supported deployment paths:
+There are two deployment paths:
 
-- **`full-stack.yaml`** — **Full Stack**: a single stack that provisions VPC,
-  EKS, RDS, DocumentDB, ElastiCache, and AmazonMQ (nesting
-  `templates/foundation.yaml` and `products/midaz/infrastructure.yaml`),
-  then nests `orchestrator.yaml` as the Application layer and wires every
-  endpoint/secret-ARN/cluster-name parameter automatically via nested-stack
-  outputs. If `EnableReporter`/`EnableFetcher` is `true`, it also provisions
-  that module's S3 bucket and a shared IRSA role (`ObjectStorageRole`) for
-  it — `orchestrator.yaml` itself does not provision object storage, so
-  without this, enabling either module crashes it on "bucket name is
-  required." Pick a region, name the project, click Launch — nothing to
-  pre-provision.
+- **`full-stack.yaml`** — **Full Stack**: a single stack that provisions
+  VPC, EKS, RDS, DocumentDB, ElastiCache, AmazonMQ, and (when Fetcher is
+  enabled) MSK, then installs `orchestrator.yaml` as the Application layer
+  and wires every endpoint/secret-ARN/cluster-name parameter automatically
+  via nested-stack outputs. Pick a region, name the project, click Launch —
+  nothing to pre-provision.
 - **`orchestrator.yaml`** — **Application only**: installs just the
   operator onto an **existing** EKS cluster and hands it module lifecycle.
-  Requires you to already have RDS/DocumentDB/ElastiCache/AmazonMQ (and
-  their Secrets Manager ARNs) on hand — see Prerequisites below.
+  Requires you to already have the data layer (see Prerequisites).
 
 `app-stack.yaml`, `application.yaml`, and `helm.yaml` are earlier iterations
 kept in this directory for reference — they are **not** the deployment path
-described here; do not launch them expecting this behavior. (The previous
-`full-stack.yaml` occupying this name was one of those legacy iterations;
-it has been replaced by the nested-stack template described above.)
+described here; do not launch them expecting this behavior.
 
 ## Prerequisites
 
-**Full Stack (`full-stack.yaml`)** — none. It provisions the EKS cluster and
-the entire data layer itself; you only need an AWS account and the
-`sa-east-1` region (see below).
+| | Full Stack (`full-stack.yaml`) | Application only (`orchestrator.yaml`) |
+|---|---|---|
+| AWS account + region | `sa-east-1` only (see below) | `sa-east-1` only (see below) |
+| VPC / EKS | Provisioned for you | Existing EKS cluster required |
+| RDS / DocumentDB / ElastiCache / AmazonMQ | Provisioned for you | Existing, with endpoints + Secrets Manager ARNs on hand |
+| MSK (Fetcher only) | Auto-provisioned when `EnableFetcher=true` | Bring your own (`MSKClusterArn`) or auto-provision (`MSKVpcId`/`MSKVpcCIDR`/`MSKPrivateSubnetIds`) |
 
-**Application only (`orchestrator.yaml`)** — installs the operator and hands
-it module lifecycle, but does **not** provision the data layer. Before
-launching it you need an existing EKS cluster plus (depending on which
-modules you enable) RDS PostgreSQL, DocumentDB, ElastiCache (Valkey/Redis),
-AmazonMQ (RabbitMQ), and MSK, with their endpoints/Secrets Manager ARNs/KMS
-key ARNs on hand to pass in as stack parameters. Midaz's own
-`foundation.yaml` + `infrastructure.yaml` templates in this repo provision
-that same infra shape and are a reasonable way to stand it up first if you
-don't already have it — or just launch `full-stack.yaml` instead, which does
-this composition for you.
+**Region**: `sa-east-1` only for now — the bootstrap Lambda embeds a
+region-specific CA bundle for RDS/DocumentDB TLS verification. Deploying
+elsewhere fails TLS verification against the data layer; see
+[`CHECKPOINT.md`](./CHECKPOINT.md) for the multi-region tracking item.
 
-## ⚠️ Region: `sa-east-1` only
-
-The bootstrap Lambda embeds a fixed CA bundle (`DEFAULT_CA_BUNDLE_B64`) for
-RDS/DocumentDB TLS verification, built from the **`sa-east-1`** RDS
-truststore. There is no multi-region override that fits within a CFN
-Parameter's 4096-character limit yet. **Launch this stack only in the
-`sa-east-1` console region.** Deploying elsewhere will fail TLS verification
-against the data layer. Multi-region CA bundling is a known post-v0 gap, not
-silently supported.
-
-## ⚠️ Shared dev-only `AuthorizerClientSecret`
-
-`AuthorizerClientSecret` defaults to a **hardcoded value shared across every
-deploy** (`6add4bc64f394456a77fa85708ad8c9b67e39e4c`), matching the seeded
-Casdoor `init_data.json`. Every dev stack that doesn't override **both** this
-parameter **and** ship a custom `init_data.json` gets the identical M2M
-authorizer secret as every other dev deploy of this template. This is
-acceptable for an internal/dev "kick the tires" deploy, but:
-
-- **Do not** expose this deployment's Console/API endpoints to the public
-  internet without rotating this secret and providing a custom
-  `init_data.json`.
-- The real fix (generate a fresh per-deploy secret + `init_data.json` at
-  bootstrap time) is tracked as a known limitation in `CHECKPOINT.md`, not
-  yet implemented.
-
-## Modules NOT yet supported — leave disabled
-
-- **`fees`** — not exposed as a parameter in `orchestrator.yaml`/
-  `full-stack.yaml` at all (there is no `EnableFees`/`FeesChartVersion`/
-  `FeesLicenseKey` — removed; it was never enabled/validated live through
-  this template, and every other module tested so far surfaced at least
-  one real bug before it worked). If it's ever brought into scope, treat
-  that as adding it back, not un-hiding something already there.
-- **`pix_indirect_btg`** — not exposed as a parameter in `orchestrator.yaml`
-  at all (there is no `EnablePixIndirectBtg`), so it cannot currently be
-  enabled through this template. It also has a known, unfixed gap even in
-  isolated testing: its own M2M self-identity (`PLUGIN_PIX_BTG`) is never
-  registered by the operator's `m2m-app` bootstrap provider, so its inbound
-  auth would get an empty credential if it were enabled.
-
-Everything else in the catalog (`ledger`, `tracer`, `access_manager`,
-`console`, `bank_transfer`, `reporter`, `fetcher`) has reached
-`Platform.status.Ready=True` together in one live run.
+If you don't already have the data layer for **Application only**,
+`foundation.yaml` + `products/midaz/infrastructure.yaml` in this repo
+provision that same shape — or just launch `full-stack.yaml` instead, which
+does this composition for you.
 
 ## Quick Start — One-Click Deploy
 
@@ -139,28 +87,27 @@ Real (production) links, for restoring after merge:
 
 [img]: https://s3.amazonaws.com/cloudformation-examples/cloudformation-launch-stack.png
 
-The console groups parameters into labeled sections; the 10 that have no
-default are marked **`(Required)`** right in the parameter label so they're
-obvious in the form, not just in this doc:
+## Required parameters
+
+**`full-stack.yaml` (Full Stack)** — only **3** parameters have no default:
+`RDSMasterUsername`, `DocumentDBMasterUsername`, `AmazonMQAdminUsername`.
+Everything else (VPC, EKS, module toggles, chart versions) has a working
+default — pick a `ProjectName`, set those 3 usernames, and Launch.
+
+**`orchestrator.yaml` (Application only)** — **10** parameters have no
+default, since it doesn't provision its own infrastructure:
 `ProjectName`, `EnvironmentName`, `ClusterName`, `RDSEndpoint`,
 `RDSSecretArn`, `DocumentDBEndpoint`, `DocumentDBSecretArn`,
-`ElastiCacheEndpoint`, `AmazonMQEndpoint`, `AmazonMQSecretArn` — all of
-them existing data-layer endpoints/secret ARNs except the first three (see
-Prerequisites). Everything else has a working default.
-`OrchestratorChartVersion` and the manager image are already pinned to a
-live-validated build — see the parameter's inline description in
-`orchestrator.yaml` for exactly which commit and what was validated on it.
+`ElastiCacheEndpoint`, `AmazonMQEndpoint`, `AmazonMQSecretArn` — the
+Console groups them into labeled sections and marks each **`(Required)`**
+directly in its label.
 
-`full-stack.yaml` (Full Stack) drops that list to just **3** required
-parameters — `RDSMasterUsername`, `DocumentDBMasterUsername`,
-`AmazonMQAdminUsername` — since it provisions `ProjectName`/
-`EnvironmentName`/`ClusterName` and every data-layer endpoint/secret ARN
-itself and wires them internally via nested-stack outputs instead of asking
-for them. Its console form groups parameters per module (Access Manager,
-Ledger, Reporter, Fetcher, Console, Bank Transfer) rather than by parameter
-type, so each module's enable flag, chart version, license key, and any
-module-specific fields sit together in one collapsible section — Tracer has
-no group of its own here since it ships bundled into Ledger's.
+Access Manager needs a real Lerian license key (`AccessManagerLicenseKey`)
+to operate — see `docs.lerian.studio` for how to obtain one.
+`AuthorizerClientId`/`AuthorizerClientSecret` default to Lerian's own
+seeded dev values; override both before exposing this deployment's
+endpoints beyond your own testing (see `CHECKPOINT.md` for the per-deploy
+secret rotation tracking item).
 
 ### CLI equivalent
 
@@ -168,23 +115,19 @@ no group of its own here since it ships bundled into Ledger's.
 aws cloudformation create-stack \
   --region sa-east-1 \
   --stack-name lerian-platform \
-  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/orchestrator.yaml \
+  --template-url https://lerian-cloudformation-templates.s3.sa-east-1.amazonaws.com/releases/latest/products/lerian-platform/full-stack.yaml \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameters \
     ParameterKey=ProjectName,ParameterValue=lerian-platform \
     ParameterKey=EnvironmentName,ParameterValue=dev \
-    ParameterKey=ClusterName,ParameterValue=<your-eks-cluster-name> \
-    ParameterKey=RDSEndpoint,ParameterValue=<...> \
-    ParameterKey=RDSSecretArn,ParameterValue=<...> \
-    ParameterKey=DocumentDBEndpoint,ParameterValue=<...> \
-    ParameterKey=DocumentDBSecretArn,ParameterValue=<...> \
-    ParameterKey=ElastiCacheEndpoint,ParameterValue=<...> \
-    ParameterKey=AmazonMQEndpoint,ParameterValue=<...> \
-    ParameterKey=AmazonMQSecretArn,ParameterValue=<...>
+    ParameterKey=RDSMasterUsername,ParameterValue=midaz_admin \
+    ParameterKey=DocumentDBMasterUsername,ParameterValue=midaz_admin \
+    ParameterKey=AmazonMQAdminUsername,ParameterValue=midaz_admin \
+    ParameterKey=AccessManagerLicenseKey,ParameterValue=<your-license-key>
     # ... remaining optional params per your enabled module set
 ```
 
-## Ingress (Custom Domains)
+## Enabling Ingress (Custom Domains)
 
 Each of these modules can get its own AWS ALB Ingress with a custom
 hostname: **Console**, **Ledger**, **Reporter**, **Fetcher**, **Bank
@@ -214,7 +157,7 @@ via a common `alb.ingress.kubernetes.io/group.name` annotation) instead of
 being repeated per module:
 
 - `IngressClassName` — default `alb` (the AWS Load Balancer Controller's
-  own default). Requires `EnableALBController: true`.
+  own default). Requires `EnableALBController: true` (the default).
 - `IngressCertificateArn` — an ACM certificate ARN for HTTPS. Leave empty
   for HTTP-only.
 
@@ -224,15 +167,13 @@ typing its own hostname gets `<module>.<DomainName>` automatically —
 `console.client.net`, `ledger.client.net`, `auth.client.net`,
 `identity.client.net`, etc. Setting a hostname explicitly always overrides
 the derivation. Leaving `DomainName` empty means every enabled module's
-hostname must be typed out by hand.
+hostname must be typed out by hand. `DomainName` also drives a private
+Route53 hosted zone (VPC-internal only — it does not touch any public DNS
+you may already own for that domain).
 
 ## Known limitations
 
-See [`CHECKPOINT.md`](./CHECKPOINT.md) for the full, current list (no
-Marketplace-grade CI/CD, no admission webhook, no Kubernetes Events from the
-operator, fixed 10s reconcile requeue, plaintext `authorizer.clientSecret` in
-the `Platform` CR, ledger's Postgres password mirrored from the RDS master
-password instead of a dedicated role, `bank_transfer` shipping
-`JD_SANDBOX_MODE=true`/`ENV_NAME=development` by default, expensive default
-sizing with no small/trial profile, and the `RDSReplicaEndpoint` output
-missing an `IsShared` guard on the `dedicated` topology path).
+See [`CHECKPOINT.md`](./CHECKPOINT.md) for the full, current list and the
+path toward a full AWS Marketplace listing (ECR migration, admission
+webhook, CI/CD for the operator image/chart, per-deploy secret rotation,
+and a handful of smaller tracked items).
