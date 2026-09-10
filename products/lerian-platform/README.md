@@ -1,20 +1,31 @@
 # Lerian Platform on AWS
 
-[Lerian Platform](https://docs.lerian.studio) deploys the `platform-orchestrator`
-Kubernetes controller onto an existing EKS cluster, then hands module lifecycle
-(Ledger, Access Manager, Tracer, Console, Reporter, Fetcher, Bank Transfer)
-to it declaratively via two CRDs (`EnvironmentContract` + `Platform`) — the
-operator reconciles continuously as a long-running Deployment instead of the
-Lambda looping a `helm install` per app. **Tracer now ships bundled into the
+[Lerian Platform](https://docs.lerian.studio) is a complete, modular core
+banking platform: Midaz (the double-entry ledger engine) plus a composable
+set of modules — Access Manager (auth/identity), Console, Reporter, Fetcher,
+Bank Transfer — that a bank or fintech runs as their own core, in their own
+AWS account (BYOC). This directory deploys it on AWS with a single
+CloudFormation stack: click **Launch Stack**, fill in a handful of
+parameters, and end up with a running platform — VPC, EKS, the managed data
+layer (RDS/DocumentDB/ElastiCache/AmazonMQ), and every module you enabled,
+all reconciled and healthy.
+
+Under the hood, the stack installs the `platform-orchestrator` Kubernetes
+controller onto the EKS cluster and hands it module lifecycle declaratively
+via two CRDs (`EnvironmentContract` + `Platform`) — the operator reconciles
+continuously as a long-running Deployment, the same delivery model used in
+Lerian's own production BYOC deployments. **Tracer ships bundled into the
 Ledger module** (midaz-helm v9.1.0/helm#1926 folded it directly into the
 same chart Ledger installs) rather than as its own catalog entry — there is
 no separate `EnableTracer` parameter; enabling Ledger enables Tracer too.
 
-**Status: v0, dev-scoped, one-click.** Not yet an AWS Marketplace submission
-(no ECR migration, no admission webhook, no CI/CD pipeline for the operator
-image/chart — see [`CHECKPOINT.md`](./CHECKPOINT.md) for the full backlog).
-7 of 8 catalog modules have been validated live end-to-end against a real AWS
-sandbox account via real `create-stack`/`update-stack` calls.
+Validated live, end-to-end, against real AWS infrastructure: every module
+below except `fees`/`pix_indirect_btg` (see "Modules not yet supported")
+reaches `Platform.status.Ready=True` together in a single run, with zero
+manual intervention after clicking Launch. See [`CHECKPOINT.md`](./CHECKPOINT.md)
+for the detailed validation log and the current backlog toward a full AWS
+Marketplace listing (ECR migration, admission webhook, CI/CD for the
+operator image/chart).
 
 There are two supported deployment paths:
 
