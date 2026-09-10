@@ -93,6 +93,7 @@ Metadata:
           - GitOpsPath
           - GitOpsDeploySSHKey
           - GitOpsMode
+          - ArgoCDChartVersion
       - Label:
           default: "Ingress (Shared ALB Settings)"
         Parameters:
@@ -901,6 +902,11 @@ Parameters:
     AllowedValues: ["commit", "apply"]
     Description: "GitOps write mode. Only used when PlatformDelivery=gitops."
 
+  ArgoCDChartVersion:
+    Type: String
+    Default: "8.6.0"
+    Description: "argo-cd chart version. Only used when PlatformDelivery=gitops."
+
   # ===========================================================================
   # MODULE: ACCESS MANAGER (CASDOOR)
   # ===========================================================================
@@ -1636,6 +1642,7 @@ Resources:
         GitOpsPath: !Ref GitOpsPath
         GitOpsDeploySSHKey: !Ref GitOpsDeploySSHKey
         GitOpsMode: !Ref GitOpsMode
+        ArgoCDChartVersion: !Ref ArgoCDChartVersion
         # OCI Helm registry auth
         HelmRegistryHost: !Ref HelmRegistryHost
         HelmRegistryUser: !Ref HelmRegistryUser

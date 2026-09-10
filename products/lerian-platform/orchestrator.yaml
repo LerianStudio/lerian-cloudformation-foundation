@@ -71,6 +71,7 @@ Metadata:
           - GitOpsPath
           - GitOpsDeploySSHKey
           - GitOpsMode
+          - ArgoCDChartVersion
       - Label:
           default: "Ingress (Shared ALB Settings)"
         Parameters:
@@ -861,6 +862,15 @@ Parameters:
       them) or "apply" (operator applies directly against the cluster ArgoCD
       is also watching). Only used when PlatformDelivery=gitops.
 
+  ArgoCDChartVersion:
+    Type: String
+    Default: "8.6.0"
+    Description: >-
+      argo-cd chart version. Only used when PlatformDelivery=gitops — this
+      Lambda installs its own ArgoCD (oci://ghcr.io/argoproj/argo-helm/argo-cd)
+      into the "argocd" namespace and configures it to watch GitOpsRepoURL,
+      since nothing else in this delivery model owns that responsibility.
+
   # ---------------------------------------------------------------------------
   # OCI Helm registry auth (optional; for any PRIVATE OCI Helm charts, incl.
   # the orchestrator chart itself if it ends up private)
@@ -1243,6 +1253,7 @@ Resources:
           GITOPS_PATH: !Ref GitOpsPath
           GITOPS_DEPLOY_SSH_KEY: !Ref GitOpsDeploySSHKey
           GITOPS_MODE: !Ref GitOpsMode
+          ARGOCD_CHART_VERSION: !Ref ArgoCDChartVersion
           # OCI registry auth (private charts)
           HELM_REGISTRY_HOST: !Ref HelmRegistryHost
           HELM_REGISTRY_USER: !Ref HelmRegistryUser
@@ -1415,6 +1426,20 @@ Resources:
                           "ingress_hostname_env": "CONSOLE_INGRESS_HOSTNAME", "ingress_prefix": "console"},
           }
 
+          def delete_argocd_application_cascade(name, ns='argocd'):
+              # A raw `kubectl delete application` does NOT cascade-delete the
+              # resources ArgoCD applied from it — that only happens if the
+              # resources-finalizer.argocd.argoproj.io finalizer is present
+              # (renderArgoApplication in internal/deploy/gitops.go doesn't set
+              # one; the argocd CLI normally injects it on `--cascade`). Patch
+              # it in ourselves before deleting so gitops-backed modules get
+              # torn down for real, not just their bookkeeping Application.
+              run(['kubectl', '-n', ns, 'patch', 'application', name, '--type=merge',
+                   '-p', '{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}'],
+                  check=False)
+              run(['kubectl', '-n', ns, 'delete', 'application', name,
+                   '--ignore-not-found', '--wait=true', '--timeout=180s'], check=False)
+
           def purge_module_helm_releases():
               # On Delete, this Lambda is the ONLY installer of these module
               # releases in this delivery model — no GitOps consumes it (that's
@@ -1426,22 +1451,33 @@ Resources:
               # Confirmed live: reporter/console/ledger/tracer all failed
               # "invalid ownership metadata" against a still-there prior
               # attempt's release after nothing but a plain create-then-retry.
-              seen_ns = set()
-              for app, m in REGISTRY.items():
-                  enabled = os.environ.get(m['enable'], 'false').lower() == 'true'
-                  ns = m.get('namespace')
-                  if not enabled or not ns or ns in seen_ns:
+              #
+              # Targets EXACTLY this Platform's own releases via each
+              # ModuleRelease's status.externalRef (backend/name/namespace) —
+              # NOT a "any release named lp-* in this module's namespace" scan.
+              # That heuristic previously purged a DIFFERENT stack's live
+              # production releases sharing the same fixed per-module
+              # namespace (every module's namespace is a hardcoded catalog
+              # literal, e.g. "midaz", identical across every stack/environment
+              # that enables it) — confirmed live, see CHECKPOINT.md.
+              ns = os.environ['ORCHESTRATOR_NAMESPACE']
+              platform_release_ref = f"{os.environ['PROJECT_NAME']}-platform-release"
+              out = run(['kubectl', 'get', 'modulerelease', '-n', ns, '-o', 'json'], check=False)
+              try:
+                  items = json.loads(out or '{}').get('items', [])
+              except json.JSONDecodeError:
+                  items = []
+              for mr in items:
+                  if mr.get('spec', {}).get('platformReleaseRef') != platform_release_ref:
                       continue
-                  seen_ns.add(ns)
-                  out = run(['helm', 'list', '-n', ns, '-o', 'json'], check=False)
-                  try:
-                      releases = json.loads(out or '[]')
-                  except json.JSONDecodeError:
-                      releases = []
-                  for rel in releases:
-                      name = rel.get('name', '')
-                      if name.startswith('lp-'):
-                          run(['helm', 'uninstall', name, '-n', ns], check=False)
+                  ext = mr.get('status', {}).get('externalRef') or {}
+                  name, rel_ns, backend = ext.get('name'), ext.get('namespace'), ext.get('backend')
+                  if not name or not rel_ns:
+                      continue
+                  if backend == 'gitops':
+                      delete_argocd_application_cascade(name, rel_ns)
+                  else:
+                      run(['helm', 'uninstall', name, '-n', rel_ns], check=False)
 
           # =====================================================================
           # CloudFormation response
@@ -1681,6 +1717,68 @@ Resources:
                    '--set', 'environmentContract.markReadyForDev=false',
                    '--set', 'devContractSecrets.enabled=false',
                    '--wait', '--timeout', '10m'])
+
+          def render_argocd_repo_secret(name, ns, repo_url, ssh_key):
+              # A repository credential Secret, per ArgoCD's own convention
+              # (argocd.argoproj.io/secret-type: repository label; type/url/
+              # sshPrivateKey keys) — json.dumps() for the same embedded-quote/
+              # newline-safety reason as secret_manifest() above (ssh_key is a
+              # real multi-line PEM).
+              return (f"apiVersion: v1\nkind: Secret\n"
+                      f"metadata:\n  name: {name}\n  namespace: {ns}\n"
+                      f"  labels:\n    argocd.argoproj.io/secret-type: repository\n"
+                      f"type: Opaque\nstringData:\n"
+                      f"  type: git\n"
+                      f"  url: {json.dumps(repo_url)}\n"
+                      f"  sshPrivateKey: {json.dumps(ssh_key)}\n")
+
+          def render_argocd_root_application(name, repo_url, branch, gitops_path):
+              # "App of apps": watches GitOpsRepoURL for the files the
+              # operator's own gitops backend commits (apps/<module>/
+              # application.yaml — internal/deploy/gitops.go EnsureDesiredState)
+              # and creates each as a real child Application. AUTOMATED here
+              # (unlike the manual-sync root used for local testing) — the
+              # whole point of this parameter is a one-click, zero-manual-step
+              # bootstrap.
+              base = (gitops_path or '').strip('/') or '.'
+              lines = [
+                  "apiVersion: argoproj.io/v1alpha1", "kind: Application",
+                  "metadata:", f"  name: {name}", "  namespace: argocd",
+                  "spec:", "  project: default", "  source:",
+                  f"    repoURL: {json.dumps(repo_url)}",
+                  f"    targetRevision: {json.dumps(branch)}",
+                  f"    path: {json.dumps(base)}",
+                  "    directory:", "      recurse: true",
+                  "      include: \"apps/*/application.yaml\"",
+                  "  destination:",
+                  "    server: https://kubernetes.default.svc",
+                  "    namespace: argocd",
+                  "  syncPolicy:", "    automated:", "      prune: true",
+                  "      selfHeal: true", "    syncOptions:",
+                  "      - CreateNamespace=true",
+              ]
+              return "\n".join(lines) + "\n"
+
+          def setup_gitops_argocd():
+              # Only this Lambda's own concern when PlatformDelivery=gitops —
+              # nothing else in this delivery model installs/configures ArgoCD.
+              # Idempotent (helm upgrade --install + kubectl apply), safe to
+              # call on every Create/Update.
+              if os.environ.get('PLATFORM_DELIVERY', 'helm') != 'gitops':
+                  return
+              argocd_ns = 'argocd'
+              ensure_ns(argocd_ns)
+              version = os.environ.get('ARGOCD_CHART_VERSION', '8.6.0')
+              run(['helm', 'upgrade', '--install', 'argocd',
+                   'oci://ghcr.io/argoproj/argo-helm/argo-cd',
+                   '--version', version, '--namespace', argocd_ns,
+                   '--wait', '--timeout', '5m'])
+              repo_url = os.environ.get('GITOPS_REPO_URL', '')
+              ssh_key = get_gitops_deploy_key()
+              branch = os.environ.get('GITOPS_BRANCH', 'main')
+              gitops_path = os.environ.get('GITOPS_PATH', '')
+              kubectl_apply(render_argocd_repo_secret('gitops-repo-creds', argocd_ns, repo_url, ssh_key))
+              kubectl_apply(render_argocd_root_application('platform-gitops-root', repo_url, branch, gitops_path))
 
           # =====================================================================
           # Step 2 — resolve each configured Secrets Manager ARN and write a
@@ -2228,6 +2326,12 @@ Resources:
                       run(['kubectl', '-n', ns, 'delete', 'environmentcontract', contract_name,
                            '--ignore-not-found', '--wait=true', '--timeout=60s'], check=False)
                       run(['helm', 'uninstall', 'platform-orchestrator', '-n', ns], check=False)
+                      if os.environ.get('PLATFORM_DELIVERY', 'helm') == 'gitops':
+                          # We installed it (setup_gitops_argocd()); we tear it
+                          # down. purge_module_helm_releases() above already
+                          # cascade-deleted each gitops module's Application —
+                          # this just removes the ArgoCD control plane itself.
+                          run(['helm', 'uninstall', 'argocd', '-n', 'argocd'], check=False)
                       send_response(event, context, 'SUCCESS', {
                           'Message': 'Platform/EnvironmentContract CRs deleted, module Helm releases '
                                      'purged, and platform-orchestrator uninstalled.'
@@ -2236,6 +2340,7 @@ Resources:
 
                   ensure_ns(ns)
                   install_orchestrator()
+                  setup_gitops_argocd()
 
                   refs = write_contract_secrets(ns)
                   kubectl_apply(render_environment_contract(contract_name, ns, refs))
