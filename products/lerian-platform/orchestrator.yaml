@@ -21,7 +21,7 @@ Metadata:
           - EnvironmentName
           - ClusterName
           - PlatformNamespace
-          - OperatorNamespace
+          - OrchestratorNamespace
           - PermissionsBoundaryArn
       - Label:
           default: "AWS Marketplace Parameters (only used to auto-provision MSK — see below)"
@@ -152,8 +152,8 @@ Metadata:
         default: "(Required) EKS Cluster Name"
       PlatformNamespace:
         default: "Platform Namespace"
-      OperatorNamespace:
-        default: "Operator Namespace"
+      OrchestratorNamespace:
+        default: "Orchestrator Namespace"
       PermissionsBoundaryArn:
         default: "IAM Permissions Boundary ARN"
       RDSEndpoint:
@@ -348,14 +348,16 @@ Parameters:
     Default: lerian-platform
     Description: Base namespace label for platform components (per-app namespaces are used for chart compatibility)
 
-  OperatorNamespace:
+  OrchestratorNamespace:
     Type: String
-    Default: lerian-operator
+    Default: lerian-orchestrator
     Description: >-
       Namespace the platform-orchestrator chart installs into (its own
       Deployment/ServiceAccount/RBAC), and where this template writes the
       EnvironmentContract-backing Secrets + the EnvironmentContract/Platform
-      CRs themselves. Matches the chart's own default (values.yaml).
+      CRs themselves. "Orchestrator", not "operator" — matches the chart's
+      own repo/rename convention (platform-orchestrator, not
+      platform-operator).
 
   # ---------------------------------------------------------------------------
   # Shared data connections (from the full-stack outputs)
@@ -1095,7 +1097,7 @@ Resources:
           CLUSTER_NAME: !Ref ClusterName
           PROJECT_NAME: !Ref ProjectName
           PLATFORM_NAMESPACE: !Ref PlatformNamespace
-          OPERATOR_NAMESPACE: !Ref OperatorNamespace
+          ORCHESTRATOR_NAMESPACE: !Ref OrchestratorNamespace
           # AWS_DEFAULT_REGION / AWS_REGION are injected by the Lambda runtime.
           # Data connections
           RDS_ENDPOINT: !Ref RDSEndpoint
@@ -1520,7 +1522,7 @@ Resources:
           # =====================================================================
           def install_orchestrator():
               helm_registry_login()
-              ns = os.environ['OPERATOR_NAMESPACE']
+              ns = os.environ['ORCHESTRATOR_NAMESPACE']
               ensure_ns(ns)
               repo = os.environ['ORCHESTRATOR_CHART_REPO']
               version = os.environ['ORCHESTRATOR_CHART_VERSION']
@@ -1992,7 +1994,7 @@ Resources:
               logger.info(f"Event: {json.dumps({k: v for k, v in event.items() if k != 'ResourceProperties'})}")
               try:
                   req = event['RequestType']
-                  ns = os.environ['OPERATOR_NAMESPACE']
+                  ns = os.environ['ORCHESTRATOR_NAMESPACE']
                   project = os.environ['PROJECT_NAME']
                   contract_name = f"{project}-contract"
                   platform_name = f"{project}-platform"

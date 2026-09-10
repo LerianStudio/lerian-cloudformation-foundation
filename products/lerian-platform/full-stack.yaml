@@ -149,7 +149,7 @@ Metadata:
           default: "platform-orchestrator (controller)"
         Parameters:
           - PlatformNamespace
-          - OperatorNamespace
+          - OrchestratorNamespace
           - OrchestratorChartRepo
           - OrchestratorChartVersion
       - Label:
@@ -349,8 +349,8 @@ Metadata:
       # platform-orchestrator (controller)
       PlatformNamespace:
         default: "Platform Namespace"
-      OperatorNamespace:
-        default: "Operator Namespace"
+      OrchestratorNamespace:
+        default: "Orchestrator Namespace"
       OrchestratorChartRepo:
         default: "Orchestrator Chart Repo (OCI)"
       OrchestratorChartVersion:
@@ -1122,12 +1122,12 @@ Parameters:
     Default: lerian-platform
     Description: Base namespace label for platform components (per-app namespaces are used for chart compatibility)
 
-  OperatorNamespace:
+  OrchestratorNamespace:
     Type: String
-    Default: lerian-operator
+    Default: lerian-orchestrator
     Description: >-
-      Namespace the platform-orchestrator chart installs into. Matches the
-      chart's own default (values.yaml).
+      Namespace the platform-orchestrator chart installs into. "Orchestrator",
+      not "operator" — matches the chart's own repo/rename convention.
 
   OrchestratorChartRepo:
     Type: String
@@ -1497,7 +1497,7 @@ Resources:
         EnvironmentName: !Ref EnvironmentName
         ClusterName: !GetAtt FoundationStack.Outputs.EKSClusterName
         PlatformNamespace: !Ref PlatformNamespace
-        OperatorNamespace: !Ref OperatorNamespace
+        OrchestratorNamespace: !Ref OrchestratorNamespace
         # Data layer — wired from InfrastructureStack, not asked of the human
         RDSEndpoint: !GetAtt InfrastructureStack.Outputs.RDSEndpoint
         RDSReplicaEndpoint: !If [CreateRDSReplica, !GetAtt InfrastructureStack.Outputs.RDSReplicaEndpoint, ""]
@@ -1675,4 +1675,4 @@ Outputs:
 
   CheckPlatformCommand:
     Description: Command to check the Platform CR status once the operator has reconciled
-    Value: !Sub "kubectl get platform -n ${OperatorNamespace}"
+    Value: !Sub "kubectl get platform -n ${OrchestratorNamespace}"
