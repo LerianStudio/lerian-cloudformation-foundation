@@ -15,44 +15,63 @@ Description: |
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
+      # Group order below is deliberate: CloudFormation's own parameter form
+      # has no collapsible/hide-until-expanded mechanism (a hard Console
+      # limitation, not something fixable in the template) — the closest a
+      # template alone can get is putting every field with a real, working
+      # default LAST, under "(Advanced)"-prefixed groups, so a first-time
+      # deployer only has to read/decide on what's in the first two groups.
       - Label:
-          default: "General Configuration"
+          default: "1. Required"
         Parameters:
           - ProjectName
           - EnvironmentName
           - ClusterName
+          - RDSEndpoint
+          - RDSSecretArn
+          - DocumentDBEndpoint
+          - DocumentDBSecretArn
+          - ElastiCacheEndpoint
+          - AmazonMQEndpoint
+          - AmazonMQSecretArn
+          - AccessManagerLicenseKey
+      - Label:
+          default: "2. Modules — Enable/Disable"
+        Parameters:
+          - EnableAccessManager
+          - EnableLedger
+          - EnableReporter
+          - EnableFetcher
+          - EnableConsole
+          - EnableBankTransfer
+      - Label:
+          default: "(Advanced) General Configuration"
+        Parameters:
           - PlatformNamespace
           - OrchestratorNamespace
           - PermissionsBoundaryArn
       - Label:
-          default: "AWS Marketplace Parameters (only used to auto-provision MSK — see below)"
+          default: "(Advanced) AWS Marketplace Parameters (only used to auto-provision MSK — see below)"
         Parameters:
           - MPS3BucketName
           - MPS3BucketRegion
           - MPS3KeyPrefix
       - Label:
-          default: "Data Layer — Endpoints & Secrets"
+          default: "(Advanced) Data Layer — Endpoints & Secrets"
         Parameters:
-          - RDSEndpoint
           - RDSReplicaEndpoint
-          - RDSSecretArn
-          - DocumentDBEndpoint
-          - DocumentDBSecretArn
-          - ElastiCacheEndpoint
           - ElastiCacheSecretArn
-          - AmazonMQEndpoint
-          - AmazonMQSecretArn
           - MSKClusterArn
           - MSKSecretArn
       - Label:
-          default: "MSK Auto-Provisioning (only used when Fetcher is enabled and MSKClusterArn is empty)"
+          default: "(Advanced) MSK Auto-Provisioning (only used when Fetcher is enabled and MSKClusterArn is empty)"
         Parameters:
           - MSKVpcId
           - MSKVpcCIDR
           - MSKPrivateSubnetIds
           - MSKInstanceType
       - Label:
-          default: "Data Layer — Encryption (KMS)"
+          default: "(Advanced) Data Layer — Encryption (KMS)"
         Parameters:
           - RDSKMSKeyArn
           - DocumentDBKMSKeyArn
@@ -60,11 +79,11 @@ Metadata:
           - AmazonMQKMSKeyArn
           - MSKKMSKeyArn
       - Label:
-          default: "Licensing — Global"
+          default: "(Advanced) Licensing — Global"
         Parameters:
           - LicenseUseDevGateway
       - Label:
-          default: "Delivery Backend (GitOps/ArgoCD) — Optional"
+          default: "(Advanced) Delivery Backend (GitOps/ArgoCD)"
         Parameters:
           - PlatformDelivery
           - GitOpsRepoURL
@@ -74,85 +93,78 @@ Metadata:
           - GitOpsMode
           - ArgoCDChartVersion
       - Label:
-          default: "Ingress (Shared ALB Settings)"
+          default: "(Advanced) Ingress (Shared ALB Settings)"
         Parameters:
           - DomainName
           - IngressClassName
           - IngressCertificateArn
       - Label:
-          default: "Module: Plugin Access Manager"
+          default: "(Advanced) Module: Plugin Access Manager"
         Parameters:
-          - EnableAccessManager
           - AccessManagerChartVersion
           - AuthorizerClientId
           - AuthorizerClientSecret
-          - AccessManagerLicenseKey
           - EnableAccessManagerIdentityIngress
           - AccessManagerIdentityIngressHostname
           - EnableAccessManagerAuthIngress
           - AccessManagerAuthIngressHostname
           - AccessManagerValuesOverride
       - Label:
-          default: "Module: Ledger (Midaz)"
+          default: "(Advanced) Module: Ledger (Midaz)"
         Parameters:
-          - EnableLedger
           - LedgerChartVersion
           - EnableLedgerIngress
           - LedgerIngressHostname
           - LedgerValuesOverride
       - Label:
-          default: "Module: Reporter"
+          default: "(Advanced) Module: Reporter"
         Parameters:
-          - EnableReporter
           - ReporterChartVersion
           - ReporterStorageBucketName
           - EnableReporterIngress
           - ReporterIngressHostname
           - ReporterValuesOverride
       - Label:
-          default: "Module: Fetcher"
+          default: "(Advanced) Module: Fetcher"
         Parameters:
-          - EnableFetcher
           - FetcherChartVersion
           - FetcherStorageBucketName
           - EnableFetcherIngress
           - FetcherIngressHostname
           - FetcherValuesOverride
       - Label:
-          default: "Module: Product Console"
+          default: "(Advanced) Module: Product Console"
         Parameters:
-          - EnableConsole
           - ConsoleChartVersion
           - NextAuthUrl
           - EnableConsoleIngress
           - ConsoleIngressHostname
           - ConsoleValuesOverride
       - Label:
-          default: "Module: BR Bank Transfer"
+          default: "(Advanced) Module: BR Bank Transfer"
         Parameters:
-          - EnableBankTransfer
           - BankTransferChartVersion
           - BankTransferLicenseKey
           - EnableBankTransferIngress
           - BankTransferIngressHostname
           - BankTransferValuesOverride
       - Label:
-          default: "Object Storage — Shared"
+          default: "(Advanced) Object Storage — Shared"
         Parameters:
           - ObjectStorageRoleArn
       - Label:
-          default: "platform-orchestrator (controller)"
+          default: "(Advanced) platform-orchestrator (controller)"
         Parameters:
           - OrchestratorChartRepo
           - OrchestratorChartVersion
       - Label:
-          default: "OCI Helm Registry (private charts only)"
+          default: "(Advanced) OCI Helm Registry (private charts only)"
         Parameters:
           - HelmRegistryHost
           - HelmRegistryUser
           - HelmRegistryToken
       - Label:
-          default: "Advanced"
+          default: "(Advanced) Misc"
         Parameters:
           - EnvironmentContractCARef
     ParameterLabels:

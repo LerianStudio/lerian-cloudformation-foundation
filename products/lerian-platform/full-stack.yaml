@@ -29,14 +29,37 @@ Metadata:
       # Marketplace listing happens in the AWS Marketplace Management
       # Portal's own fulfillment/parameter-lock configuration for this
       # product, not in this template.
+      #
+      # Group order below is deliberate: CloudFormation's own parameter form
+      # has no collapsible/hide-until-expanded mechanism (a hard Console
+      # limitation, not something fixable in the template) — the closest a
+      # template alone can get is putting every field with a real, working
+      # default LAST, under "(Advanced)"-prefixed groups, so a first-time
+      # deployer only has to read/decide on what's in the first two groups.
       - Label:
-          default: "General Configuration"
+          default: "1. Required"
         Parameters:
           - ProjectName
+          - RDSMasterUsername
+          - DocumentDBMasterUsername
+          - AmazonMQAdminUsername
+          - AccessManagerLicenseKey
+      - Label:
+          default: "2. Modules — Enable/Disable"
+        Parameters:
+          - EnableAccessManager
+          - EnableLedger
+          - EnableReporter
+          - EnableFetcher
+          - EnableConsole
+          - EnableBankTransfer
+      - Label:
+          default: "(Advanced) General Configuration"
+        Parameters:
           - EnvironmentName
           - PermissionsBoundaryArn
       - Label:
-          default: "Network (Foundation)"
+          default: "(Advanced) Network (Foundation)"
         Parameters:
           - VpcCIDR
           - AvailabilityZone1
@@ -53,7 +76,7 @@ Metadata:
           - EnableALBController
           - EnableExternalDNS
       - Label:
-          default: "Data Layer Sizing (Infrastructure)"
+          default: "(Advanced) Data Layer Sizing (Infrastructure)"
         Parameters:
           - RDSEngineVersion
           - RDSInstanceClass
@@ -62,7 +85,6 @@ Metadata:
           - RDSStorageType
           - RDSIops
           - RDSDatabaseName
-          - RDSMasterUsername
           - CreateReadReplica
           - RDSForceSSL
           - RDSMultiAZ
@@ -70,22 +92,20 @@ Metadata:
           - RDSBackupRetentionPeriod
           - DocumentDBInstanceClass
           - DocumentDBInstanceCount
-          - DocumentDBMasterUsername
           - DocumentDBDeletionProtection
           - DocumentDBBackupRetentionPeriod
           - ElastiCacheNodeType
           - AmazonMQInstanceType
           - AmazonMQDeploymentMode
-          - AmazonMQAdminUsername
           - AdditionalIngressCIDR1
           - AdditionalIngressCIDR2
           - AdditionalIngressCIDR3
       - Label:
-          default: "Licensing — Global"
+          default: "(Advanced) Licensing — Global"
         Parameters:
           - LicenseUseDevGateway
       - Label:
-          default: "Delivery Backend (GitOps/ArgoCD) — Optional"
+          default: "(Advanced) Delivery Backend (GitOps/ArgoCD)"
         Parameters:
           - PlatformDelivery
           - GitOpsRepoURL
@@ -95,81 +115,74 @@ Metadata:
           - GitOpsMode
           - ArgoCDChartVersion
       - Label:
-          default: "Ingress (Shared ALB Settings)"
+          default: "(Advanced) Ingress (Shared ALB Settings)"
         Parameters:
           - IngressClassName
           - IngressCertificateArn
       - Label:
-          default: "Module: Plugin Access Manager"
+          default: "(Advanced) Module: Plugin Access Manager"
         Parameters:
-          - EnableAccessManager
           - AccessManagerChartVersion
           - AuthorizerClientId
           - AuthorizerClientSecret
-          - AccessManagerLicenseKey
           - EnableAccessManagerIdentityIngress
           - AccessManagerIdentityIngressHostname
           - EnableAccessManagerAuthIngress
           - AccessManagerAuthIngressHostname
           - AccessManagerValuesOverride
       - Label:
-          default: "Module: Ledger (Midaz)"
+          default: "(Advanced) Module: Ledger (Midaz)"
         Parameters:
-          - EnableLedger
           - LedgerChartVersion
           - EnableLedgerIngress
           - LedgerIngressHostname
           - LedgerValuesOverride
       - Label:
-          default: "Module: Reporter"
+          default: "(Advanced) Module: Reporter"
         Parameters:
-          - EnableReporter
           - ReporterChartVersion
           - EnableReporterIngress
           - ReporterIngressHostname
           - ReporterValuesOverride
       - Label:
-          default: "Module: Fetcher"
+          default: "(Advanced) Module: Fetcher"
         Parameters:
-          - EnableFetcher
           - FetcherChartVersion
           - EnableFetcherIngress
           - FetcherIngressHostname
           - FetcherValuesOverride
           - MSKInstanceType
       - Label:
-          default: "Module: Product Console"
+          default: "(Advanced) Module: Product Console"
         Parameters:
-          - EnableConsole
           - ConsoleChartVersion
           - NextAuthUrl
           - EnableConsoleIngress
           - ConsoleIngressHostname
           - ConsoleValuesOverride
       - Label:
-          default: "Module: BR Bank Transfer"
+          default: "(Advanced) Module: BR Bank Transfer"
         Parameters:
-          - EnableBankTransfer
           - BankTransferChartVersion
           - BankTransferLicenseKey
           - EnableBankTransferIngress
           - BankTransferIngressHostname
           - BankTransferValuesOverride
       - Label:
-          default: "platform-orchestrator (controller)"
+          default: "(Advanced) platform-orchestrator (controller)"
         Parameters:
           - PlatformNamespace
           - OrchestratorNamespace
           - OrchestratorChartRepo
           - OrchestratorChartVersion
       - Label:
-          default: "OCI Helm Registry (private charts only)"
+          default: "(Advanced) OCI Helm Registry (private charts only)"
         Parameters:
           - HelmRegistryHost
           - HelmRegistryUser
           - HelmRegistryToken
       - Label:
-          default: "Advanced"
+          default: "(Advanced) Misc"
         Parameters:
           - EnvironmentContractCARef
     ParameterLabels:
