@@ -7,9 +7,10 @@ Description: |
   app in the Lambda (helm.yaml's model). CFN is the "provisioner" for the
   EnvironmentContract and patches it Ready=True once backing Secrets are written; the
   operator's own controllers then reconcile continuously as a long-running Deployment.
-  SCOPE CUT: the GitOps-seeder mode from helm.yaml is dropped entirely — this is
-  helm-delivery only (Platform.spec.delivery=helm). See inline comments for details
-  and open assumptions. (c) Lerian Studio - https://lerian.studio
+  Delivery backend is a day-0 choice via PlatformDelivery: "helm" (default, operator
+  calls the Helm SDK directly) or "gitops" (operator commits rendered manifests to a
+  Git repo for Argo CD to apply). See inline comments for details and open
+  assumptions. (c) Lerian Studio - https://lerian.studio
 
 Metadata:
   AWS::CloudFormation::Interface:
