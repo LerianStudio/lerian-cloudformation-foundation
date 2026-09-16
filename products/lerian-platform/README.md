@@ -90,42 +90,51 @@ Real (production) links, for restoring after merge:
 ## Required parameters
 
 Both templates put everything you actually need to decide into the first
-two Console sections — **"1. Required"** and **"2. Modules —
-Enable/Disable"** — and push every other parameter (VPC/EKS sizing, RDS/
-DocumentDB tuning, chart versions, GitOps, Ingress, ...) into
-**`(Advanced)`**-prefixed sections below them. CloudFormation's own
-parameter form has no collapsible/hide-until-expanded mechanism, so
-"Advanced" doesn't hide anything — it's ordering, not concealment — but a
-first-time deployer only has to read/decide on the top two sections;
-everything under "(Advanced)" already has a working default.
+two Console sections — **"1. Modules — Enable/Disable"** and **"2.
+Required"** — and push every other parameter (VPC/EKS sizing, RDS/
+DocumentDB tuning, chart versions, GitOps, Ingress, per-module license
+keys, ...) into **`(Advanced)`**-prefixed sections below them.
+CloudFormation's own parameter form has no collapsible/hide-until-expanded
+mechanism, so "Advanced" doesn't hide anything — it's ordering, not
+concealment — but a first-time deployer only has to read/decide on the top
+two sections; everything under "(Advanced)" already has a working default.
 
-**`full-stack.yaml` (Full Stack)** — **"1. Required"** has 5 fields:
-`ProjectName`, `RDSMasterUsername`, `DocumentDBMasterUsername`,
-`AmazonMQAdminUsername`, `AccessManagerLicenseKey`. Of these, only the
-first 4 are hard-required by CloudFormation itself (no default value at
-all); `AccessManagerLicenseKey` defaults to empty but is included here
-too because Access Manager is enabled by default and won't function
-without one. **"2. Modules — Enable/Disable"** holds the six per-module
-toggles (`EnableAccessManager`, `EnableLedger`, `EnableReporter`,
-`EnableFetcher`, `EnableConsole`, `EnableBankTransfer`) so the day-0
-module selection is visible without scrolling past every module's
-advanced settings first.
+Modules come **first**, deliberately: which modules you enable determines
+which per-module license key (if any) you actually need to fill in below,
+under that module's own `(Advanced) Module: ...` section — not every
+license key is required, only the ones for modules you enabled.
 
-**`orchestrator.yaml` (Application only)** — **"1. Required"** has 11
-fields: the same `AccessManagerLicenseKey` plus the 10 CloudFormation
+**`full-stack.yaml` (Full Stack)** — **"1. Modules — Enable/Disable"**
+holds the six per-module toggles (`EnableAccessManager`, `EnableLedger`,
+`EnableReporter`, `EnableFetcher`, `EnableConsole`,
+`EnableBankTransfer`). **"2. Required"** has the 4 fields CloudFormation
+itself won't let you leave blank: `ProjectName`, `RDSMasterUsername`,
+`DocumentDBMasterUsername`, `AmazonMQAdminUsername`.
+
+**`orchestrator.yaml` (Application only)** — same "1. Modules —
+Enable/Disable", then **"2. Required"** has the 10 fields CloudFormation
 requires outright since this template doesn't provision its own
-infrastructure — `ProjectName`, `EnvironmentName`, `ClusterName`,
+infrastructure: `ProjectName`, `EnvironmentName`, `ClusterName`,
 `RDSEndpoint`, `RDSSecretArn`, `DocumentDBEndpoint`,
 `DocumentDBSecretArn`, `ElastiCacheEndpoint`, `AmazonMQEndpoint`,
-`AmazonMQSecretArn`. Same "2. Modules — Enable/Disable" section as above.
+`AmazonMQSecretArn`.
 
-Access Manager needs a real Lerian license key (`AccessManagerLicenseKey`)
-to operate — see `docs.lerian.studio` for how to obtain one.
-`AuthorizerClientId`/`AuthorizerClientSecret` (under `(Advanced) Module:
-Plugin Access Manager`) default to Lerian's own seeded dev values;
-override both before exposing this deployment's endpoints beyond your own
-testing (see `CHECKPOINT.md` for the per-deploy secret rotation tracking
-item).
+Access Manager is enabled by default and needs a real Lerian license key
+(`AccessManagerLicenseKey`, under `(Advanced) Module: Plugin Access
+Manager`) to operate — see `docs.lerian.studio` for how to obtain one. A
+CloudFormation `Rule` (`AccessManagerRequiresLicense`) enforces this at
+Console validation time whenever `EnableAccessManager=true`, so a missing
+key fails fast instead of ~15-20 minutes into a real deploy. Each other
+licensed plugin follows the same pattern — its own `*LicenseKey`
+parameter, scoped to that module's own section (`BankTransferLicenseKey`
+today; more plugins will add their own as they ship). Unlike Access
+Manager, BankTransfer/Fetcher's license enforcement is gated by
+`ENV_NAME` at runtime, not by key presence (validated live — see
+`CHECKPOINT.md`), so those keys have no matching hard `Rule`.
+`AuthorizerClientId`/`AuthorizerClientSecret` (same Access Manager
+section) default to Lerian's own seeded dev values; override both before
+exposing this deployment's endpoints beyond your own testing (see
+`CHECKPOINT.md` for the per-deploy secret rotation tracking item).
 
 ### CLI equivalent
 

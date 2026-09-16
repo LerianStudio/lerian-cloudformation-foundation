@@ -37,15 +37,7 @@ Metadata:
       # default LAST, under "(Advanced)"-prefixed groups, so a first-time
       # deployer only has to read/decide on what's in the first two groups.
       - Label:
-          default: "1. Required"
-        Parameters:
-          - ProjectName
-          - RDSMasterUsername
-          - DocumentDBMasterUsername
-          - AmazonMQAdminUsername
-          - AccessManagerLicenseKey
-      - Label:
-          default: "2. Modules — Enable/Disable"
+          default: "1. Modules — Enable/Disable"
         Parameters:
           - EnableAccessManager
           - EnableLedger
@@ -53,6 +45,13 @@ Metadata:
           - EnableFetcher
           - EnableConsole
           - EnableBankTransfer
+      - Label:
+          default: "2. Required"
+        Parameters:
+          - ProjectName
+          - RDSMasterUsername
+          - DocumentDBMasterUsername
+          - AmazonMQAdminUsername
       - Label:
           default: "(Advanced) General Configuration"
         Parameters:
@@ -125,6 +124,7 @@ Metadata:
           - AccessManagerChartVersion
           - AuthorizerClientId
           - AuthorizerClientSecret
+          - AccessManagerLicenseKey
           - EnableAccessManagerIdentityIngress
           - AccessManagerIdentityIngressHostname
           - EnableAccessManagerAuthIngress
@@ -1284,6 +1284,16 @@ Rules:
         AssertDescription: "GitOpsRepoURL is required when PlatformDelivery=gitops"
       - Assert: !Not [!Equals [!Ref GitOpsDeploySSHKey, ""]]
         AssertDescription: "GitOpsDeploySSHKey is required when PlatformDelivery=gitops"
+  # Access Manager's license is enforced unconditionally at runtime (unlike
+  # BankTransfer/Fetcher, whose license checks are gated by ENV_NAME — see
+  # CHECKPOINT.md's "Already validated" section) — catch a missing key here,
+  # at Console validation time, instead of ~15-20 minutes into a real
+  # create-stack once VPC/EKS/RDS/DocumentDB already exist.
+  AccessManagerRequiresLicense:
+    RuleCondition: !Equals [!Ref EnableAccessManager, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AccessManagerLicenseKey, ""]]
+        AssertDescription: "AccessManagerLicenseKey is required when EnableAccessManager=true"
 
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
