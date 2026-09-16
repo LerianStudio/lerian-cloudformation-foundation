@@ -702,7 +702,10 @@ Parameters:
     AllowedValues:
       - "0"
       - "1"
-    Description: Force SSL/TLS connections to RDS (1 = enabled, 0 = disabled). Recommended for production with sensitive data.
+    Description: >-
+      Force SSL/TLS connections to RDS (1 = enabled, 0 = disabled).
+      Automatically forced to "1" when EnvironmentName=production, regardless
+      of this value — only takes effect as set for development/staging.
 
   RDSMultiAZ:
     Type: String
@@ -1298,6 +1301,13 @@ Rules:
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # EnvironmentName=production forces RDSForceSSL on regardless of what the
+  # parameter itself is set to — DocumentDB's own EnableTLS already defaults
+  # to "enabled" unconditionally (not even exposed as a parameter here) and
+  # ElastiCache's TransitEncryptionEnabled/TransitEncryptionMode are hardcoded
+  # "true"/"required" in templates/elasticache.yaml — RDS was the one
+  # encryption-in-transit knob that could still be left off by omission.
+  IsProduction: !Equals [!Ref EnvironmentName, "production"]
   # S3 buckets + IRSA role for reporter/fetcher object storage — ported from
   # the legacy full-stack.yaml this template replaced (that one already had
   # this working, confirmed live: without it, reporter/fetcher pods crash
@@ -1515,7 +1525,7 @@ Resources:
         RDSDatabaseName: !Ref RDSDatabaseName
         RDSMasterUsername: !Ref RDSMasterUsername
         CreateReadReplica: !Ref CreateReadReplica
-        RDSForceSSL: !Ref RDSForceSSL
+        RDSForceSSL: !If [IsProduction, "1", !Ref RDSForceSSL]
         RDSMultiAZ: !Ref RDSMultiAZ
         RDSDeletionProtection: !Ref RDSDeletionProtection
         RDSBackupRetentionPeriod: !Ref RDSBackupRetentionPeriod
