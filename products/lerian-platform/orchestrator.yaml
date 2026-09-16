@@ -45,6 +45,16 @@ Metadata:
           - AmazonMQEndpoint
           - AmazonMQSecretArn
       - Label:
+          default: "(Advanced) Delivery Backend (GitOps/ArgoCD)"
+        Parameters:
+          - PlatformDelivery
+          - GitOpsRepoURL
+          - GitOpsBranch
+          - GitOpsPath
+          - GitOpsDeploySSHKey
+          - GitOpsMode
+          - ArgoCDChartVersion
+      - Label:
           default: "(Advanced) General Configuration"
         Parameters:
           - PlatformNamespace
@@ -82,16 +92,6 @@ Metadata:
           default: "(Advanced) Licensing — Global"
         Parameters:
           - LicenseUseDevGateway
-      - Label:
-          default: "(Advanced) Delivery Backend (GitOps/ArgoCD)"
-        Parameters:
-          - PlatformDelivery
-          - GitOpsRepoURL
-          - GitOpsBranch
-          - GitOpsPath
-          - GitOpsDeploySSHKey
-          - GitOpsMode
-          - ArgoCDChartVersion
       - Label:
           default: "(Advanced) Ingress (Shared ALB Settings)"
         Parameters:

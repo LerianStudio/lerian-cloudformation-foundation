@@ -141,6 +141,12 @@ own seeded dev values; override both before
 exposing this deployment's endpoints beyond your own testing (see
 `CHECKPOINT.md` for the per-deploy secret rotation tracking item).
 
+`(Advanced) Delivery Backend (GitOps/ArgoCD)` sits immediately after "2.
+Required" — ahead of every other `(Advanced)` section — since it's a
+day-0, all-or-nothing choice (see [GitOps Delivery](#gitops-delivery-argocd)
+below): deciding `PlatformDelivery` before scrolling past unrelated
+sizing/tuning knobs avoids re-reading the whole form if you want `gitops`.
+
 ### CLI equivalent
 
 ```bash
