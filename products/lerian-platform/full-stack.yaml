@@ -1297,6 +1297,15 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref AccessManagerLicenseKey, ""]]
         AssertDescription: "AccessManagerLicenseKey is required when EnableAccessManager=true"
+  # "admin" is a reserved word the DocumentDB engine rejects outright at
+  # cluster-creation time ("MasterUsername admin cannot be used as it is a
+  # reserved word used by the engine") — found live, ~15 minutes into a real
+  # create-stack, after VPC/EKS/RDS had already been provisioned. Catch it
+  # here instead, before anything gets created.
+  DocumentDBMasterUsernameNotReserved:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref DocumentDBMasterUsername, "admin"]]
+        AssertDescription: "DocumentDBMasterUsername cannot be 'admin' — reserved by the DocumentDB engine"
 
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
