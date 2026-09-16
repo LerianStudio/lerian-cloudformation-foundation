@@ -89,25 +89,43 @@ Real (production) links, for restoring after merge:
 
 ## Required parameters
 
-**`full-stack.yaml` (Full Stack)** — only **3** parameters have no default:
-`RDSMasterUsername`, `DocumentDBMasterUsername`, `AmazonMQAdminUsername`.
-Everything else (VPC, EKS, module toggles, chart versions) has a working
-default — pick a `ProjectName`, set those 3 usernames, and Launch.
+Both templates put everything you actually need to decide into the first
+two Console sections — **"1. Required"** and **"2. Modules —
+Enable/Disable"** — and push every other parameter (VPC/EKS sizing, RDS/
+DocumentDB tuning, chart versions, GitOps, Ingress, ...) into
+**`(Advanced)`**-prefixed sections below them. CloudFormation's own
+parameter form has no collapsible/hide-until-expanded mechanism, so
+"Advanced" doesn't hide anything — it's ordering, not concealment — but a
+first-time deployer only has to read/decide on the top two sections;
+everything under "(Advanced)" already has a working default.
 
-**`orchestrator.yaml` (Application only)** — **10** parameters have no
-default, since it doesn't provision its own infrastructure:
-`ProjectName`, `EnvironmentName`, `ClusterName`, `RDSEndpoint`,
-`RDSSecretArn`, `DocumentDBEndpoint`, `DocumentDBSecretArn`,
-`ElastiCacheEndpoint`, `AmazonMQEndpoint`, `AmazonMQSecretArn` — the
-Console groups them into labeled sections and marks each **`(Required)`**
-directly in its label.
+**`full-stack.yaml` (Full Stack)** — **"1. Required"** has 5 fields:
+`ProjectName`, `RDSMasterUsername`, `DocumentDBMasterUsername`,
+`AmazonMQAdminUsername`, `AccessManagerLicenseKey`. Of these, only the
+first 4 are hard-required by CloudFormation itself (no default value at
+all); `AccessManagerLicenseKey` defaults to empty but is included here
+too because Access Manager is enabled by default and won't function
+without one. **"2. Modules — Enable/Disable"** holds the six per-module
+toggles (`EnableAccessManager`, `EnableLedger`, `EnableReporter`,
+`EnableFetcher`, `EnableConsole`, `EnableBankTransfer`) so the day-0
+module selection is visible without scrolling past every module's
+advanced settings first.
+
+**`orchestrator.yaml` (Application only)** — **"1. Required"** has 11
+fields: the same `AccessManagerLicenseKey` plus the 10 CloudFormation
+requires outright since this template doesn't provision its own
+infrastructure — `ProjectName`, `EnvironmentName`, `ClusterName`,
+`RDSEndpoint`, `RDSSecretArn`, `DocumentDBEndpoint`,
+`DocumentDBSecretArn`, `ElastiCacheEndpoint`, `AmazonMQEndpoint`,
+`AmazonMQSecretArn`. Same "2. Modules — Enable/Disable" section as above.
 
 Access Manager needs a real Lerian license key (`AccessManagerLicenseKey`)
 to operate — see `docs.lerian.studio` for how to obtain one.
-`AuthorizerClientId`/`AuthorizerClientSecret` default to Lerian's own
-seeded dev values; override both before exposing this deployment's
-endpoints beyond your own testing (see `CHECKPOINT.md` for the per-deploy
-secret rotation tracking item).
+`AuthorizerClientId`/`AuthorizerClientSecret` (under `(Advanced) Module:
+Plugin Access Manager`) default to Lerian's own seeded dev values;
+override both before exposing this deployment's endpoints beyond your own
+testing (see `CHECKPOINT.md` for the per-deploy secret rotation tracking
+item).
 
 ### CLI equivalent
 
