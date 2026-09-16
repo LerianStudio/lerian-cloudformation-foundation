@@ -609,8 +609,12 @@ Parameters:
     Description: fetcher-helm chart version
   ConsoleChartVersion:
     Type: String
-    # Stable (helm#1925, merged) — lerian-common masks adopted.
-    Default: "4.0.0"
+    # 4.0.0 -> 4.0.5: chart-only fixes (MongoDB host resolution through
+    # lerian-common, secret-sourced password instead of hardcoded, trusted-
+    # proxy validation) — same bump validated in platform-orchestrator's own
+    # catalog (internal/modules/catalog/console.go). appVersion unchanged
+    # (1.12.0), so this does not touch application code.
+    Default: "4.0.5"
     Description: product-console-helm chart version
   AccessManagerChartVersion:
     Type: String
