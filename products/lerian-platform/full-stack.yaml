@@ -40,6 +40,7 @@ Metadata:
           default: "1. Modules — Enable/Disable"
         Parameters:
           - EnableAccessManager
+          - AccessManagerLicenseKey
           - EnableLedger
           - EnableReporter
           - EnableFetcher
@@ -124,7 +125,6 @@ Metadata:
           - AccessManagerChartVersion
           - AuthorizerClientId
           - AuthorizerClientSecret
-          - AccessManagerLicenseKey
           - EnableAccessManagerIdentityIngress
           - AccessManagerIdentityIngressHostname
           - EnableAccessManagerAuthIngress

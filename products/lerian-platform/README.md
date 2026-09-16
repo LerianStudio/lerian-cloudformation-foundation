@@ -100,39 +100,44 @@ concealment — but a first-time deployer only has to read/decide on the top
 two sections; everything under "(Advanced)" already has a working default.
 
 Modules come **first**, deliberately: which modules you enable determines
-which per-module license key (if any) you actually need to fill in below,
-under that module's own `(Advanced) Module: ...` section — not every
-license key is required, only the ones for modules you enabled.
+which per-module license key (if any) you actually need. `Enable*` toggles
+that need a license key have that key listed directly below them, in the
+same "1. Modules — Enable/Disable" section, instead of buried under an
+`(Advanced)` module block — not every license key is required, only the
+ones for modules you enabled.
 
 **`full-stack.yaml` (Full Stack)** — **"1. Modules — Enable/Disable"**
 holds the six per-module toggles (`EnableAccessManager`, `EnableLedger`,
 `EnableReporter`, `EnableFetcher`, `EnableConsole`,
-`EnableBankTransfer`). **"2. Required"** has the 4 fields CloudFormation
+`EnableBankTransfer`), with `AccessManagerLicenseKey` right below
+`EnableAccessManager`. **"2. Required"** has the 4 fields CloudFormation
 itself won't let you leave blank: `ProjectName`, `RDSMasterUsername`,
 `DocumentDBMasterUsername`, `AmazonMQAdminUsername`.
 
 **`orchestrator.yaml` (Application only)** — same "1. Modules —
-Enable/Disable", then **"2. Required"** has the 10 fields CloudFormation
-requires outright since this template doesn't provision its own
-infrastructure: `ProjectName`, `EnvironmentName`, `ClusterName`,
-`RDSEndpoint`, `RDSSecretArn`, `DocumentDBEndpoint`,
-`DocumentDBSecretArn`, `ElastiCacheEndpoint`, `AmazonMQEndpoint`,
-`AmazonMQSecretArn`.
+Enable/Disable" (with `AccessManagerLicenseKey` in the same spot), then
+**"2. Required"** has the 10 fields CloudFormation requires outright
+since this template doesn't provision its own infrastructure:
+`ProjectName`, `EnvironmentName`, `ClusterName`, `RDSEndpoint`,
+`RDSSecretArn`, `DocumentDBEndpoint`, `DocumentDBSecretArn`,
+`ElastiCacheEndpoint`, `AmazonMQEndpoint`, `AmazonMQSecretArn`.
 
 Access Manager is enabled by default and needs a real Lerian license key
-(`AccessManagerLicenseKey`, under `(Advanced) Module: Plugin Access
-Manager`) to operate — see `docs.lerian.studio` for how to obtain one. A
-CloudFormation `Rule` (`AccessManagerRequiresLicense`) enforces this at
-Console validation time whenever `EnableAccessManager=true`, so a missing
-key fails fast instead of ~15-20 minutes into a real deploy. Each other
-licensed plugin follows the same pattern — its own `*LicenseKey`
-parameter, scoped to that module's own section (`BankTransferLicenseKey`
-today; more plugins will add their own as they ship). Unlike Access
-Manager, BankTransfer/Fetcher's license enforcement is gated by
-`ENV_NAME` at runtime, not by key presence (validated live — see
-`CHECKPOINT.md`), so those keys have no matching hard `Rule`.
-`AuthorizerClientId`/`AuthorizerClientSecret` (same Access Manager
-section) default to Lerian's own seeded dev values; override both before
+(`AccessManagerLicenseKey`) to operate — see `docs.lerian.studio` for how
+to obtain one. It's the one license key promoted into "1. Modules —
+Enable/Disable" (right below `EnableAccessManager`), because a
+CloudFormation `Rule` (`AccessManagerRequiresLicense`) enforces it at
+Console validation time whenever `EnableAccessManager=true` — a missing
+key fails fast instead of ~15-20 minutes into a real deploy.
+`BankTransferLicenseKey` stays under its own `(Advanced) Module: BR Bank
+Transfer` section, not promoted: BankTransfer/Fetcher's license
+enforcement is gated by `ENV_NAME` at runtime, not by key presence
+(validated live — see `CHECKPOINT.md`), so it has no matching hard
+`Rule` and no reason to sit above the fold. Future licensed plugins
+should follow whichever of these two patterns matches how their license
+is actually enforced. `AuthorizerClientId`/`AuthorizerClientSecret`
+(under `(Advanced) Module: Plugin Access Manager`) default to Lerian's
+own seeded dev values; override both before
 exposing this deployment's endpoints beyond your own testing (see
 `CHECKPOINT.md` for the per-deploy secret rotation tracking item).
 
