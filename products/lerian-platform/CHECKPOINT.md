@@ -17,6 +17,31 @@ intervention. `fees` and `pix_indirect_btg` are still untested. The stack
 was deliberately torn down afterward (data-layer teardown, no app-layer
 workaround) to test the DELETE-path fix below on a real run.
 
+## GitOps delivery — live validation (2026-09-18)
+
+`PlatformDelivery=gitops` validated live against the sandbox (`524121347244`)
+with a real Argo CD install. Three deploy-time mistakes (all in how the
+Console form was filled in, not template bugs) are now documented in the
+README's [Troubleshooting a GitOps deploy](./README.md#troubleshooting-a-gitops-deploy)
+section: `GitOpsDeploySSHKey` losing its newlines when pasted into the
+Console's single-line `String` input, `GitOpsRepoURL` given as `https://`
+instead of the SSH SCP form, and Argo CD's own repo-creds Secret needing
+a byte-exact URL match with the Application's `spec.source.repoURL`.
+
+One real **operator bug** found and fixed in the process:
+`renderArgoApplication` (`internal/deploy/gitops.go`) never set
+`chart:` on the OCI Helm source it renders — only `repoURL`, with the
+chart name baked into its last path segment. Argo CD rejects any
+Application source with none of `path`/`chart`/`ref` set, so **every**
+OCI-chart module (all 6 in the catalog) failed with `InvalidSpecError`
+as soon as Argo CD tried to sync it, even after the 3 config mistakes
+above were corrected. Fixed on `platform-orchestrator` branch
+`fix/argocd-oci-chart-source` (commit `6ce52eb`) — pending CodeRabbit
+review + PR + a new chart/image release. **Until that release ships,**
+`OrchestratorChartVersion`'s current pin still carries this bug — a
+fresh `gitops`-mode deploy will hit the same `InvalidSpecError` on every
+module until the pin is bumped past the fix.
+
 Repos involved:
 - `platform-orchestrator` (Go operator + Helm chart + module catalog) —
   branch `feat/operator-e2e-hardening`, HEAD `46175de` at this update.

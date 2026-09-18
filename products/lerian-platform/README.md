@@ -241,6 +241,43 @@ lands and Argo CD picks it up), **rotate this deploy key on your git
 host** — revoke the key used during deploy and add a fresh one for any
 ongoing GitOps write access Argo CD/the operator still needs.
 
+### Troubleshooting a GitOps deploy
+
+Three real mistakes hit live while validating this path — all three
+produce a `ModuleRelease` stuck `Stalled`/`Retryable` (`kubectl get
+modulereleases -n <OrchestratorNamespace>`), not a CloudFormation failure,
+since the Platform CR/EnvironmentContract get created successfully either
+way:
+
+1. **`GitOpsDeploySSHKey` pasted into the Console form loses its
+   newlines.** CloudFormation's Quick-create form renders `String`
+   parameters as single-line `<input>` fields — pasting a multi-line
+   OpenSSH/PEM private key into one flattens it to a single line (HTML
+   `<input>` cannot contain `\n` at all). Symptom: `stalled: [Terminal]
+   InvalidDeployKey: parse SSH deploy key ...: ssh: no key found`. There
+   is no Console-side workaround for a single-line `String` parameter;
+   use the [CLI](#cli-equivalent) instead and pass the key read straight
+   from its file (`$(cat your-key)` preserves the real newlines), or
+   patch the `<OrchestratorNamespace>/gitops-deploy-key` Secret's
+   `ssh-privatekey` field directly after the stack is up.
+2. **`GitOpsRepoURL` as an `https://` URL with an SSH deploy key.** The
+   two are different git transports/auth mechanisms — go-git picks the
+   transport from the URL scheme, and an HTTPS transport rejects an SSH
+   `AuthMethod` outright. Symptom: `submit: [Retryable] GitOpen: gitops
+   backend: GitOpen: invalid auth method`. Always use the SCP-style SSH
+   form: `git@github.com:your-org/your-repo.git` (matching the example in
+   the table above), never `https://github.com/...`.
+3. **ArgoCD's own repo-creds Secret must match the Application's
+   `repoURL` byte-for-byte** (including the `.git` suffix) — this is
+   normally fully automated by the stack's bootstrap, but if you ever see
+   an Argo CD `Application` stuck `Unknown`/`ComparisonError` with `ssh:
+   unable to authenticate` or `error creating SSH agent: "SSH agent
+   requested but SSH_AUTH_SOCK not-specified"`, it means Argo CD couldn't
+   match a repo-creds Secret to that exact URL and fell back to anonymous
+   SSH. Check `kubectl get secret gitops-repo-creds -n argocd -o
+   jsonpath='{.data.url}' | base64 -d` against the Application's own
+   `spec.source.repoURL` — they must be identical strings.
+
 ## Known limitations
 
 See [`CHECKPOINT.md`](./CHECKPOINT.md) for the full, current list and the
