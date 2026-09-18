@@ -750,20 +750,20 @@ Parameters:
     # wins on a full-stack create-stack — confirmed live: bumping ONLY this
     # copy left a real create-stack silently running the OLD pinned build for
     # hours, no error at all. Keep both defaults identical.
-    Default: "0.1.29-e2e.83bb248-multiarch"
+    Default: "0.1.27-e2e.0dfaf5a"
     Description: >-
-      platform-orchestrator chart version. Bumped from 0.1.4-e2e.ccb4346 after
-      a TLS code-path audit found two real gaps ahead of a live create-stack
-      against real RDS/DocumentDB: Postgres TLS was already correct (no fix
-      needed there), but Mongo TLS had no CA-bundle wiring at all, and one
-      module (pix_indirect_btg) never set an SSL mode on its Postgres
-      connections. Both fixed and verified against real chart source (not
-      guessed). Still multi-arch, same build convention. Not yet re-run
-      through a live create-stack. Validated locally via a full from-zero
-      minikube run (all modules reaching Ready with no manual steps) — note
-      minikube uses plaintext datastores, so this only proves no regression,
-      not that the new TLS-required code paths work against real infra.
-      NodeInstanceType stays Graviton (c7g.large), unaffected by this bump.
+      platform-orchestrator chart version. Bumped from 0.1.29-e2e.83bb248
+      to pick up platform-orchestrator PR #10 (0dfaf5a, merged to develop) —
+      renderArgoApplication never set source.chart on its OCI Helm source,
+      so every GitOps-mode module failed with ArgoCD InvalidSpecError as
+      soon as it tried to sync, found live running PlatformDelivery=gitops
+      end-to-end. Chart itself is a fresh package (LerianStudio/helm-internal
+      PR #105, still open/unmerged — this is a manually cut alpha off that
+      branch, same convention as every other alpha pin here) with
+      appVersion bumped to the matching operator image tag 1.0.0-beta.7.
+      NOT yet CodeRabbit-clean on the chart PR (real findings pending,
+      tracked separately) — this alpha exists to unblock live GitOps
+      testing, not as a stable release.
 
   # ---------------------------------------------------------------------------
   # Access Manager (Casdoor) — authorizer (mother) credential + admin + license

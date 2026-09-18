@@ -1233,14 +1233,14 @@ Parameters:
     # old build believing it was current. This file's Default always wins
     # (it's what actually gets passed down), so THIS is the one to check
     # first if a deployed operator doesn't match what you expect.
-    Default: "0.1.29-e2e.83bb248-multiarch"
+    Default: "0.1.27-e2e.0dfaf5a"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of
-      this pin — this bump rebuilds the manager image as genuine multi-arch
-      (linux/amd64 + linux/arm64) so it runs on the Graviton-only nodes the
-      shared foundation.yaml now requires (see this file's NodeInstanceType
-      comment above).
+      this pin (platform-orchestrator PR #10 / operator image
+      1.0.0-beta.7 — fixes ArgoCD InvalidSpecError on every GitOps-mode
+      module; chart itself is a manually cut alpha off
+      LerianStudio/helm-internal PR #105, still open/unmerged).
 
   # ===========================================================================
   # OCI HELM REGISTRY (private charts only)
