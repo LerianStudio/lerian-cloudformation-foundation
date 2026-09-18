@@ -750,7 +750,7 @@ Parameters:
     # wins on a full-stack create-stack — confirmed live: bumping ONLY this
     # copy left a real create-stack silently running the OLD pinned build for
     # hours, no error at all. Keep both defaults identical.
-    Default: "0.1.27-e2e.0dfaf5a"
+    Default: "0.1.28-e2e.0dfaf5a-multiarch"
     Description: >-
       platform-orchestrator chart version. Bumped from 0.1.29-e2e.83bb248
       to pick up platform-orchestrator PR #10 (0dfaf5a, merged to develop) —
@@ -760,10 +760,18 @@ Parameters:
       end-to-end. Chart itself is a fresh package (LerianStudio/helm-internal
       PR #105, still open/unmerged — this is a manually cut alpha off that
       branch, same convention as every other alpha pin here) with
-      appVersion bumped to the matching operator image tag 1.0.0-beta.7.
-      NOT yet CodeRabbit-clean on the chart PR (real findings pending,
-      tracked separately) — this alpha exists to unblock live GitOps
-      testing, not as a stable release.
+      appVersion bumped to match. 0.1.28-e2e.0dfaf5a-multiarch supersedes
+      0.1.27-e2e.0dfaf5a within an hour of publishing it: the automated
+      release pipeline's v1.0.0-beta.7 image tag turned out to be
+      amd64-only (no arm64 manifest at all) — found live, ImagePullBackOff
+      on the Graviton (c7g.large) node group. Manually rebuilt as genuine
+      multi-arch via `docker buildx build --platform linux/amd64,
+      linux/arm64 --push`, tagged 1.0.0-beta.7-multiarch (same image
+      source/commit, not a code change) — the release pipeline's own
+      multi-arch build step needs its own follow-up fix, tracked
+      separately. NOT yet CodeRabbit-clean on the chart PR (real findings
+      pending, tracked separately) — this alpha exists to unblock live
+      GitOps testing, not as a stable release.
 
   # ---------------------------------------------------------------------------
   # Access Manager (Casdoor) — authorizer (mother) credential + admin + license
