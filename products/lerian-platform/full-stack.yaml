@@ -1233,13 +1233,14 @@ Parameters:
     # old build believing it was current. This file's Default always wins
     # (it's what actually gets passed down), so THIS is the one to check
     # first if a deployed operator doesn't match what you expect.
-    Default: "0.1.28-e2e.0dfaf5a-multiarch"
+    Default: "0.1.29-e2e.ca8f77d-multiarch"
     Description: >-
       platform-orchestrator chart version. See orchestrator.yaml's own
       Parameter description for the full live-validation provenance of
-      this pin (platform-orchestrator PR #10 / operator image
-      1.0.0-beta.7 — fixes ArgoCD InvalidSpecError on every GitOps-mode
-      module; chart itself is a manually cut alpha off
+      this pin (platform-orchestrator PR #10 + #11 / operator image
+      1.0.0-beta.8-multiarch — fixes ArgoCD InvalidSpecError AND the
+      digest-targetRevision resolver bug on every GitOps-mode module;
+      chart itself is a manually cut alpha off
       LerianStudio/helm-internal PR #105, still open/unmerged).
 
   # ===========================================================================

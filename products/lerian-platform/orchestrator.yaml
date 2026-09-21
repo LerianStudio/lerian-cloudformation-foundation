@@ -750,28 +750,27 @@ Parameters:
     # wins on a full-stack create-stack — confirmed live: bumping ONLY this
     # copy left a real create-stack silently running the OLD pinned build for
     # hours, no error at all. Keep both defaults identical.
-    Default: "0.1.28-e2e.0dfaf5a-multiarch"
+    Default: "0.1.29-e2e.ca8f77d-multiarch"
     Description: >-
-      platform-orchestrator chart version. Bumped from 0.1.29-e2e.83bb248
-      to pick up platform-orchestrator PR #10 (0dfaf5a, merged to develop) —
-      renderArgoApplication never set source.chart on its OCI Helm source,
-      so every GitOps-mode module failed with ArgoCD InvalidSpecError as
-      soon as it tried to sync, found live running PlatformDelivery=gitops
-      end-to-end. Chart itself is a fresh package (LerianStudio/helm-internal
-      PR #105, still open/unmerged — this is a manually cut alpha off that
-      branch, same convention as every other alpha pin here) with
-      appVersion bumped to match. 0.1.28-e2e.0dfaf5a-multiarch supersedes
-      0.1.27-e2e.0dfaf5a within an hour of publishing it: the automated
-      release pipeline's v1.0.0-beta.7 image tag turned out to be
-      amd64-only (no arm64 manifest at all) — found live, ImagePullBackOff
-      on the Graviton (c7g.large) node group. Manually rebuilt as genuine
-      multi-arch via `docker buildx build --platform linux/amd64,
-      linux/arm64 --push`, tagged 1.0.0-beta.7-multiarch (same image
-      source/commit, not a code change) — the release pipeline's own
-      multi-arch build step needs its own follow-up fix, tracked
-      separately. NOT yet CodeRabbit-clean on the chart PR (real findings
-      pending, tracked separately) — this alpha exists to unblock live
-      GitOps testing, not as a stable release.
+      platform-orchestrator chart version. Bumped from
+      0.1.28-e2e.0dfaf5a-multiarch to pick up platform-orchestrator PR #11
+      (ca8f77d, merged to develop) — Argo CD v3.1.8's OCI resolver breaks
+      on a raw digest targetRevision (drops the chart name building the
+      registry manifest URL), regardless of how repoURL/chart are split;
+      found live running PlatformDelivery=gitops end-to-end, after the
+      PR #10 chart:-field fix above got every module past its own
+      InvalidSpecError. The operator now renders the resolved semver
+      version as targetRevision (Digest stays the helm backend's install
+      key, unaffected). Chart itself is a fresh package
+      (LerianStudio/helm-internal PR #105, still open/unmerged — a
+      manually cut alpha off that branch) with appVersion bumped to match
+      the operator image 1.0.0-beta.8-multiarch — same amd64-only release
+      pipeline gap as before (tracked separately, not yet fixed), so this
+      is AGAIN a manual `docker buildx --platform linux/amd64,linux/arm64
+      --push` rebuild of the same source/commit, not a code change. NOT
+      yet CodeRabbit-clean on the chart PR (real findings pending, tracked
+      separately) — this alpha exists to unblock live GitOps testing, not
+      as a stable release.
 
   # ---------------------------------------------------------------------------
   # Access Manager (Casdoor) — authorizer (mother) credential + admin + license
