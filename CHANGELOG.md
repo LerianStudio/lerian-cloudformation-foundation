@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **System Facts product infrastructure** (`products/system-facts/infrastructure.yaml`) -
+  RDS stack for the `system-facts` product, so the self-service testing platform
+  (Palantir) can fetch its template instead of failing with `Failed to fetch
+  CloudFormation template parameters from GitHub`. Same shape and parameters as
+  `products/tracer/infrastructure.yaml`; only the `ProjectName` and
+  `RDSDatabaseName` defaults and the descriptions differ.
 - **Agent Stack** (`agent.yaml`) - installs the `lerian-agent` Helm chart into the
   cluster and enrolls it with the Lerian control plane. Optional nested stack of
   the Foundation, created when `ControlPlaneURL`, `EnrollmentToken` and
