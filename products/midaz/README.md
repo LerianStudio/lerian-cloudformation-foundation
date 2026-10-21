@@ -1,6 +1,6 @@
 # Midaz on AWS
 
-[Midaz](https://github.com/LerianStudio/midaz) is an open-source ledger platform. This guide covers the AWS data services Midaz runs on, deployed with CloudFormation.
+[Midaz](https://github.com/LerianStudio/midaz) is a ledger platform. This guide covers the AWS data services Midaz runs on, deployed with CloudFormation.
 
 **Infrastructure components:** RDS PostgreSQL, DocumentDB, ElastiCache (Valkey/Redis), AmazonMQ (RabbitMQ)
 
