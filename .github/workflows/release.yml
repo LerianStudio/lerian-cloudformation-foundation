@@ -641,7 +641,7 @@ jobs:
     name: Notify
     needs: [release-templates, release-summary]
     if: always() && needs.release-templates.result != 'skipped'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.10.2
+    uses: LerianStudio/shared-workflows-public/.github/workflows/slack-notify.yml@tier-1
     with:
       status: ${{ needs.release-templates.result }}
       workflow_name: "CloudFormation Release"
