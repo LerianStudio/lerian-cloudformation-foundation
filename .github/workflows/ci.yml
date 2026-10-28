@@ -30,7 +30,7 @@ jobs:
   pr-validation:
     name: PR Validation
     if: github.event_name == 'pull_request'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/pr-validation.yml@v1.10.2
+    uses: LerianStudio/shared-workflows-public/.github/workflows/pr-validation.yml@tier-1
     with:
       runner_type: blacksmith-4vcpu-ubuntu-2404
       pr_title_types: |
@@ -64,8 +64,6 @@ jobs:
         docs
         infra
       require_scope: false
-      min_description_length: 30
-      check_changelog: true
       enable_auto_labeler: true
       labeler_config_path: '.github/labeler.yml'
       enforce_source_branches: true
@@ -522,7 +520,7 @@ jobs:
     name: Notify
     needs: [ci-summary]
     if: always() && github.event_name == 'pull_request'
-    uses: LerianStudio/github-actions-shared-workflows/.github/workflows/slack-notify.yml@v1.10.2
+    uses: LerianStudio/shared-workflows-public/.github/workflows/slack-notify.yml@tier-1
     with:
       status: ${{ needs.ci-summary.result }}
       workflow_name: "CloudFormation CI"
