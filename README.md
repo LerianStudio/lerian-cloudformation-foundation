@@ -4,7 +4,7 @@ Production-ready AWS CloudFormation templates for deploying Lerian products infr
 
 [![CI](https://github.com/LerianStudio/lerian-cloudformation-foundation/actions/workflows/ci.yml/badge.svg)](https://github.com/LerianStudio/lerian-cloudformation-foundation/actions/workflows/ci.yml)
 [![Release](https://github.com/LerianStudio/lerian-cloudformation-foundation/actions/workflows/release.yml/badge.svg)](https://github.com/LerianStudio/lerian-cloudformation-foundation/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Elastic%202.0-blue.svg)](LICENSE)
 
 ## What's Included
 
@@ -133,7 +133,8 @@ scales with the instance classes you pick.
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE)
+Copyright 2026 Lerian Studio Ltd. Licensed under the Elastic License 2.0. See
+[LICENSE](LICENSE).
 
 ---
 
