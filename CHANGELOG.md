@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > into `docs/marketplace-changesets.md`, step 8, and the values contract is
 > pinned by `scripts/check-agent-templates.py`.
 
+### Changed
+
+- The repository is licensed under the Elastic License 2.0 instead of the Apache
+  License 2.0. Template versions released before this change keep Apache 2.0.
+
 ### Removed
 
 - **BREAKING**: `products/midaz/application.yaml`, `products/midaz/helm.yaml`, and
