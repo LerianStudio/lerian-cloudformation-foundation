@@ -3,8 +3,8 @@
   "templates": {
     "vpc": "0.1.4",
     "eks": "1.0.0",
-    "rds": "0.2.4",
-    "documentdb": "0.3.3",
+    "rds": "0.2.5",
+    "documentdb": "0.3.4",
     "elasticache": "0.2.7",
     "amazonmq": "0.2.5",
     "route53": "0.1.2",
