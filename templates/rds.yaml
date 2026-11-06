@@ -300,6 +300,8 @@ Resources:
   # =============================================================================
   RDSKMSKey:
     Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Description: !Sub "KMS key for ${ProjectName} RDS encryption"
       EnableKeyRotation: true
