@@ -129,6 +129,8 @@ Resources:
   # =============================================================================
   DocumentDBKMSKey:
     Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Description: KMS key for DocumentDB encryption
       EnableKeyRotation: true
