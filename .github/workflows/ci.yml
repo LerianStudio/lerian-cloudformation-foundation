@@ -32,7 +32,6 @@ jobs:
     if: github.event_name == 'pull_request'
     uses: LerianStudio/shared-workflows-public/.github/workflows/pr-validation.yml@tier-1
     with:
-      runner_type: blacksmith-4vcpu-ubuntu-2404
       pr_title_types: |
         feat
         fix
@@ -76,7 +75,7 @@ jobs:
   # ============================================================================
   cfn-lint:
     name: CloudFormation Lint
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -130,7 +129,7 @@ jobs:
   # ============================================================================
   checkov:
     name: Checkov Security Scan
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -163,7 +162,7 @@ jobs:
   # ============================================================================
   validate-templates:
     name: Validate Templates
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -305,7 +304,7 @@ jobs:
   # ============================================================================
   marketplace-compliance:
     name: Marketplace Compliance
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -457,7 +456,7 @@ jobs:
   # ============================================================================
   multi-region-lint:
     name: Multi-Region Lint
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     strategy:
       matrix:
         region:
@@ -492,7 +491,7 @@ jobs:
     name: CI Summary
     needs: [cfn-lint, checkov, validate-templates, marketplace-compliance]
     if: always()
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     steps:
       - name: Check results
         run: |
