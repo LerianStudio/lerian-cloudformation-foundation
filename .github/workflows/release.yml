@@ -24,7 +24,7 @@ jobs:
   # ============================================================================
   check-skip:
     name: Check Skip
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     outputs:
       should_skip: ${{ steps.check.outputs.should_skip }}
     steps:
@@ -46,7 +46,7 @@ jobs:
     name: Detect Changes
     needs: check-skip
     if: needs.check-skip.outputs.should_skip != 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     outputs:
       changed_core_templates: ${{ steps.process.outputs.changed_core_templates }}
       changed_products: ${{ steps.process.outputs.changed_products }}
@@ -140,7 +140,7 @@ jobs:
     name: Release Templates
     needs: [check-skip, detect-changes]
     if: needs.detect-changes.outputs.has_changes == 'true' && needs.check-skip.outputs.should_skip != 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     outputs:
       released_templates: ${{ steps.release.outputs.released_templates }}
       template_tags: ${{ steps.release.outputs.template_tags }}
@@ -612,7 +612,7 @@ jobs:
     name: Release Summary
     needs: [detect-changes, release-templates]
     if: always() && needs.detect-changes.outputs.has_changes == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.GENERAL_RUNNERS || vars.FALLBACK_RUNNERS }}
     steps:
       - name: Summary
         env:
