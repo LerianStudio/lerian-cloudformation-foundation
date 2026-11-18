@@ -150,12 +150,21 @@ jobs:
           output_format: sarif
           output_file_path: checkov-products-results.sarif
 
-      - name: Upload Checkov SARIF
+      - name: Upload Checkov SARIF (core)
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         continue-on-error: true
         with:
           sarif_file: checkov-core-results.sarif
+          category: checkov-core
+
+      - name: Upload Checkov SARIF (products)
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: checkov-products-results.sarif
+          category: checkov-products
 
   # ============================================================================
   # CloudFormation-Specific: Template Validation
@@ -482,7 +491,7 @@ jobs:
       - name: Validate templates for ${{ matrix.region }}
         run: |
           echo "Validating templates for region: ${{ matrix.region }}"
-          cfn-lint templates/*.yaml products/**/*.yaml --regions ${{ matrix.region }} --format parseable || true
+          cfn-lint templates/*.yaml products/**/*.yaml --regions ${{ matrix.region }} --format parseable
 
   # ============================================================================
   # Summary Job
