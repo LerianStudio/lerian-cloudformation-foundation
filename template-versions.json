@@ -11,12 +11,12 @@
     "alb-controller": "0.1.5",
     "external-dns": "0.1.5",
     "foundation": "1.0.0",
-    "msk": "0.1.0",
+    "msk": "0.2.0",
     "agent": "1.0.1"
   },
   "products": {
     "midaz": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "tracer": {
       "infrastructure": "1.0.0"
