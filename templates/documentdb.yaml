@@ -1,7 +1,20 @@
 AWSTemplateFormatVersion: '2010-09-09'
+# LanguageExtensions lets DeletionPolicy follow the DataDeletionPolicy parameter.
+Transform: AWS::LanguageExtensions
 Description: DocumentDB Stack for Midaz Platform
 
 Parameters:
+  DataDeletionPolicy:
+    Type: String
+    Default: Snapshot
+    AllowedValues:
+      - Snapshot
+      - Delete
+    Description: >-
+      What happens to the data store and its retained resources when this stack is deleted.
+      Snapshot (default) keeps a final snapshot and retains the customer-managed KMS key.
+      Delete removes both, for ephemeral environments such as automated test stacks.
+
   ProjectName:
     Type: String
     Description: Project name for resource naming
@@ -129,7 +142,7 @@ Resources:
   # =============================================================================
   DocumentDBKMSKey:
     Type: AWS::KMS::Key
-    DeletionPolicy: Retain
+    DeletionPolicy: !If [DeleteDataOnStackDeletion, Delete, Retain]
     UpdateReplacePolicy: Retain
     Properties:
       Description: KMS key for DocumentDB encryption
@@ -250,7 +263,7 @@ Resources:
   # =============================================================================
   DocumentDBCluster:
     Type: AWS::DocDB::DBCluster
-    DeletionPolicy: Snapshot
+    DeletionPolicy: !Ref DataDeletionPolicy
     UpdateReplacePolicy: Snapshot
     Properties:
       DBClusterIdentifier: !Sub "${ProjectName}-documentdb"
@@ -421,6 +434,7 @@ Resources:
           Value: !Ref EnvironmentName
 
 Conditions:
+  DeleteDataOnStackDeletion: !Equals [!Ref DataDeletionPolicy, Delete]
   HasAdditionalCIDR1: !And
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, !Ref VpcCIDR]]
