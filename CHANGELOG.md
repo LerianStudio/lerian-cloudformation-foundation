@@ -64,6 +64,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- EKS defaults to Kubernetes 1.37, and 1.36 and 1.37 are now accepted values of
+  `KubernetesVersion` in `foundation.yaml`, `eks.yaml` and every product
+  `infrastructure.yaml`. 1.33, 1.34 and 1.35 are still accepted. A stack update
+  that does not pass `KubernetesVersion` takes the new default, and EKS moves one
+  minor version at a time, so a 1.35 cluster updated that way fails; pass the
+  cluster's current version, or upgrade through 1.36 first.
 - The repository is licensed under the Elastic License 2.0 instead of the Apache
   License 2.0. Template versions released before this change keep Apache 2.0.
 
