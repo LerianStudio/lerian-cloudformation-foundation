@@ -2,7 +2,7 @@
   "description": "Current versions of each template. Updated automatically by CI/CD.",
   "templates": {
     "vpc": "0.1.4",
-    "eks": "1.0.0",
+    "eks": "1.1.0",
     "rds": "0.2.5",
     "documentdb": "0.3.4",
     "elasticache": "0.2.7",
@@ -10,7 +10,7 @@
     "route53": "0.1.2",
     "alb-controller": "0.1.5",
     "external-dns": "0.1.5",
-    "foundation": "1.0.0",
+    "foundation": "1.1.0",
     "msk": "0.2.0",
     "agent": "1.0.1"
   },
@@ -19,52 +19,52 @@
       "infrastructure": "1.1.0"
     },
     "tracer": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "fetcher": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "flowker": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "ledger": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "matcher": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "plugin-access-manager": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "plugin-br-bank-transfer-jd": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "plugin-br-pix-direct-jd": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "plugin-br-pix-indirect-btg": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "plugin-br-pix-switch": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "plugin-crm": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "plugin-fees": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "product-console": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "reporter": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "underwriter": {
-      "infrastructure": "1.0.0"
+      "infrastructure": "1.1.0"
     },
     "system-facts": {
-      "infrastructure": "0.1.0"
+      "infrastructure": "0.2.0"
     }
   }
 }
