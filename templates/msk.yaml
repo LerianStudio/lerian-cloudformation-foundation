@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: Amazon MSK (Managed Streaming for Apache Kafka) Stack for Midaz Platform
 
 Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM permissions boundary ARN. Leave empty to skip."
+
   ProjectName:
     Type: String
     Description: Project name for resource naming
@@ -121,6 +126,7 @@ Parameters:
 Conditions:
   ScramEnabled: !Equals [!Ref EnableScram, "true"]
   IamEnabled: !Equals [!Ref EnableIam, "true"]
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasAdditionalCIDR1: !And
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, ""]]
     - !Not [!Equals [!Ref AdditionalIngressCIDR1, !Ref VpcCIDR]]
@@ -462,6 +468,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "${ProjectName}-msk-bootstrap-role"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

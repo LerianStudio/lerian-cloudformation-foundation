@@ -713,6 +713,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}msk.yaml"
       Parameters:
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If
