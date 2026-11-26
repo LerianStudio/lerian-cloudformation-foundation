@@ -2,7 +2,7 @@
 
 [Midaz](https://github.com/LerianStudio/midaz) is a ledger platform. This guide covers the AWS data services Midaz runs on, deployed with CloudFormation.
 
-**Infrastructure components:** RDS PostgreSQL, DocumentDB, ElastiCache (Valkey/Redis), AmazonMQ (RabbitMQ)
+**Infrastructure components:** RDS PostgreSQL, DocumentDB, ElastiCache (Valkey/Redis), AmazonMQ (RabbitMQ), and an optional Amazon MSK (Kafka) cluster
 
 ## How Midaz gets deployed
 
@@ -134,7 +134,7 @@ parameters.
 
 | Template | Description |
 |----------|-------------|
-| `infrastructure.yaml` | Databases only — RDS, DocumentDB, ElastiCache, AmazonMQ (auto-imports from Foundation) |
+| `infrastructure.yaml` | Data services only — RDS, DocumentDB, ElastiCache, AmazonMQ, optional MSK (auto-imports from Foundation) |
 
 ## Key Parameters
 
@@ -144,6 +144,20 @@ parameters.
 | `EnvironmentName` | `production` | Environment tag |
 | `FoundationStackName` | `lerian-foundation` | Foundation stack to import VPC/EKS from |
 | `RDSInstanceClass` | `db.t3.medium` | Database instance |
+| `EnableMSK` | `false` | Creates an Amazon MSK cluster (SASL/SCRAM over TLS, port 9096) for Midaz streaming |
+| `MSKInstanceType` | `kafka.t3.small` | MSK broker instance type; ignored when `EnableMSK` is `false` |
+
+### Amazon MSK (optional)
+
+With `EnableMSK=true` the stack adds a nested MSK cluster with 3 brokers, one per
+private subnet, so it needs exactly 3 private subnets: the Foundation stack
+creates 3, and `ExistingPrivateSubnetIds` must also list 3. The stack then
+outputs `MSKBootstrapBrokersSaslScram` and `MSKScramSecretArn` (the secret holds
+the SCRAM `username` and `password`). Midaz authenticates with `SCRAM-SHA-512`
+over TLS. Creating the cluster typically adds 20 to 40 minutes to the stack.
+
+With the default `EnableMSK=false` no MSK resource is created and an existing
+stack updated to this template version keeps the same resources.
 
 Every parameter carries its own description in
 [`infrastructure.yaml`](infrastructure.yaml); the CloudFormation console shows
