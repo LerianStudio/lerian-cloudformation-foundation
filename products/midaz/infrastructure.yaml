@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: |
   Midaz Infrastructure Stack
-  Deploys RDS, DocumentDB, ElastiCache, and AmazonMQ for the Midaz product.
+  Deploys RDS, DocumentDB, ElastiCache, and AmazonMQ for the Midaz product,
+  plus an optional Amazon MSK (Kafka) cluster when EnableMSK is true.
   Requires a Foundation stack (VPC + EKS + agent) unless every required VPC,
   subnet, cluster, and OIDC value is supplied through the Existing* overrides.
   Midaz itself is installed by the Lerian control plane through the cluster's agent,
@@ -70,6 +71,11 @@ Metadata:
           - AmazonMQInstanceType
           - AmazonMQDeploymentMode
           - AmazonMQAdminUsername
+      - Label:
+          default: "Amazon MSK (Kafka) Configuration"
+        Parameters:
+          - EnableMSK
+          - MSKInstanceType
       - Label:
           default: "Additional Network Access"
         Parameters:
@@ -154,6 +160,11 @@ Metadata:
         default: "Deployment Mode"
       AmazonMQAdminUsername:
         default: "Admin Username"
+      # Amazon MSK
+      EnableMSK:
+        default: "Create Amazon MSK Cluster"
+      MSKInstanceType:
+        default: "MSK Broker Instance Type"
       # Additional Network Access
       AdditionalIngressCIDR1:
         default: "Additional CIDR 1"
@@ -480,6 +491,30 @@ Parameters:
     ConstraintDescription: "Must begin with a letter and contain only alphanumeric characters and underscores"
 
   # =============================================================================
+  # AMAZON MSK CONFIGURATION (optional, off by default)
+  # =============================================================================
+  EnableMSK:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: "Create an Amazon MSK (Kafka) cluster with SASL/SCRAM over TLS for Midaz streaming. With false (default) no MSK resource is created."
+
+  MSKInstanceType:
+    Type: String
+    Default: kafka.t3.small
+    AllowedValues:
+      - kafka.t3.small
+      - kafka.m5.large
+      - kafka.m5.xlarge
+      - kafka.m5.2xlarge
+      - kafka.m5.4xlarge
+      - kafka.m7g.large
+      - kafka.m7g.xlarge
+      - kafka.m7g.2xlarge
+      - kafka.m7g.4xlarge
+    Description: "MSK broker instance type (3 brokers, one per private subnet). Ignored when EnableMSK is false."
+
+  # =============================================================================
   # ADDITIONAL NETWORK ACCESS
   # =============================================================================
   AdditionalIngressCIDR1:
@@ -505,6 +540,7 @@ Parameters:
 
 Conditions:
   CreateRDSReplica: !Equals [!Ref CreateReadReplica, "true"]
+  CreateMSK: !Equals [!Ref EnableMSK, "true"]
   HasExplicitVpcId: !Not [!Equals [!Ref ExistingVpcId, ""]]
   HasExplicitVpcCIDR: !Not [!Equals [!Ref ExistingVpcCIDR, ""]]
   HasExplicitPrivateSubnets: !Not [!Equals [!Ref ExistingPrivateSubnetIds, ""]]
@@ -668,6 +704,41 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
+  # =============================================================================
+  # AMAZON MSK STACK (only with EnableMSK=true)
+  # =============================================================================
+  MSKStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateMSK
+    Properties:
+      TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}msk.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !If
+          - HasExplicitVpcId
+          - !Ref ExistingVpcId
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcId"
+        VpcCIDR: !If
+          - HasExplicitVpcCIDR
+          - !Ref ExistingVpcCIDR
+          - Fn::ImportValue: !Sub "${FoundationStackName}-VpcCIDR"
+        PrivateSubnetIds: !If
+          - HasExplicitPrivateSubnets
+          - !Ref ExistingPrivateSubnetIds
+          - Fn::ImportValue: !Sub "${FoundationStackName}-PrivateSubnetIds"
+        InstanceType: !Ref MSKInstanceType
+        AdditionalIngressCIDR1: !Ref AdditionalIngressCIDR1
+        AdditionalIngressCIDR2: !Ref AdditionalIngressCIDR2
+        AdditionalIngressCIDR3: !Ref AdditionalIngressCIDR3
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-msk-stack"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
 Outputs:
   # =============================================================================
   # STACK METADATA (for application stack reference)
@@ -813,6 +884,23 @@ Outputs:
     Value: !GetAtt AmazonMQStack.Outputs.SecretArn
     Export:
       Name: !Sub "${AWS::StackName}-AmazonMQSecretArn"
+
+  # =============================================================================
+  # AMAZON MSK OUTPUTS (only with EnableMSK=true)
+  # =============================================================================
+  MSKBootstrapBrokersSaslScram:
+    Condition: CreateMSK
+    Description: MSK SASL/SCRAM bootstrap brokers (TLS, port 9096)
+    Value: !GetAtt MSKStack.Outputs.BootstrapBrokersSaslScram
+    Export:
+      Name: !Sub "${AWS::StackName}-MSKBootstrapBrokersSaslScram"
+
+  MSKScramSecretArn:
+    Condition: CreateMSK
+    Description: MSK SASL/SCRAM credentials Secret ARN (JSON with username and password)
+    Value: !GetAtt MSKStack.Outputs.ScramSecretArn
+    Export:
+      Name: !Sub "${AWS::StackName}-MSKScramSecretArn"
 
   # =============================================================================
   # NEXT STEP
