@@ -160,6 +160,17 @@ Metadata:
         default: "Enable ExternalDNS"
 
 Parameters:
+  DataDeletionPolicy:
+    Type: String
+    Default: Snapshot
+    AllowedValues:
+      - Snapshot
+      - Delete
+    Description: >-
+      Passed to the RDS, DocumentDB and ElastiCache stacks. Snapshot (default) keeps a final
+      snapshot and retains the KMS keys when the stack is deleted; Delete removes them, for
+      ephemeral environments.
+
   # =============================================================================
   # AWS MARKETPLACE PARAMETERS (Required for Nested Stacks)
   # =============================================================================
@@ -553,6 +564,7 @@ Resources:
     Properties:
       TemplateURL: !Sub "https://${MPS3BucketName}.s3.${MPS3BucketRegion}.${AWS::URLSuffix}/${MPS3KeyPrefix}rds.yaml"
       Parameters:
+        DataDeletionPolicy: !Ref DataDeletionPolicy
         ProjectName: !Ref ProjectName
         EnvironmentName: !Ref EnvironmentName
         VpcId: !If [CreateNewCluster, !GetAtt VPCStack.Outputs.VpcId, !Ref ExistingVpcId]
